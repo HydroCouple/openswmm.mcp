@@ -328,7 +328,9 @@ Resources and prompts are mounted without a namespace prefix to keep their URIs 
 
 ## Contributing
 
-Contributions are welcome. Please see [`docs/developer/contributing.md`](docs/developer/contributing.md) for guidelines.
+Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md) for details on the development workflow, code style, and how to submit pull requests.
+
+This project follows the [Contributor Covenant 3.0 Code of Conduct](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code.
 
 In brief:
 
@@ -338,6 +340,10 @@ In brief:
 4. Ensure `ruff check` and `ruff format` pass with no issues.
 5. Ensure `pytest tests/unit/` passes.
 6. Open a pull request against `main` with a clear description of your changes.
+
+## Authors
+
+See [AUTHORS.md](AUTHORS.md) for the full list of contributors to this project.
 
 ## License
 
