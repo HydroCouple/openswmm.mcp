@@ -1,0 +1,132 @@
+"""Lifespan management and dependency injection for the OpenSWMM MCP server."""
+
+from __future__ import annotations
+
+import logging
+from typing import TYPE_CHECKING
+
+from fastmcp import Context
+from fastmcp.exceptions import ToolError
+from fastmcp.server.lifespan import lifespan
+
+from openswmm_mcp.config import ServerSettings
+from openswmm_mcp.session import SessionManager
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
+logger = logging.getLogger(__name__)
+
+
+@lifespan
+async def server_lifespan(server) -> AsyncIterator[dict]:
+    """FastMCP lifespan handler: bootstrap shared resources and tear them down on shutdown.
+
+    Yields a context dict containing:
+        session_manager: :class:`SessionManager` shared across all tool calls.
+        settings: :class:`ServerSettings` loaded from the environment.
+    """
+    # 1. Build configuration from environment variables / .env
+    settings = ServerSettings()
+
+    # 2. Configure logging to match the requested level
+    log_level = getattr(logging, settings.log_level.upper(), logging.INFO)
+    logging.basicConfig(
+        level=log_level,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        force=True,
+    )
+    logger.info("OpenSWMM MCP server starting (log_level=%s)", settings.log_level)
+
+    # 3. Create the session manager that owns all SWMM simulation sessions
+    session_manager = SessionManager(
+        max_sessions=settings.max_sessions,
+        working_dir=settings.working_dir,
+    )
+
+    # 4. Yield the context dict so tools can access shared state
+    try:
+        yield {"session_manager": session_manager, "settings": settings}
+    finally:
+        # 5. Cleanup on shutdown
+        logger.info("OpenSWMM MCP server shutting down -- cleaning up sessions")
+        await session_manager.cleanup_all()
+
+
+# ---------------------------------------------------------------------------
+# Helper functions for extracting dependencies inside tool handlers
+# ---------------------------------------------------------------------------
+
+
+def get_session_manager(ctx: Context) -> SessionManager:
+    """Extract the :class:`SessionManager` from the FastMCP lifespan context.
+
+    Parameters
+    ----------
+    ctx:
+        The FastMCP :class:`Context` injected into a tool handler.
+
+    Returns
+    -------
+    SessionManager
+        The shared session manager instance.
+
+    Raises
+    ------
+    ToolError
+        If the session manager is not available in the context.
+    """
+    try:
+        return ctx.lifespan_context["session_manager"]
+    except (KeyError, TypeError) as exc:
+        raise ToolError(
+            "Session manager is not available. The server may not have started correctly."
+        ) from exc
+
+
+def get_settings(ctx: Context) -> ServerSettings:
+    """Extract :class:`ServerSettings` from the FastMCP lifespan context.
+
+    Parameters
+    ----------
+    ctx:
+        The FastMCP :class:`Context` injected into a tool handler.
+
+    Returns
+    -------
+    ServerSettings
+        The server configuration loaded at startup.
+
+    Raises
+    ------
+    ToolError
+        If settings are not available in the context.
+    """
+    try:
+        return ctx.lifespan_context["settings"]
+    except (KeyError, TypeError) as exc:
+        raise ToolError(
+            "Server settings are not available. The server may not have started correctly."
+        ) from exc
+
+
+def require_state(session, *valid_states: str) -> None:
+    """Assert that *session* is in one of *valid_states*.
+
+    Parameters
+    ----------
+    session:
+        A session object that exposes a ``.state`` attribute.
+    *valid_states:
+        One or more acceptable state strings (e.g. ``"running"``, ``"paused"``).
+
+    Raises
+    ------
+    ToolError
+        If ``session.state`` is not among the accepted states.
+    """
+    if session.state not in valid_states:
+        allowed = ", ".join(f"'{s}'" for s in valid_states)
+        raise ToolError(
+            f"Session is in state '{session.state}', but this action requires one of: {allowed}."
+        )
