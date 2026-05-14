@@ -8,6 +8,7 @@ from pathlib import Path
 
 from fastmcp import Context, FastMCP
 
+from openswmm_mcp.dependencies import require_new_engine
 from openswmm_mcp.errors import ToolError
 from openswmm_mcp.models import HotStartResult
 
@@ -138,6 +139,7 @@ async def clone_session(
 
     sm = _get_session_manager(ctx)
     source = await sm.get_session(source_id)
+    require_new_engine(source, "Session cloning")
 
     if source.state not in ("running", "ended"):
         raise ToolError(
@@ -152,13 +154,13 @@ async def clone_session(
     await asyncio.to_thread(source.hotstart.save, source.solver, tmp_path)
 
     # Create a new session using the same inp file as the source
-    inp_path = str(source.solver.inp_path)
+    inp_path = source.inp_path
     target = await sm.create_session(target_id, inp_path)
 
     # Open and initialise the new session's solver
     await asyncio.to_thread(target.solver.open)
     target.state = "opened"
-    await asyncio.to_thread(target.solver.init)
+    await asyncio.to_thread(target.solver.initialize)
     target.state = "initialized"
 
     # Apply the hot-start state

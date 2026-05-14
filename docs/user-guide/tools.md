@@ -1,7 +1,7 @@
 # Tools
 
-The OpenSWMM MCP Server provides over 35 tools organised into seven
-namespaced phases. Each tool name is prefixed with its namespace
+The OpenSWMM MCP Server provides over 45 tools organised into eight
+namespaced groups. Each tool name is prefixed with its namespace
 (e.g. `lifecycle_open_model`, `query_get_node_info`).
 
 ## Lifecycle Tools (`lifecycle_*`)
@@ -335,6 +335,24 @@ Add a node to the model being built.
 | `max_depth` | `float` | `0.0` | Maximum depth above invert. |
 | `x`, `y` | `float` | `None` | Optional coordinate position. |
 
+### `building_pop_last_node`
+
+Remove the most recently added node (undo of `building_add_node`). The supplied
+`node_id` must match the current tail of the node list. If any link still
+references the tail node, the engine refuses the pop — call
+`building_pop_last_link` for those links first.
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `session_id` | `str` | `"default"` | Session identifier. |
+| `node_id` | `str` | *required* | Expected tail node identifier. |
+
+**Returns:** `BuildingResult` with status and a confirmation message. Returns an
+error if `node_id` is not the current tail or if a link still references the
+node (`SWMM_ERR_BADINDEX`, code 8).
+
+---
+
 ### `building_add_link`
 
 Add a link (conduit, pump, orifice, weir, or outlet) to the model.
@@ -351,6 +369,21 @@ Add a link (conduit, pump, orifice, weir, or outlet) to the model.
 | `xsect_shape` | `str` | `"circular"` | `"circular"`, `"rect_closed"`, `"rect_open"`, `"trapezoidal"`, `"triangular"`. |
 | `xsect_geom1` | `float` | `1.0` | Primary geometry parameter (e.g. diameter). |
 | `xsect_geom2`-`4` | `float` | `0.0` | Additional geometry parameters. |
+
+### `building_pop_last_link`
+
+Remove the most recently added link (undo of `building_add_link`). The supplied
+`link_id` must match the current tail of the link list.
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `session_id` | `str` | `"default"` | Session identifier. |
+| `link_id` | `str` | *required* | Expected tail link identifier. |
+
+**Returns:** `BuildingResult` with status and a confirmation message. Returns an
+error if `link_id` is not the current tail (`SWMM_ERR_BADINDEX`, code 8).
+
+---
 
 ### `building_add_subcatchment`
 
@@ -525,3 +558,166 @@ Add a Low Impact Development control to a subcatchment.
 | `subcatch_id` | `str` | *required* | Subcatchment identifier. |
 | `lid_type` | `str` | *required* | LID type (`"BC"`, `"RG"`, `"PP"`, etc.). |
 | `area` | `float` | *required* | Surface area of the LID unit. |
+
+---
+
+## Editing Tools (`editing_*`)
+
+Tools for deleting model objects and converting them to different types.
+These tools operate on sessions in the `building` (programmatic construction)
+or `opened` (after parsing a `.inp` file) state.
+
+### Cascade deletion policy
+
+When a node is deleted:
+
+- All **links** that reference the deleted node as an endpoint are
+  **cascade-deleted**.
+- Subcatchment `outlet_node`, inlet-usage `node_index`, and similar weak
+  references are **nullified** (set to `-1`).
+- All integer cross-references whose stored index exceeded the deleted index are
+  **decremented by 1** to keep indices consistent.
+
+The same cascade logic applies when deleting links, subcatchments, gages,
+tables, and transects (each has its own referencing set).
+
+Always call `editing_analyze_impact` first to preview exactly what will be
+affected before committing the deletion with `editing_delete_object`.
+
+---
+
+### `editing_analyze_impact`
+
+Preview what would be affected if an object were deleted, **without deleting
+anything**. Equivalent to calling `editing_delete_object` with `dry_run=True`.
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `session_id` | `str` | `"default"` | Session identifier. |
+| `object_type` | `str` | `"node"` | Object category: `"node"`, `"link"`, `"subcatchment"`, `"gage"`, `"table"`, or `"transect"`. |
+| `object_id` | `str` | *required* | String identifier of the object, or a numeric index string for `"transect"`. |
+
+**Returns:** `ImpactReportModel` with:
+
+| Field | Type | Description |
+|---|---|---|
+| `session_id` | `str` | Session identifier. |
+| `object_type` | `str` | Type of the object analysed. |
+| `object_id` | `str` | Identifier of the object analysed. |
+| `dry_run` | `bool` | Always `True` for this tool. |
+| `node_count` | `int` | Current node count in the model. |
+| `link_count` | `int` | Current link count in the model. |
+| `impacts` | `list[ImpactEntryModel]` | List of affected objects (see below). |
+
+Each `ImpactEntryModel` has:
+
+| Field | Type | Description |
+|---|---|---|
+| `obj_type` | `int` | Engine enum value for the referencing object's type. |
+| `obj_type_name` | `str` | Human-readable type name. |
+| `obj_idx` | `int` | Zero-based index of the referencing object. |
+| `field` | `str` | Name of the field that would change. |
+| `cascaded` | `bool` | `True` if the referencing object would be deleted; `False` if only nullified. |
+
+---
+
+### `editing_delete_object`
+
+Delete a model object and cascade-delete or nullify all objects that reference
+it. Supports a non-destructive `dry_run` mode that returns the same impact
+report without modifying the model.
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `session_id` | `str` | `"default"` | Session identifier. |
+| `object_type` | `str` | `"node"` | Object category: `"node"`, `"link"`, `"subcatchment"`, `"gage"`, `"table"`, or `"transect"`. |
+| `object_id` | `str` | *required* | String identifier of the object to delete, or a numeric index string for `"transect"`. |
+| `dry_run` | `bool` | `False` | When `True`, return the impact report without mutating the model. |
+
+**Returns:** `ImpactReportModel` (same schema as `editing_analyze_impact`).
+When `dry_run` is `False`, the `impacts` list reflects the objects that were
+actually deleted or nullified.
+
+**Example workflow:**
+
+```
+# 1. Preview the impact
+editing_analyze_impact(object_type="node", object_id="J5")
+# → impacts: [link C4 (cascaded=True), link C5 (cascaded=True), subcatch S1.outlet_node (cascaded=False)]
+
+# 2. Commit the deletion
+editing_delete_object(object_type="node", object_id="J5")
+# → J5 deleted; C4 and C5 cascade-deleted; S1.outlet_node nullified
+```
+
+---
+
+### `editing_convert_node`
+
+Convert an existing node to a different type in place. Common properties
+(invert elevation, max depth, coordinates) are preserved. Type-specific
+properties for the old type are cleared and sensible defaults for the new type
+are applied. Non-fatal topology warnings are reported but do not prevent
+conversion.
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `session_id` | `str` | `"default"` | Session identifier. |
+| `node_id` | `str` | *required* | Node identifier or zero-based index. |
+| `new_type` | `str` | `"junction"` | Target type: `"junction"`, `"outfall"`, `"storage"`, or `"divider"`. |
+
+**Returns:** `ConversionResultModel` with:
+
+| Field | Type | Description |
+|---|---|---|
+| `session_id` | `str` | Session identifier. |
+| `object_type` | `str` | Always `"node"`. |
+| `object_id` | `str` | Identifier of the converted node. |
+| `new_type` | `str` | The type the node was converted to. |
+| `cleared_fields` | `list[str]` | Type-specific fields from the old type that were cleared. |
+| `warnings` | `list[str]` | Non-fatal topology or data warnings. |
+
+**Preserved properties:** invert elevation, max depth, coordinates.
+
+**Cleared on conversion (examples):**
+
+| From type | To type | Cleared fields |
+|---|---|---|
+| `storage` | `junction` | `storage_curve`, `seepage_rate`, `evap_factor` |
+| `junction` | `outfall` | *(none — outfall defaults applied)* |
+| `divider` | `storage` | `divider_link`, `divider_type`, `divider_curve` |
+
+---
+
+### `editing_convert_link`
+
+Convert an existing link to a different type in place. Common properties
+(endpoint nodes, offsets, initial flow) are preserved. Type-specific properties
+are cleared and new-type defaults are applied.
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `session_id` | `str` | `"default"` | Session identifier. |
+| `link_id` | `str` | *required* | Link identifier or zero-based index. |
+| `new_type` | `str` | `"conduit"` | Target type: `"conduit"`, `"pump"`, `"orifice"`, `"weir"`, or `"outlet"`. |
+
+**Returns:** `ConversionResultModel` with:
+
+| Field | Type | Description |
+|---|---|---|
+| `session_id` | `str` | Session identifier. |
+| `object_type` | `str` | Always `"link"`. |
+| `object_id` | `str` | Identifier of the converted link. |
+| `new_type` | `str` | The type the link was converted to. |
+| `cleared_fields` | `list[str]` | Type-specific fields from the old type that were cleared. |
+| `warnings` | `list[str]` | Non-fatal topology or data warnings. |
+
+**Preserved properties:** from/to nodes, inlet and outlet offsets, initial flow.
+
+**Cleared on conversion (examples):**
+
+| From type | To type | Cleared fields |
+|---|---|---|
+| `conduit` | `pump` | `xsect_shape`, `roughness`, `length` |
+| `orifice` | `weir` | `orifice_type`, `orifice_coeff`, `flap_gate` |
+| `pump` | `conduit` | `pump_curve` |

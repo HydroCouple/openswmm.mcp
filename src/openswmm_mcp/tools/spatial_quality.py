@@ -6,6 +6,7 @@ import asyncio
 
 from fastmcp import Context, FastMCP
 
+from openswmm_mcp.dependencies import require_new_engine
 from openswmm_mcp.errors import ToolError
 from openswmm_mcp.models import SpatialResult
 
@@ -56,8 +57,8 @@ async def get_coordinates(
 ) -> SpatialResult:
     """Retrieve the spatial coordinates for a model element.
 
-    Supports nodes (x, y), links (vertex list), and subcatchments (centroid
-    or polygon vertices) depending on the data stored in the model.
+    Supports nodes (x, y), links (x, y centroid), and subcatchments (x, y
+    centroid) depending on the data stored in the model.
 
     Parameters
     ----------
@@ -74,10 +75,12 @@ async def get_coordinates(
     etype = _validate_spatial_type(element_type)
     sm = _get_session_manager(ctx)
     session = await sm.get_session(session_id)
+    require_new_engine(session, "Spatial coordinate queries")
     spatial = session.spatial
 
     if etype == "node":
-        coord = await asyncio.to_thread(spatial.get_node_coord, element_id)
+        idx = await asyncio.to_thread(session.nodes.get_index, element_id)
+        coord = await asyncio.to_thread(spatial.get_node_coord, idx)
         return SpatialResult(
             element_type=etype,
             element_id=element_id,
@@ -85,17 +88,17 @@ async def get_coordinates(
             y=coord[1],
         )
     elif etype == "link":
-        coord = await asyncio.to_thread(spatial.get_link_coord, element_id)
+        idx = await asyncio.to_thread(session.links.get_index, element_id)
+        coord = await asyncio.to_thread(spatial.get_link_coord, idx)
         return SpatialResult(
             element_type=etype,
             element_id=element_id,
-            vertices=coord,
+            x=coord[0],
+            y=coord[1],
         )
     else:  # subcatchment
-        coord = await asyncio.to_thread(
-            spatial.get_subcatch_coord,
-            element_id,
-        )
+        idx = await asyncio.to_thread(session.subcatchments.get_index, element_id)
+        coord = await asyncio.to_thread(spatial.get_subcatch_coord, idx)
         return SpatialResult(
             element_type=etype,
             element_id=element_id,
@@ -134,14 +137,18 @@ async def set_coordinates(
     etype = _validate_spatial_type(element_type)
     sm = _get_session_manager(ctx)
     session = await sm.get_session(session_id)
+    require_new_engine(session, "Spatial coordinate updates")
     spatial = session.spatial
 
     if etype == "node":
-        await asyncio.to_thread(spatial.set_node_coord, element_id, x, y)
+        idx = await asyncio.to_thread(session.nodes.get_index, element_id)
+        await asyncio.to_thread(spatial.set_node_coord, idx, x, y)
     elif etype == "link":
-        await asyncio.to_thread(spatial.set_link_coord, element_id, x, y)
+        idx = await asyncio.to_thread(session.links.get_index, element_id)
+        await asyncio.to_thread(spatial.set_link_coord, idx, x, y)
     else:
-        await asyncio.to_thread(spatial.set_subcatch_coord, element_id, x, y)
+        idx = await asyncio.to_thread(session.subcatchments.get_index, element_id)
+        await asyncio.to_thread(spatial.set_subcatch_coord, idx, x, y)
 
     return {
         "status": "updated",
@@ -183,24 +190,41 @@ async def get_quality(
     etype = _validate_spatial_type(element_type)
     sm = _get_session_manager(ctx)
     session = await sm.get_session(session_id)
-    quality = session.quality
+    require_new_engine(session, "Water-quality queries")
+
+    pollutants = session.pollutants
+    pollut_count = await asyncio.to_thread(pollutants.count)
 
     if etype == "node":
-        data = await asyncio.to_thread(quality.get_node_quality, element_id)
-    elif etype == "link":
-        data = await asyncio.to_thread(quality.get_link_quality, element_id)
-    else:
-        data = await asyncio.to_thread(
-            quality.get_subcatch_quality,
-            element_id,
-        )
+        elem_idx = await asyncio.to_thread(session.nodes.get_index, element_id)
 
-    # data is expected to be a dict mapping pollutant name -> concentration
-    if isinstance(data, dict) and pollutant is not None:
+        def _get_conc(p_idx: int) -> float:
+            return session.nodes.get_quality(elem_idx, p_idx)
+
+    elif etype == "link":
+        elem_idx = await asyncio.to_thread(session.links.get_index, element_id)
+
+        def _get_conc(p_idx: int) -> float:
+            return session.links.get_quality(elem_idx, p_idx)
+
+    else:
+        elem_idx = await asyncio.to_thread(session.subcatchments.get_index, element_id)
+
+        def _get_conc(p_idx: int) -> float:
+            return session.subcatchments.get_quality(elem_idx, p_idx)
+
+    data: dict[str, float] = {}
+    for p_idx in range(pollut_count):
+        p_name = await asyncio.to_thread(pollutants.get_id, p_idx)
+        conc = await asyncio.to_thread(_get_conc, p_idx)
+        data[p_name] = conc
+
+    if pollutant is not None:
         if pollutant not in data:
+            available = ", ".join(data.keys()) if data else "none"
             raise ToolError(
                 f"Pollutant '{pollutant}' not found for {etype} "
-                f"'{element_id}'. Available: {', '.join(data.keys())}."
+                f"'{element_id}'. Available: {available}."
             )
         data = {pollutant: data[pollutant]}
 
@@ -245,11 +269,17 @@ async def set_treatment(
 
     sm = _get_session_manager(ctx)
     session = await sm.get_session(session_id)
+    require_new_engine(session, "Treatment assignments")
+
+    node_idx = await asyncio.to_thread(session.nodes.get_index, node_id)
+    pollut_idx = await asyncio.to_thread(session.pollutants.get_index, pollutant)
+    if pollut_idx < 0:
+        raise ToolError(f"Pollutant '{pollutant}' not found in model.")
 
     await asyncio.to_thread(
-        session.quality.set_treatment,
-        node_id,
-        pollutant,
+        session.quality.treatment_set,
+        node_idx,
+        pollut_idx,
         expression,
     )
 
@@ -268,8 +298,12 @@ async def add_lid(
     ctx: Context,
     session_id: str = "default",
     subcatch_id: str = "",
-    lid_type: str = "",
+    lid_idx: int = 0,
+    number: int = 1,
     area: float = 0.0,
+    width: float = 0.0,
+    init_sat: float = 0.0,
+    from_imperv: float = 1.0,
 ) -> dict:
     """Add a Low Impact Development (LID) control to a subcatchment.
 
@@ -279,34 +313,49 @@ async def add_lid(
         Identifier of the session.  Defaults to ``"default"``.
     subcatch_id:
         The subcatchment that will receive the LID.
-    lid_type:
-        The type of LID control (e.g. ``"BC"`` for bio-retention cell,
-        ``"RG"`` for rain garden, ``"PP"`` for permeable pavement).
+    lid_idx:
+        Index of the LID control defined in the model (zero-based).
+    number:
+        Number of identical LID units to place.
     area:
-        The surface area of the LID unit (in model area units).
+        Surface area of each LID unit (in model area units).
+    width:
+        Top width of the overland-flow surface of each LID unit.
+    init_sat:
+        Initial saturation fraction in [0.0, 1.0].
+    from_imperv:
+        Fraction of impervious area routed to the LID, in [0.0, 1.0].
     """
     if not subcatch_id:
         raise ToolError("subcatch_id is required.")
-    if not lid_type:
-        raise ToolError("lid_type is required.")
     if area <= 0.0:
         raise ToolError("area must be a positive number.")
 
     sm = _get_session_manager(ctx)
     session = await sm.get_session(session_id)
+    require_new_engine(session, "LID controls")
 
+    subcatch_idx = await asyncio.to_thread(session.subcatchments.get_index, subcatch_id)
     await asyncio.to_thread(
-        session.infrastructure.add_lid,
-        subcatch_id,
-        lid_type,
+        session.infrastructure.lid_usage_add,
+        subcatch_idx,
+        lid_idx,
+        number,
         area,
+        width,
+        init_sat,
+        from_imperv,
     )
 
     return {
         "status": "lid_added",
         "session_id": session_id,
         "subcatch_id": subcatch_id,
-        "lid_type": lid_type,
+        "lid_idx": lid_idx,
+        "number": number,
         "area": area,
-        "message": (f"LID '{lid_type}' with area {area} added to subcatchment '{subcatch_id}'."),
+        "message": (
+            f"LID {lid_idx} with area {area} × {number} unit(s) "
+            f"added to subcatchment '{subcatch_id}'."
+        ),
     }

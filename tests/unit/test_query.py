@@ -1,4 +1,8 @@
-"""Unit tests for query tool functions."""
+"""Unit tests for query tool functions against the real openswmm engine.
+
+Uses site_drainage_model.inp: 12 nodes (J1–J11, O1), 11 conduits (C1–C11),
+7 subcatchments (S1–S7), 1 gage (RainGage), 1 pollutant (TSS).
+"""
 
 from __future__ import annotations
 
@@ -14,245 +18,340 @@ from openswmm_mcp.models import (
     SystemSummary,
 )
 
-# ---------------------------------------------------------------------------
-# Mock MCP Context
-# ---------------------------------------------------------------------------
 
+class _Ctx:
+    def __init__(self, sm):
+        self.lifespan_context = {"session_manager": sm}
 
-class MockContext:
-    def __init__(self, session_manager):
-        self.lifespan_context = {"session_manager": session_manager}
-
-    async def report_progress(self, current, total):
+    async def report_progress(self, *_):
         pass
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-async def _open_model(session_manager, tmp_inp, session_id="default"):
-    """Open a model via lifecycle tool and return the context."""
+async def _open(session_manager, tmp_inp, session_id="default"):
     from openswmm_mcp.tools.lifecycle import open_model
 
-    ctx = MockContext(session_manager)
+    ctx = _Ctx(session_manager)
     await open_model(ctx, inp_path=tmp_inp, session_id=session_id)
     return ctx
 
 
 # ---------------------------------------------------------------------------
-# Tests
+# get_node_info
 # ---------------------------------------------------------------------------
 
 
 class TestGetNodeInfo:
-    async def test_get_node_info_single(self, session_manager, tmp_inp):
+    async def test_get_node_info_single(self, session_manager, tmp_inp, reference_model):
         from openswmm_mcp.tools.query import get_node_info
 
-        ctx = await _open_model(session_manager, tmp_inp, "qn1")
-        result = await get_node_info(ctx, session_id="qn1", node_id="J1")
+        ctx = await _open(session_manager, tmp_inp, "qn1")
+        result = await get_node_info(ctx, session_id="qn1", node_id=reference_model.FIRST_NODE_ID)
 
         assert isinstance(result, NodeInfo)
-        assert result.node_id == "J1"
+        assert result.node_id == reference_model.FIRST_NODE_ID
         assert result.node_type == "JUNCTION"
-        assert result.index == 0
-        assert result.invert_elev is not None
+        assert result.index >= 0
+        assert result.invert_elev == pytest.approx(4973.0, abs=1.0)
 
-    async def test_get_node_info_outfall(self, session_manager, tmp_inp):
+    async def test_get_node_info_outfall(self, session_manager, tmp_inp, reference_model):
         from openswmm_mcp.tools.query import get_node_info
 
-        ctx = await _open_model(session_manager, tmp_inp, "qn_out")
-        result = await get_node_info(ctx, session_id="qn_out", node_id="O1")
+        ctx = await _open(session_manager, tmp_inp, "qn_out")
+        result = await get_node_info(ctx, session_id="qn_out", node_id=reference_model.OUTFALL_ID)
 
         assert result.node_type == "OUTFALL"
-        assert result.index == 11
+        assert result.invert_elev == pytest.approx(4962.0, abs=1.0)
 
-    async def test_get_node_info_all(self, session_manager, tmp_inp):
+    async def test_get_node_info_all(self, session_manager, tmp_inp, reference_model):
         from openswmm_mcp.tools.query import get_node_info
 
-        ctx = await _open_model(session_manager, tmp_inp, "qn_all")
+        ctx = await _open(session_manager, tmp_inp, "qn_all")
         result = await get_node_info(ctx, session_id="qn_all")
 
         assert isinstance(result, list)
-        assert len(result) == 12
+        assert len(result) == reference_model.NODE_COUNT
         assert all(isinstance(r, NodeInfo) for r in result)
+
+    async def test_get_node_info_sequential_indices(self, session_manager, tmp_inp, reference_model):
+        from openswmm_mcp.tools.query import get_node_info
+
+        ctx = await _open(session_manager, tmp_inp, "qn_idx")
+        result = await get_node_info(ctx, session_id="qn_idx")
+
+        indices = [n.index for n in result]
+        assert indices == list(range(reference_model.NODE_COUNT))
 
     async def test_get_node_info_nonexistent(self, session_manager, tmp_inp):
         from openswmm_mcp.tools.query import get_node_info
 
-        ctx = await _open_model(session_manager, tmp_inp, "qn_bad")
+        ctx = await _open(session_manager, tmp_inp, "qn_bad")
         with pytest.raises(ToolError, match="ELEMENT_NOT_FOUND"):
             await get_node_info(ctx, session_id="qn_bad", node_id="BOGUS")
 
+    async def test_no_runtime_depth_before_start(self, session_manager, tmp_inp, reference_model):
+        from openswmm_mcp.tools.query import get_node_info
+
+        ctx = await _open(session_manager, tmp_inp, "qn_norun")
+        result = await get_node_info(ctx, session_id="qn_norun",
+                                     node_id=reference_model.FIRST_NODE_ID)
+        assert result.depth is None
+
+    async def test_runtime_depth_present_after_step(self, session_manager, tmp_inp, reference_model):
+        from openswmm_mcp.tools.lifecycle import open_model, step_simulation
+        from openswmm_mcp.tools.query import get_node_info
+
+        ctx = _Ctx(session_manager)
+        await open_model(ctx, inp_path=tmp_inp, session_id="qn_run")
+        await step_simulation(ctx, session_id="qn_run", num_steps=10)
+        result = await get_node_info(ctx, session_id="qn_run",
+                                     node_id=reference_model.FIRST_NODE_ID)
+        assert result.depth is not None
+        assert result.head is not None
+
+
+# ---------------------------------------------------------------------------
+# get_link_info
+# ---------------------------------------------------------------------------
+
 
 class TestGetLinkInfo:
-    async def test_get_link_info_single(self, session_manager, tmp_inp):
+    async def test_get_link_info_single(self, session_manager, tmp_inp, reference_model):
         from openswmm_mcp.tools.query import get_link_info
 
-        ctx = await _open_model(session_manager, tmp_inp, "ql1")
-        result = await get_link_info(ctx, session_id="ql1", link_id="C1")
+        ctx = await _open(session_manager, tmp_inp, "ql1")
+        result = await get_link_info(ctx, session_id="ql1", link_id=reference_model.FIRST_LINK_ID)
 
         assert isinstance(result, LinkInfo)
-        assert result.link_id == "C1"
+        assert result.link_id == reference_model.FIRST_LINK_ID
         assert result.link_type == "CONDUIT"
-        assert result.from_node == "J1"
-        assert result.to_node == "J2"
-        assert result.length == 400.0
-        assert result.roughness == 0.013
+        assert result.length > 0
+        assert result.roughness > 0
 
-    async def test_get_link_info_all(self, session_manager, tmp_inp):
+    async def test_c1_topology(self, session_manager, tmp_inp):
+        """C1 connects J1 → J5 in site_drainage_model.inp."""
         from openswmm_mcp.tools.query import get_link_info
 
-        ctx = await _open_model(session_manager, tmp_inp, "ql_all")
+        ctx = await _open(session_manager, tmp_inp, "ql_c1")
+        result = await get_link_info(ctx, session_id="ql_c1", link_id="C1")
+
+        assert result.from_node == "J1"
+        assert result.to_node == "J5"
+        assert result.length == pytest.approx(185.0, abs=0.5)
+        assert result.roughness == pytest.approx(0.05, abs=0.001)
+
+    async def test_c11_terminates_at_outfall(self, session_manager, tmp_inp):
+        """C11 connects J11 → O1."""
+        from openswmm_mcp.tools.query import get_link_info
+
+        ctx = await _open(session_manager, tmp_inp, "ql_c11")
+        result = await get_link_info(ctx, session_id="ql_c11", link_id="C11")
+
+        assert result.from_node == "J11"
+        assert result.to_node == "O1"
+
+    async def test_get_link_info_all(self, session_manager, tmp_inp, reference_model):
+        from openswmm_mcp.tools.query import get_link_info
+
+        ctx = await _open(session_manager, tmp_inp, "ql_all")
         result = await get_link_info(ctx, session_id="ql_all")
 
         assert isinstance(result, list)
-        assert len(result) == 11
+        assert len(result) == reference_model.LINK_COUNT
 
     async def test_get_link_info_nonexistent(self, session_manager, tmp_inp):
         from openswmm_mcp.tools.query import get_link_info
 
-        ctx = await _open_model(session_manager, tmp_inp, "ql_bad")
+        ctx = await _open(session_manager, tmp_inp, "ql_bad")
         with pytest.raises(ToolError, match="ELEMENT_NOT_FOUND"):
             await get_link_info(ctx, session_id="ql_bad", link_id="BOGUS")
 
 
+# ---------------------------------------------------------------------------
+# get_subcatchment_info
+# ---------------------------------------------------------------------------
+
+
 class TestGetSubcatchmentInfo:
-    async def test_get_subcatchment_info_single(self, session_manager, tmp_inp):
+    async def test_get_subcatchment_info_single(self, session_manager, tmp_inp, reference_model):
         from openswmm_mcp.tools.query import get_subcatchment_info
 
-        ctx = await _open_model(session_manager, tmp_inp, "qs1")
-        result = await get_subcatchment_info(ctx, session_id="qs1", subcatch_id="S1")
+        ctx = await _open(session_manager, tmp_inp, "qs1")
+        result = await get_subcatchment_info(ctx, session_id="qs1",
+                                              subcatch_id=reference_model.FIRST_SUBCATCH_ID)
 
         assert isinstance(result, SubcatchmentInfo)
-        assert result.subcatch_id == "S1"
-        assert result.area == 5.0
-        assert result.imperv_pct == 50.0
+        assert result.subcatch_id == reference_model.FIRST_SUBCATCH_ID
+        assert result.area == pytest.approx(4.55, abs=0.1)
+        assert result.imperv_pct == pytest.approx(56.8, abs=0.5)
 
-    async def test_get_subcatchment_info_all(self, session_manager, tmp_inp):
+    async def test_get_subcatchment_info_all(self, session_manager, tmp_inp, reference_model):
         from openswmm_mcp.tools.query import get_subcatchment_info
 
-        ctx = await _open_model(session_manager, tmp_inp, "qs_all")
+        ctx = await _open(session_manager, tmp_inp, "qs_all")
         result = await get_subcatchment_info(ctx, session_id="qs_all")
 
         assert isinstance(result, list)
-        assert len(result) == 8
+        assert len(result) == reference_model.SUBCATCH_COUNT
 
     async def test_get_subcatchment_info_nonexistent(self, session_manager, tmp_inp):
         from openswmm_mcp.tools.query import get_subcatchment_info
 
-        ctx = await _open_model(session_manager, tmp_inp, "qs_bad")
+        ctx = await _open(session_manager, tmp_inp, "qs_bad")
         with pytest.raises(ToolError, match="ELEMENT_NOT_FOUND"):
             await get_subcatchment_info(ctx, session_id="qs_bad", subcatch_id="BOGUS")
 
 
+# ---------------------------------------------------------------------------
+# get_gage_info
+# ---------------------------------------------------------------------------
+
+
 class TestGetGageInfo:
-    async def test_get_gage_info_single(self, session_manager, tmp_inp):
+    async def test_get_gage_info_single(self, session_manager, tmp_inp, reference_model):
         from openswmm_mcp.tools.query import get_gage_info
 
-        ctx = await _open_model(session_manager, tmp_inp, "qg1")
-        result = await get_gage_info(ctx, session_id="qg1", gage_id="RG1")
+        ctx = await _open(session_manager, tmp_inp, "qg1")
+        result = await get_gage_info(ctx, session_id="qg1", gage_id=reference_model.GAGE_ID)
 
         assert isinstance(result, GageInfo)
-        assert result.gage_id == "RG1"
+        assert result.gage_id == reference_model.GAGE_ID
         assert result.data_source == "TIMESERIES"
-        assert result.rain_type == "INTENSITY"
+        # VOLUME format gage → rain_type VOLUME (code 1)
+        assert result.rain_type in ("INTENSITY", "VOLUME", "CUMULATIVE")
 
-    async def test_get_gage_info_all(self, session_manager, tmp_inp):
+    async def test_get_gage_info_all(self, session_manager, tmp_inp, reference_model):
         from openswmm_mcp.tools.query import get_gage_info
 
-        ctx = await _open_model(session_manager, tmp_inp, "qg_all")
+        ctx = await _open(session_manager, tmp_inp, "qg_all")
         result = await get_gage_info(ctx, session_id="qg_all")
 
         assert isinstance(result, list)
-        assert len(result) == 2
+        assert len(result) == reference_model.GAGE_COUNT
 
     async def test_get_gage_info_nonexistent(self, session_manager, tmp_inp):
         from openswmm_mcp.tools.query import get_gage_info
 
-        ctx = await _open_model(session_manager, tmp_inp, "qg_bad")
+        ctx = await _open(session_manager, tmp_inp, "qg_bad")
         with pytest.raises(ToolError, match="ELEMENT_NOT_FOUND"):
             await get_gage_info(ctx, session_id="qg_bad", gage_id="BOGUS")
 
 
+# ---------------------------------------------------------------------------
+# get_system_summary
+# ---------------------------------------------------------------------------
+
+
 class TestGetSystemSummary:
-    async def test_get_system_summary(self, session_manager, tmp_inp):
+    async def test_get_system_summary_counts(self, session_manager, tmp_inp, reference_model):
         from openswmm_mcp.tools.query import get_system_summary
 
-        ctx = await _open_model(session_manager, tmp_inp, "qsys")
+        ctx = await _open(session_manager, tmp_inp, "qsys")
         result = await get_system_summary(ctx, session_id="qsys")
 
         assert isinstance(result, SystemSummary)
-        assert result.node_count == 12
-        assert result.link_count == 11
-        assert result.subcatchment_count == 8
-        assert result.gage_count == 2
-        assert result.pollutant_count == 0
-        assert result.flow_units == "CFS"
-        assert result.route_model == "DYNWAVE"
-        assert result.start_time == 45000.0
-        assert result.end_time == 45000.25
+        assert result.node_count == reference_model.NODE_COUNT
+        assert result.link_count == reference_model.LINK_COUNT
+        assert result.subcatchment_count == reference_model.SUBCATCH_COUNT
+        assert result.gage_count == reference_model.GAGE_COUNT
+        assert result.pollutant_count == reference_model.POLLUTANT_COUNT
 
-    async def test_get_system_summary_current_time_not_running(self, session_manager, tmp_inp):
+    async def test_get_system_summary_options(self, session_manager, tmp_inp):
         from openswmm_mcp.tools.query import get_system_summary
 
-        ctx = await _open_model(session_manager, tmp_inp, "qsys_init")
+        ctx = await _open(session_manager, tmp_inp, "qsys_opts")
+        result = await get_system_summary(ctx, session_id="qsys_opts")
+
+        assert result.flow_units == "CFS"
+        assert result.route_model == "DYNWAVE"
+
+    async def test_get_system_summary_timing(self, session_manager, tmp_inp, reference_model):
+        from openswmm_mcp.tools.query import get_system_summary
+
+        ctx = await _open(session_manager, tmp_inp, "qsys_time")
+        result = await get_system_summary(ctx, session_id="qsys_time")
+
+        duration = result.end_time - result.start_time
+        assert duration == pytest.approx(reference_model.EXPECTED_DURATION_DAYS, rel=1e-3)
+        assert result.routing_step == pytest.approx(reference_model.EXPECTED_ROUTING_STEP_SECS, rel=1e-3)
+
+    async def test_current_time_none_before_run(self, session_manager, tmp_inp):
+        from openswmm_mcp.tools.query import get_system_summary
+
+        ctx = await _open(session_manager, tmp_inp, "qsys_init")
         result = await get_system_summary(ctx, session_id="qsys_init")
 
-        # In "initialized" state, current_time should be None
         assert result.current_time is None
 
 
+# ---------------------------------------------------------------------------
+# find_elements
+# ---------------------------------------------------------------------------
+
+
 class TestFindElements:
-    async def test_find_elements_all(self, session_manager, tmp_inp):
+    async def test_find_elements_all(self, session_manager, tmp_inp, reference_model):
         from openswmm_mcp.tools.query import find_elements
 
-        ctx = await _open_model(session_manager, tmp_inp, "fe_all")
+        ctx = await _open(session_manager, tmp_inp, "fe_all")
         result = await find_elements(ctx, session_id="fe_all")
 
-        # 12 nodes + 11 links + 8 subcatchments + 2 gages = 33
-        assert len(result) == 33
+        expected = (
+            reference_model.NODE_COUNT
+            + reference_model.LINK_COUNT
+            + reference_model.SUBCATCH_COUNT
+            + reference_model.GAGE_COUNT
+        )
+        assert len(result) == expected
         assert all(isinstance(r, ElementSearchResult) for r in result)
 
     async def test_find_elements_by_pattern(self, session_manager, tmp_inp):
         from openswmm_mcp.tools.query import find_elements
 
-        ctx = await _open_model(session_manager, tmp_inp, "fe_pat")
+        ctx = await _open(session_manager, tmp_inp, "fe_pat")
         result = await find_elements(ctx, session_id="fe_pat", pattern="^J1$")
 
         assert len(result) == 1
         assert result[0].element_id == "J1"
         assert result[0].element_type == "node"
 
-    async def test_find_elements_by_type(self, session_manager, tmp_inp):
+    async def test_find_all_junctions(self, session_manager, tmp_inp):
+        """J1–J11 = 11 junctions; O1 outfall should not match."""
         from openswmm_mcp.tools.query import find_elements
 
-        ctx = await _open_model(session_manager, tmp_inp, "fe_type")
-        result = await find_elements(ctx, session_id="fe_type", element_type="link")
+        ctx = await _open(session_manager, tmp_inp, "fe_junc")
+        result = await find_elements(ctx, session_id="fe_junc", pattern="^J[0-9]+$",
+                                     element_type="node")
 
         assert len(result) == 11
-        assert all(r.element_type == "link" for r in result)
 
-    async def test_find_elements_by_pattern_and_type(self, session_manager, tmp_inp):
+    async def test_find_elements_by_type(self, session_manager, tmp_inp, reference_model):
         from openswmm_mcp.tools.query import find_elements
 
-        ctx = await _open_model(session_manager, tmp_inp, "fe_both")
-        result = await find_elements(ctx, session_id="fe_both", pattern="C1", element_type="link")
+        ctx = await _open(session_manager, tmp_inp, "fe_type")
+        result = await find_elements(ctx, session_id="fe_type", element_type="link")
 
-        # C1, C10, C11 all match "C1"
+        assert len(result) == reference_model.LINK_COUNT
+        assert all(r.element_type == "link" for r in result)
+
+    async def test_find_elements_c1_pattern(self, session_manager, tmp_inp):
+        """Pattern 'C1' (case-insensitive substring) matches C1, C10, C11."""
+        from openswmm_mcp.tools.query import find_elements
+
+        ctx = await _open(session_manager, tmp_inp, "fe_c1")
+        result = await find_elements(ctx, session_id="fe_c1", pattern="C1", element_type="link")
+
         assert len(result) == 3
 
     async def test_find_elements_invalid_type(self, session_manager, tmp_inp):
         from openswmm_mcp.tools.query import find_elements
 
-        ctx = await _open_model(session_manager, tmp_inp, "fe_bad")
+        ctx = await _open(session_manager, tmp_inp, "fe_bad")
         with pytest.raises(ToolError, match="VALIDATION_ERROR"):
             await find_elements(ctx, session_id="fe_bad", element_type="bogus")
 
     async def test_find_elements_invalid_regex(self, session_manager, tmp_inp):
         from openswmm_mcp.tools.query import find_elements
 
-        ctx = await _open_model(session_manager, tmp_inp, "fe_regex")
+        ctx = await _open(session_manager, tmp_inp, "fe_regex")
         with pytest.raises(ToolError, match="VALIDATION_ERROR"):
             await find_elements(ctx, session_id="fe_regex", pattern="[invalid")

@@ -19,18 +19,27 @@ class ErrorCode:
     ENGINE_ERROR: str = "ENGINE_ERROR"
     VALIDATION_ERROR: str = "VALIDATION_ERROR"
     MAX_SESSIONS_REACHED: str = "MAX_SESSIONS_REACHED"
+    NOT_SUPPORTED: str = "NOT_SUPPORTED"
 
 
 # ---------------------------------------------------------------------------
 # ToolError import (fastmcp may or may not be installed)
 # ---------------------------------------------------------------------------
+# Prefer ``fastmcp.exceptions.ToolError`` since modern fastmcp versions only
+# expose it there; fall back to ``fastmcp.ToolError`` (older releases) and
+# finally to a local stand-in when fastmcp isn't installed at all (e.g.
+# during static analysis).  Keeping a single canonical class lets tools and
+# tests use ``isinstance(..., ToolError)`` reliably.
 
 try:
-    from fastmcp import ToolError  # noqa: F401
+    from fastmcp.exceptions import ToolError  # noqa: F401
 except ImportError:  # pragma: no cover
+    try:
+        from fastmcp import ToolError  # noqa: F401
+    except ImportError:
 
-    class ToolError(Exception):  # type: ignore[no-redef]
-        """Lightweight stand-in when *fastmcp* is not available."""
+        class ToolError(Exception):  # type: ignore[no-redef]
+            """Lightweight stand-in when *fastmcp* is not available."""
 
 
 # ---------------------------------------------------------------------------

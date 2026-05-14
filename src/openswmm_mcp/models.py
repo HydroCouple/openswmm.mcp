@@ -16,6 +16,7 @@ class ModelSummary(BaseModel):
 
     session_id: str
     state: str
+    engine: str = "openswmm"
     node_count: int
     link_count: int
     subcatchment_count: int
@@ -35,6 +36,7 @@ class SessionListItem(BaseModel):
 
     session_id: str
     state: str
+    engine: str = "openswmm"
     node_count: int
     link_count: int
     subcatchment_count: int
@@ -47,6 +49,7 @@ class SystemSummary(BaseModel):
 
     session_id: str
     state: str
+    engine: str = "openswmm"
     node_count: int
     link_count: int
     subcatchment_count: int
@@ -58,6 +61,13 @@ class SystemSummary(BaseModel):
     end_time: float
     routing_step: float
     current_time: float | None = None
+    # Extended fields (from refactored engine)
+    surcharge_method: str | None = None
+    dps_celerity: float | None = None
+    dps_alpha: float | None = None
+    dps_decay_time: float | None = None
+    event_count: int | None = None
+    steady_state_skip: bool | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -110,6 +120,8 @@ class NodeInfo(BaseModel):
     volume: float | None = None
     lateral_inflow: float | None = None
     overflow: float | None = None
+    outfall_route_to: int | None = None
+    ponded_quality: dict[str, float] | None = None
 
 
 class LinkInfo(BaseModel):
@@ -128,6 +140,10 @@ class LinkInfo(BaseModel):
     depth: float | None = None
     velocity: float | None = None
     capacity: float | None = None
+    hydraulic_power: float | None = None
+    pump_cycles: int | None = None
+    pump_on_time: float | None = None
+    pump_volume: float | None = None
 
 
 class SubcatchmentInfo(BaseModel):
@@ -172,8 +188,11 @@ class MassBalanceResult(BaseModel):
     runoff_continuity_error: float
     routing_continuity_error: float
     quality_continuity_error: float | None = None
+    quality_continuity_errors: dict[str, float] | None = None
     runoff_total: dict[str, float]
     routing_total: dict[str, float]
+    routing_stats: dict[str, float] | None = None
+    max_courant: float | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -282,3 +301,62 @@ class ElementSearchResult(BaseModel):
     element_type: str
     element_id: str
     index: int
+
+
+# ---------------------------------------------------------------------------
+# Editing — deletion and type conversion
+# ---------------------------------------------------------------------------
+
+
+class ImpactEntryModel(BaseModel):
+    """One object that is affected by a deletion (cascade or nullification)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    obj_type: int
+    """Integer code: 0=node, 1=link, 2=subcatchment, 3=gage, 4=table, 5=transect, 6=inlet_usage."""
+    obj_type_name: str
+    """Human-readable object type name."""
+    obj_idx: int
+    """Zero-based index of the affected object."""
+    field: str
+    """Name of the cross-reference field that was affected."""
+    cascaded: bool
+    """True if the object was deleted; False if only the reference was nullified."""
+
+
+class ImpactReportModel(BaseModel):
+    """Result of a deletion impact analysis or a deletion operation."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    session_id: str
+    object_type: str
+    """Type of the deleted / analysed object (``node``, ``link``, etc.)."""
+    object_id: str
+    """Identifier of the deleted / analysed object."""
+    dry_run: bool
+    """True when the analysis was non-destructive (no objects were deleted)."""
+    node_count: int
+    """Number of nodes remaining after deletion (same as before for dry_run)."""
+    link_count: int
+    """Number of links remaining after deletion (same as before for dry_run)."""
+    impacts: list[ImpactEntryModel]
+    """Objects that were (or would be) affected."""
+
+
+class ConversionResultModel(BaseModel):
+    """Result of an in-place type conversion."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    session_id: str
+    object_type: str
+    """``node`` or ``link``."""
+    object_id: str
+    new_type: str
+    """Human-readable new type name."""
+    cleared_fields: list[str]
+    """Type-specific fields that were cleared during conversion."""
+    warnings: list[str]
+    """Non-fatal topology warnings (e.g. "model has no outfall")."""

@@ -1,7 +1,7 @@
 """Sphinx configuration for the OpenSWMM MCP Server documentation."""
 
 project = "OpenSWMM MCP Server"
-copyright = "2026, HydroCouple"
+copyright = "2026, Caleb Buahin"
 author = "Caleb Buahin"
 version = "0.1.0"
 release = "0.1.0"

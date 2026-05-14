@@ -61,7 +61,7 @@ class TestSetForcing:
         assert result.variable == "lateral_inflow"
         assert result.value == 5.0
 
-    async def test_set_forcing_gage_rainfall(self, session_manager, tmp_inp):
+    async def test_set_forcing_gage_rainfall(self, session_manager, tmp_inp, reference_model):
         from openswmm_mcp.tools.forcing import set_forcing
 
         ctx = await _open_and_run(session_manager, tmp_inp, "f_gage")
@@ -69,7 +69,7 @@ class TestSetForcing:
             ctx,
             session_id="f_gage",
             target_type="gage",
-            element_id="RG1",
+            element_id=reference_model.GAGE_ID,
             variable="rainfall",
             value=2.0,
         )
@@ -261,14 +261,15 @@ class TestAddControlRule:
 
 
 class TestSetRainfallOverride:
-    async def test_set_rainfall_override(self, session_manager, tmp_inp):
+    async def test_set_rainfall_override(self, session_manager, tmp_inp, reference_model):
         from openswmm_mcp.tools.forcing import set_rainfall_override
 
         ctx = await _open_and_run(session_manager, tmp_inp, "f_rain")
-        result = await set_rainfall_override(ctx, session_id="f_rain", gage_id="RG1", rainfall=1.5)
+        result = await set_rainfall_override(ctx, session_id="f_rain",
+                                              gage_id=reference_model.GAGE_ID, rainfall=1.5)
 
         assert result["status"] == "applied"
-        assert result["gage_id"] == "RG1"
+        assert result["gage_id"] == reference_model.GAGE_ID
         assert result["rainfall"] == 1.5
         assert result["mode"] == "replace"
         assert result["persist"] is True

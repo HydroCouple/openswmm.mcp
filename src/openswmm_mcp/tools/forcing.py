@@ -12,7 +12,7 @@ import logging
 
 from fastmcp import Context, FastMCP
 
-from openswmm_mcp.dependencies import get_session_manager, require_state
+from openswmm_mcp.dependencies import get_session_manager, require_new_engine, require_state
 from openswmm_mcp.errors import ErrorCode, ToolError
 from openswmm_mcp.models import ForcingResult
 
@@ -135,6 +135,21 @@ async def set_forcing(
     forcing_mode = _resolve_forcing_mode(mode)
     forcing_target = _resolve_forcing_target(persist)
 
+    # Forcing methods take integer element indices, not string IDs.
+    _accessor_map = {
+        "node": "nodes",
+        "link": "links",
+        "subcatchment": "subcatchments",
+        "gage": "gages",
+    }
+    accessor = getattr(session, _accessor_map[target_lower])
+    element_idx = await asyncio.to_thread(accessor.get_index, element_id)
+    if element_idx < 0:
+        raise ToolError(
+            f"[{ErrorCode.ELEMENT_NOT_FOUND}] {target_lower.capitalize()} "
+            f"'{element_id}' not found."
+        )
+
     forcing = session.forcing
 
     try:
@@ -142,9 +157,15 @@ async def set_forcing(
         if var_lower == "quality":
             # node_quality requires an additional pollutant_idx argument;
             # default to pollutant index 0
-            await asyncio.to_thread(method, element_id, 0, value, forcing_mode, forcing_target)
+            await asyncio.to_thread(method, element_idx, 0, value, forcing_mode, forcing_target)
         else:
-            await asyncio.to_thread(method, element_id, value, forcing_mode, forcing_target)
+            await asyncio.to_thread(method, element_idx, value, forcing_mode, forcing_target)
+    except NotImplementedError as exc:
+        raise ToolError(
+            f"[{ErrorCode.NOT_SUPPORTED}] Forcing variable '{var_lower}' on "
+            f"target '{target_lower}' is not supported by the legacy engine. "
+            f"Open the session with engine='openswmm' to use this forcing."
+        ) from exc
     except Exception as exc:
         raise ToolError(f"[{ErrorCode.ENGINE_ERROR}] Failed to set forcing: {exc}") from exc
 
@@ -197,21 +218,44 @@ async def clear_forcing(
                 "session_id": session_id,
                 "scope": "all",
             }
-        else:
-            if target_type is None or element_id is None:
-                raise ToolError(
-                    f"[{ErrorCode.VALIDATION_ERROR}] Both 'target_type' and "
-                    "'element_id' must be provided to clear a specific element, "
-                    "or omit both to clear all forcing."
-                )
-            await asyncio.to_thread(forcing.clear, target_type, element_id)
-            return {
-                "status": "cleared",
-                "session_id": session_id,
-                "scope": "element",
-                "target_type": target_type,
-                "element_id": element_id,
-            }
+        if target_type is None or element_id is None:
+            raise ToolError(
+                f"[{ErrorCode.VALIDATION_ERROR}] Both 'target_type' and "
+                "'element_id' must be provided to clear a specific element, "
+                "or omit both to clear all forcing."
+            )
+        if session.engine_kind != "openswmm":
+            raise ToolError(
+                f"[{ErrorCode.NOT_SUPPORTED}] Per-element forcing clear is not "
+                f"supported by the legacy engine; values reset automatically "
+                f"on each timestep. Use clear_forcing() with no arguments to "
+                f"clear all overrides at once."
+            )
+        # clear(target_type_code, element_idx): NODE=0, LINK=1, SUBCATCH=2, GAGE=3
+        _type_codes = {"node": 0, "link": 1, "subcatchment": 2, "gage": 3}
+        _accessor_map = {"node": "nodes", "link": "links",
+                         "subcatchment": "subcatchments", "gage": "gages"}
+        type_lower = target_type.strip().lower()
+        type_code = _type_codes.get(type_lower)
+        if type_code is None:
+            raise ToolError(
+                f"[{ErrorCode.VALIDATION_ERROR}] Unknown target_type '{target_type}'."
+            )
+        accessor = getattr(session, _accessor_map[type_lower])
+        element_idx = await asyncio.to_thread(accessor.get_index, element_id)
+        if element_idx < 0:
+            raise ToolError(
+                f"[{ErrorCode.ELEMENT_NOT_FOUND}] {type_lower.capitalize()} "
+                f"'{element_id}' not found."
+            )
+        await asyncio.to_thread(forcing.clear, type_code, element_idx)
+        return {
+            "status": "cleared",
+            "session_id": session_id,
+            "scope": "element",
+            "target_type": target_type,
+            "element_id": element_id,
+        }
     except ToolError:
         raise
     except Exception as exc:
@@ -242,11 +286,16 @@ async def set_link_control(
     sm = get_session_manager(ctx)
     session = await sm.get_session(session_id)
     require_state(session, "running")
+    require_new_engine(session, "Link control rules")
+
+    link_idx = await asyncio.to_thread(session.links.get_index, link_id)
+    if link_idx < 0:
+        raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Link '{link_id}' not found.")
 
     controls = session.controls
 
     try:
-        await asyncio.to_thread(controls.set_link_setting, link_id, setting)
+        await asyncio.to_thread(controls.set_link_setting, link_idx, setting)
     except Exception as exc:
         raise ToolError(f"[{ErrorCode.ENGINE_ERROR}] Failed to set link control: {exc}") from exc
 
@@ -279,11 +328,12 @@ async def add_control_rule(
     sm = get_session_manager(ctx)
     session = await sm.get_session(session_id)
     require_state(session, "running")
+    require_new_engine(session, "Adding control rules at runtime")
 
     controls = session.controls
 
     try:
-        rule_index = await asyncio.to_thread(controls.add_rule, rule_text)
+        await asyncio.to_thread(controls.add_rule, rule_text)
     except Exception as exc:
         raise ToolError(f"[{ErrorCode.ENGINE_ERROR}] Failed to add control rule: {exc}") from exc
 
@@ -292,7 +342,7 @@ async def add_control_rule(
     return {
         "status": "added",
         "session_id": session_id,
-        "rule_index": rule_index,
+        "rule_index": rule_count,  # 1-based index of the newly added rule
         "total_rules": rule_count,
     }
 
@@ -323,11 +373,15 @@ async def set_rainfall_override(
     session = await sm.get_session(session_id)
     require_state(session, "running")
 
+    gage_idx = await asyncio.to_thread(session.gages.get_index, gage_id)
+    if gage_idx < 0:
+        raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Gage '{gage_id}' not found.")
+
     forcing = session.forcing
 
     # ForcingMode.REPLACE = 0, ForcingTarget.PERSIST = 1
     try:
-        await asyncio.to_thread(forcing.gage_rainfall, gage_id, rainfall, 0, 1)
+        await asyncio.to_thread(forcing.gage_rainfall, gage_idx, rainfall, 0, 1)
     except Exception as exc:
         raise ToolError(
             f"[{ErrorCode.ENGINE_ERROR}] Failed to set rainfall override: {exc}"

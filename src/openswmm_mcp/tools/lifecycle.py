@@ -61,11 +61,30 @@ async def open_model(
     session_id: str = "default",
     rpt_path: str | None = None,
     out_path: str | None = None,
+    engine: str = "openswmm",
 ) -> ModelSummary:
     """Open a SWMM model file and initialise the engine.
 
     Creates a new simulation session, parses the .inp file, and prepares the
     engine for simulation. Returns a summary of the loaded model.
+
+    Parameters
+    ----------
+    inp_path:
+        Path to the SWMM ``.inp`` input file.
+    session_id:
+        Identifier for the new session.  Defaults to ``"default"``.
+    rpt_path / out_path:
+        Optional report and binary output file paths.  When omitted they
+        default to ``<inp_stem>.rpt`` / ``<inp_stem>.out``.
+    engine:
+        Which engine to use.  ``"openswmm"`` (default) is the modern engine
+        with full feature support.  ``"legacy"`` selects the EPA SWMM 5.x
+        bindings shipped alongside it; only basic query / forcing /
+        mass-balance / hot-start tools are supported on legacy sessions —
+        advanced tools (model building, in-place editing, controls,
+        infrastructure, quality, spatial, geopackage, output reader)
+        return a ``NOT_SUPPORTED`` error.
     """
     sm = get_session_manager(ctx)
 
@@ -74,6 +93,7 @@ async def open_model(
         inp_path=inp_path,
         rpt_path=rpt_path,
         out_path=out_path,
+        engine=engine,
     )
 
     try:
@@ -113,20 +133,29 @@ async def open_model(
     end_time = await asyncio.to_thread(solver.get_end_time)
     routing_step = await asyncio.to_thread(solver.get_routing_step)
 
-    # Read flow units and route model from options
+    # New engine returns numeric code strings ("0"); legacy returns names ("CFS").
     try:
-        flow_units = await asyncio.to_thread(solver.get_option, "FLOW_UNITS")
+        raw_units = await asyncio.to_thread(solver.get_option, "FLOW_UNITS")
+        try:
+            flow_units = _flow_units_name(int(raw_units))
+        except (ValueError, TypeError):
+            flow_units = str(raw_units).upper() or "UNKNOWN"
     except Exception:
         flow_units = "UNKNOWN"
 
     try:
-        route_model = await asyncio.to_thread(solver.get_option, "ROUTING_MODEL")
+        raw_route = await asyncio.to_thread(solver.get_option, "FLOW_ROUTING")
+        try:
+            route_model = _route_model_name(int(raw_route))
+        except (ValueError, TypeError):
+            route_model = str(raw_route).upper() or "UNKNOWN"
     except Exception:
         route_model = "UNKNOWN"
 
     return ModelSummary(
         session_id=session_id,
         state=session.state,
+        engine=session.engine_kind,
         node_count=node_count,
         link_count=link_count,
         subcatchment_count=subcatch_count,
@@ -168,19 +197,24 @@ async def run_simulation(
     steps = 0
     wall_start = time.monotonic()
 
+    # Detect completion by polling solver.state: step() returns an error code
+    # (0 = success), NOT a "more steps?" boolean.
     try:
-        while True:
-            more = await asyncio.to_thread(solver.step)
+        solver_state = await asyncio.to_thread(lambda: solver.state)
+        while solver_state == 5:  # EngineState.RUNNING == 5
+            rc = await asyncio.to_thread(solver.step)
+            if rc != 0:
+                raise RuntimeError(f"step() returned error code {rc}")
             steps += 1
 
-            if not more:
-                break
+            solver_state = await asyncio.to_thread(lambda: solver.state)
 
             # Report progress based on elapsed simulation time
-            current = await asyncio.to_thread(solver.get_current_time)
-            elapsed_sim = current - start_time
-            pct = min(int((elapsed_sim / total_duration) * 100), 99)
-            await ctx.report_progress(pct, 100)
+            if steps % 100 == 0:
+                current = await asyncio.to_thread(solver.get_current_time)
+                elapsed_sim = current - start_time
+                pct = min(int((elapsed_sim / total_duration) * 100), 99)
+                await ctx.report_progress(pct, 100)
 
         await ctx.report_progress(100, 100)
 
@@ -243,11 +277,15 @@ async def step_simulation(
     completed = False
     steps_taken = 0
 
+    # step() returns error code (0 = success); check solver.state for completion.
     try:
         for _ in range(num_steps):
-            more = await asyncio.to_thread(solver.step)
+            rc = await asyncio.to_thread(solver.step)
+            if rc != 0:
+                raise RuntimeError(f"step() returned error code {rc}")
             steps_taken += 1
-            if not more:
+            state = await asyncio.to_thread(lambda: solver.state)
+            if state != 5:  # EngineState.RUNNING == 5
                 completed = True
                 break
     except Exception as exc:

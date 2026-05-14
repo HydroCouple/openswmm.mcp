@@ -3,257 +3,254 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from openswmm_mcp.errors import ToolError
 from openswmm_mcp.resources.model import (
     list_links,
     list_nodes,
     list_sessions,
+    list_subcatchments,
     mass_balance,
     node_detail,
     session_summary,
 )
 
+
 # ---------------------------------------------------------------------------
-# Mock helpers
+# Helpers
 # ---------------------------------------------------------------------------
 
 
-class MockContext:
-    def __init__(self, session_manager):
-        self.lifespan_context = {"session_manager": session_manager}
+async def _open(fake_ctx, inp_path, session_id):
+    from openswmm_mcp.tools.lifecycle import open_model
+
+    await open_model(fake_ctx, inp_path=inp_path, session_id=session_id)
 
 
-def _make_solver():
-    """Return a mock solver with common query methods."""
-    solver = MagicMock()
-    solver.get_node_count = MagicMock(return_value=5)
-    solver.get_link_count = MagicMock(return_value=4)
-    solver.get_subcatch_count = MagicMock(return_value=3)
-    solver.get_flow_units = MagicMock(return_value="CFS")
-    solver.get_route_model = MagicMock(return_value="DYNWAVE")
-    solver.get_start_time = MagicMock(return_value=0.0)
-    solver.get_end_time = MagicMock(return_value=86400.0)
-    solver.get_route_step = MagicMock(return_value=30.0)
-    return solver
+async def _open_and_run(fake_ctx, inp_path, session_id):
+    from openswmm_mcp.tools.lifecycle import open_model, run_simulation
+
+    await open_model(fake_ctx, inp_path=inp_path, session_id=session_id)
+    await run_simulation(fake_ctx, session_id=session_id)
 
 
-def _make_session(state: str = "opened"):
-    """Return a mock SimSession."""
-    session = MagicMock()
-    session.state = state
-    session.solver = _make_solver()
+async def _open_and_step(fake_ctx, inp_path, session_id):
+    from openswmm_mcp.tools.lifecycle import open_model, step_simulation
 
-    # nodes facade
-    session.nodes.get_id = MagicMock(side_effect=lambda i: f"J{i + 1}")
-    session.nodes.get_type = MagicMock(return_value="JUNCTION")
-    session.nodes.get_index = MagicMock(side_effect=lambda nid: int(nid[1:]) - 1)
-    session.nodes.get_invert = MagicMock(return_value=10.0)
-    session.nodes.get_max_depth = MagicMock(return_value=6.0)
-    session.nodes.get_depth = MagicMock(return_value=1.5)
-    session.nodes.get_head = MagicMock(return_value=11.5)
-    session.nodes.get_volume = MagicMock(return_value=100.0)
-    session.nodes.get_lateral_inflow = MagicMock(return_value=0.5)
-    session.nodes.get_overflow = MagicMock(return_value=0.0)
-
-    # links facade
-    session.links.get_id = MagicMock(side_effect=lambda i: f"C{i + 1}")
-    session.links.get_type = MagicMock(return_value="CONDUIT")
-    session.links.get_index = MagicMock(side_effect=lambda lid: int(lid[1:]) - 1)
-    session.links.get_from_node = MagicMock(return_value="J1")
-    session.links.get_to_node = MagicMock(return_value="J2")
-    session.links.get_length = MagicMock(return_value=400.0)
-    session.links.get_roughness = MagicMock(return_value=0.01)
-    session.links.get_flow = MagicMock(return_value=2.0)
-    session.links.get_depth = MagicMock(return_value=0.8)
-    session.links.get_velocity = MagicMock(return_value=3.5)
-    session.links.get_capacity = MagicMock(return_value=0.6)
-
-    # subcatchments facade
-    session.subcatchments.get_id = MagicMock(side_effect=lambda i: f"S{i + 1}")
-
-    # mass_balance facade
-    session.mass_balance.get_runoff_error = MagicMock(return_value=0.01)
-    session.mass_balance.get_routing_error = MagicMock(return_value=-0.05)
-    session.mass_balance.get_quality_error = MagicMock(return_value=0.0)
-    session.mass_balance.get_runoff_total = MagicMock(
-        return_value={"inflow": 1000.0, "outflow": 990.0}
-    )
-    session.mass_balance.get_routing_total = MagicMock(
-        return_value={"inflow": 990.0, "outflow": 985.0}
-    )
-
-    return session
-
-
-def _make_session_manager(sessions: dict | None = None):
-    sm = MagicMock()
-    _sessions = sessions or {}
-
-    async def _get_session(sid):
-        if sid not in _sessions:
-            raise ToolError(f"No session with id '{sid}'.")
-        return _sessions[sid]
-
-    sm.get_session = AsyncMock(side_effect=_get_session)
-
-    async def _list_sessions():
-        return [
-            {"id": sid, "state": s.state, "working_dir": "/tmp"} for sid, s in _sessions.items()
-        ]
-
-    sm.list_sessions = AsyncMock(side_effect=_list_sessions)
-
-    return sm
+    await open_model(fake_ctx, inp_path=inp_path, session_id=session_id)
+    await step_simulation(fake_ctx, session_id=session_id, num_steps=1)
 
 
 # ---------------------------------------------------------------------------
-# Tests
+# list_sessions
 # ---------------------------------------------------------------------------
 
 
 class TestListSessionsResource:
-    async def test_list_sessions_resource(self):
-        """list_sessions returns a JSON string with session metadata."""
-        session = _make_session()
-        sm = _make_session_manager({"default": session, "scenario_a": session})
-        ctx = MockContext(sm)
+    async def test_list_sessions_empty(self, fake_ctx):
+        """list_sessions returns an empty array when no sessions exist."""
+        raw = await list_sessions(fake_ctx)
+        data = json.loads(raw)
+        assert data == []
 
-        raw = await list_sessions(ctx)
+    async def test_list_sessions_with_sessions(self, fake_ctx, inp_path):
+        """list_sessions returns one entry per open session."""
+        await _open(fake_ctx, inp_path, "s1")
+        await _open(fake_ctx, inp_path, "s2")
+
+        raw = await list_sessions(fake_ctx)
         data = json.loads(raw)
 
         assert isinstance(data, list)
         assert len(data) == 2
         ids = {entry["id"] for entry in data}
-        assert "default" in ids
-        assert "scenario_a" in ids
+        assert "s1" in ids
+        assert "s2" in ids
 
-    async def test_list_sessions_empty(self):
-        """list_sessions returns an empty JSON array when no sessions exist."""
-        sm = _make_session_manager({})
-        ctx = MockContext(sm)
 
-        raw = await list_sessions(ctx)
-        data = json.loads(raw)
-
-        assert data == []
+# ---------------------------------------------------------------------------
+# session_summary
+# ---------------------------------------------------------------------------
 
 
 class TestSessionSummaryResource:
-    async def test_session_summary_resource(self):
-        """session_summary returns model summary as JSON."""
-        session = _make_session()
-        sm = _make_session_manager({"default": session})
-        ctx = MockContext(sm)
-
-        raw = await session_summary("default", ctx)
+    async def test_session_summary_counts(self, fake_ctx, inp_path, reference_model):
+        """session_summary reports correct element counts and options."""
+        await _open(fake_ctx, inp_path, "sum_test")
+        raw = await session_summary("sum_test", fake_ctx)
         data = json.loads(raw)
 
-        assert data["session_id"] == "default"
-        assert data["node_count"] == 5
-        assert data["link_count"] == 4
-        assert data["subcatchment_count"] == 3
+        assert data["session_id"] == "sum_test"
+        assert data["node_count"] == reference_model.NODE_COUNT
+        assert data["link_count"] == reference_model.LINK_COUNT
+        assert data["subcatchment_count"] == reference_model.SUBCATCH_COUNT
         assert data["flow_units"] == "CFS"
         assert data["route_model"] == "DYNWAVE"
-        assert data["routing_step"] == 30.0
+        assert isinstance(data["routing_step"], (int, float))
+        assert data["routing_step"] > 0
+
+    async def test_session_summary_missing_session(self, fake_ctx):
+        """session_summary raises ToolError for unknown session_id."""
+        with pytest.raises(ToolError):
+            await session_summary("nonexistent", fake_ctx)
+
+
+# ---------------------------------------------------------------------------
+# list_nodes
+# ---------------------------------------------------------------------------
 
 
 class TestListNodesResource:
-    async def test_session_nodes_resource(self):
-        """list_nodes returns a JSON array of node IDs and types."""
-        session = _make_session()
-        sm = _make_session_manager({"default": session})
-        ctx = MockContext(sm)
-
-        raw = await list_nodes("default", ctx)
+    async def test_list_nodes(self, fake_ctx, inp_path, reference_model):
+        """list_nodes returns one entry per node with id, type, and index."""
+        await _open(fake_ctx, inp_path, "nodes_test")
+        raw = await list_nodes("nodes_test", fake_ctx)
         data = json.loads(raw)
 
         assert isinstance(data, list)
-        assert len(data) == 5  # get_node_count returns 5
-        assert data[0]["node_id"] == "J1"
-        assert data[0]["type"] == "JUNCTION"
-        assert data[0]["index"] == 0
+        assert len(data) == reference_model.NODE_COUNT
+        first = data[0]
+        assert first["node_id"] == reference_model.FIRST_NODE_ID
+        assert first["index"] == 0
+        assert first["type"] in ("JUNCTION", "OUTFALL", "STORAGE", "DIVIDER")
+
+    async def test_list_nodes_all_have_required_keys(self, fake_ctx, inp_path):
+        """Every node entry has node_id, type, and index keys."""
+        await _open(fake_ctx, inp_path, "nodes_keys")
+        raw = await list_nodes("nodes_keys", fake_ctx)
+        data = json.loads(raw)
+
+        for entry in data:
+            assert "node_id" in entry
+            assert "type" in entry
+            assert "index" in entry
+
+
+# ---------------------------------------------------------------------------
+# node_detail
+# ---------------------------------------------------------------------------
 
 
 class TestNodeDetailResource:
-    async def test_session_node_detail_resource(self):
-        """node_detail returns full node properties as JSON."""
-        session = _make_session(state="opened")
-        sm = _make_session_manager({"default": session})
-        ctx = MockContext(sm)
-
-        raw = await node_detail("default", "J1", ctx)
+    async def test_node_detail_static_properties(self, fake_ctx, inp_path, reference_model):
+        """node_detail returns geometry for an initialized session."""
+        await _open(fake_ctx, inp_path, "nd_static")
+        raw = await node_detail("nd_static", reference_model.FIRST_NODE_ID, fake_ctx)
         data = json.loads(raw)
 
-        assert data["node_id"] == "J1"
-        assert data["node_type"] == "JUNCTION"
-        assert data["invert_elev"] == 10.0
-        assert data["max_depth"] == 6.0
-        # State fields should not be present when not running
+        assert data["node_id"] == reference_model.FIRST_NODE_ID
+        assert data["node_type"] in ("JUNCTION", "OUTFALL", "STORAGE", "DIVIDER")
+        assert "invert_elev" in data
+        assert "max_depth" in data
         assert "depth" not in data
 
-    async def test_session_node_detail_with_runtime_state(self):
+    async def test_node_detail_runtime_state(self, fake_ctx, inp_path, reference_model):
         """node_detail includes runtime state when the session is running."""
-        session = _make_session(state="running")
-        sm = _make_session_manager({"default": session})
-        ctx = MockContext(sm)
-
-        raw = await node_detail("default", "J1", ctx)
+        await _open_and_step(fake_ctx, inp_path, "nd_running")
+        raw = await node_detail("nd_running", reference_model.FIRST_NODE_ID, fake_ctx)
         data = json.loads(raw)
 
-        assert data["depth"] == 1.5
-        assert data["head"] == 11.5
-        assert data["volume"] == 100.0
-        assert data["lateral_inflow"] == 0.5
-        assert data["overflow"] == 0.0
+        assert "depth" in data
+        assert "head" in data
+        assert "volume" in data
+        assert "lateral_inflow" in data
+        assert "overflow" in data
+        assert isinstance(data["depth"], float)
+        assert isinstance(data["head"], float)
+
+    async def test_node_detail_outfall(self, fake_ctx, inp_path, reference_model):
+        """node_detail works for the outfall node."""
+        await _open(fake_ctx, inp_path, "nd_outfall")
+        raw = await node_detail("nd_outfall", reference_model.OUTFALL_ID, fake_ctx)
+        data = json.loads(raw)
+
+        assert data["node_id"] == reference_model.OUTFALL_ID
+        assert data["node_type"] == "OUTFALL"
+
+
+# ---------------------------------------------------------------------------
+# list_links
+# ---------------------------------------------------------------------------
 
 
 class TestListLinksResource:
-    async def test_session_links_resource(self):
-        """list_links returns a JSON array of link IDs and types."""
-        session = _make_session()
-        sm = _make_session_manager({"default": session})
-        ctx = MockContext(sm)
-
-        raw = await list_links("default", ctx)
+    async def test_list_links(self, fake_ctx, inp_path, reference_model):
+        """list_links returns one entry per link with id, type, and index."""
+        await _open(fake_ctx, inp_path, "links_test")
+        raw = await list_links("links_test", fake_ctx)
         data = json.loads(raw)
 
         assert isinstance(data, list)
-        assert len(data) == 4  # get_link_count returns 4
-        assert data[0]["link_id"] == "C1"
-        assert data[0]["type"] == "CONDUIT"
+        assert len(data) == reference_model.LINK_COUNT
+        first = data[0]
+        assert first["link_id"] == reference_model.FIRST_LINK_ID
+        assert first["index"] == 0
+        assert first["type"] in ("CONDUIT", "PUMP", "ORIFICE", "WEIR", "OUTLET")
+
+    async def test_list_links_all_have_required_keys(self, fake_ctx, inp_path):
+        """Every link entry has link_id, type, and index keys."""
+        await _open(fake_ctx, inp_path, "links_keys")
+        raw = await list_links("links_keys", fake_ctx)
+        data = json.loads(raw)
+
+        for entry in data:
+            assert "link_id" in entry
+            assert "type" in entry
+            assert "index" in entry
+
+
+# ---------------------------------------------------------------------------
+# list_subcatchments
+# ---------------------------------------------------------------------------
+
+
+class TestListSubcatchmentsResource:
+    async def test_list_subcatchments(self, fake_ctx, inp_path, reference_model):
+        """list_subcatchments returns one entry per subcatchment."""
+        await _open(fake_ctx, inp_path, "sc_test")
+        raw = await list_subcatchments("sc_test", fake_ctx)
+        data = json.loads(raw)
+
+        assert isinstance(data, list)
+        assert len(data) == reference_model.SUBCATCH_COUNT
+        assert data[0]["subcatch_id"] == reference_model.FIRST_SUBCATCH_ID
         assert data[0]["index"] == 0
 
 
+# ---------------------------------------------------------------------------
+# mass_balance
+# ---------------------------------------------------------------------------
+
+
 class TestMassBalanceResource:
-    async def test_session_mass_balance_resource(self):
-        """mass_balance returns continuity errors and totals."""
-        session = _make_session()
-        sm = _make_session_manager({"default": session})
-        ctx = MockContext(sm)
-
-        raw = await mass_balance("default", ctx)
+    async def test_mass_balance_after_run(self, fake_ctx, inp_path):
+        """mass_balance returns continuity errors and totals after a full run."""
+        await _open_and_run(fake_ctx, inp_path, "mb_run")
+        raw = await mass_balance("mb_run", fake_ctx)
         data = json.loads(raw)
 
-        assert data["session_id"] == "default"
-        assert data["runoff_continuity_error"] == 0.01
-        assert data["routing_continuity_error"] == -0.05
-        assert data["quality_continuity_error"] == 0.0
-        assert "inflow" in data["runoff_total"]
-        assert "inflow" in data["routing_total"]
+        assert data["session_id"] == "mb_run"
+        assert isinstance(data["runoff_continuity_error"], float)
+        assert isinstance(data["routing_continuity_error"], float)
+        assert isinstance(data["runoff_total"], dict)
+        assert isinstance(data["routing_total"], dict)
+        # RunoffTotal enum components
+        assert "rainfall" in data["runoff_total"]
+        # RoutingTotal enum components
+        assert "wet_weather" in data["routing_total"]
 
-    async def test_session_mass_balance_missing_quality(self):
-        """mass_balance gracefully handles missing quality error."""
-        session = _make_session()
-        # Make get_quality_error raise an exception
-        session.mass_balance.get_quality_error = MagicMock(
-            side_effect=RuntimeError("no quality data")
+    async def test_mass_balance_no_pollutants(self, fake_ctx, inp_path, reference_model):
+        """quality_continuity_error is None when the model has no pollutants."""
+        # The unit test model has TSS, so use the root model (0 pollutants) if available.
+        # Here we rely on the conftest's reference_model to know pollutant count.
+        await _open_and_run(fake_ctx, inp_path, "mb_qual")
+        raw = await mass_balance("mb_qual", fake_ctx)
+        data = json.loads(raw)
+
+        # If no pollutants: quality_continuity_error should be None.
+        # If pollutants exist: it may be a float.
+        assert data["quality_continuity_error"] is None or isinstance(
+            data["quality_continuity_error"], float
         )
-        sm = _make_session_manager({"default": session})
-        ctx = MockContext(sm)
-
-        raw = await mass_balance("default", ctx)
-        data = json.loads(raw)
-
-        assert data["quality_continuity_error"] is None

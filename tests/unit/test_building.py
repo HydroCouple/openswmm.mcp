@@ -150,6 +150,53 @@ class TestAddNode:
 
 
 # ---------------------------------------------------------------------------
+# Tests: pop_last_node
+# ---------------------------------------------------------------------------
+
+
+class TestPopLastNode:
+    async def test_pop_last_node_undoes_add(self, session_manager):
+        from openswmm_mcp.tools.building import add_node, pop_last_node
+
+        ctx = await _create_building_session(session_manager, "bld_pln_ok")
+        await add_node(ctx, session_id="bld_pln_ok", node_id="J1", node_type="junction")
+        await add_node(ctx, session_id="bld_pln_ok", node_id="J2", node_type="junction")
+
+        result = await pop_last_node(ctx, session_id="bld_pln_ok", node_id="J2")
+
+        assert isinstance(result, BuildingResult)
+        assert result.status == "ok"
+        assert result.element_type == "node"
+        assert result.element_id == "J2"
+
+        # The mock builder's _nodes list should now be back to ["J1"].
+        session = await session_manager.get_session("bld_pln_ok")
+        assert session.model_builder._nodes == ["J1"]
+
+    async def test_pop_last_node_wrong_tail_raises(self, session_manager):
+        from openswmm_mcp.tools.building import add_node, pop_last_node
+
+        ctx = await _create_building_session(session_manager, "bld_pln_wt")
+        await add_node(ctx, session_id="bld_pln_wt", node_id="J1", node_type="junction")
+        await add_node(ctx, session_id="bld_pln_wt", node_id="J2", node_type="junction")
+
+        # J1 is no longer the tail — engine returns SWMM_ERR_BADINDEX (8).
+        with pytest.raises(ToolError, match="ENGINE_ERROR"):
+            await pop_last_node(ctx, session_id="bld_pln_wt", node_id="J1")
+
+        # The list is unchanged on failure.
+        session = await session_manager.get_session("bld_pln_wt")
+        assert session.model_builder._nodes == ["J1", "J2"]
+
+    async def test_pop_last_node_empty_id(self, session_manager):
+        from openswmm_mcp.tools.building import pop_last_node
+
+        ctx = await _create_building_session(session_manager, "bld_pln_empty")
+        with pytest.raises(ToolError, match="VALIDATION_ERROR"):
+            await pop_last_node(ctx, session_id="bld_pln_empty", node_id="")
+
+
+# ---------------------------------------------------------------------------
 # Tests: add_link
 # ---------------------------------------------------------------------------
 
@@ -221,6 +268,58 @@ class TestAddLink:
                 from_node="J1",
                 to_node="J2",
             )
+
+
+# ---------------------------------------------------------------------------
+# Tests: pop_last_link
+# ---------------------------------------------------------------------------
+
+
+class TestPopLastLink:
+    async def test_pop_last_link_undoes_add(self, session_manager):
+        from openswmm_mcp.tools.building import add_link, add_node, pop_last_link
+
+        ctx = await _create_building_session(session_manager, "bld_pll_ok")
+        await add_node(ctx, session_id="bld_pll_ok", node_id="J1", node_type="junction")
+        await add_node(ctx, session_id="bld_pll_ok", node_id="J2", node_type="junction")
+        await add_link(
+            ctx,
+            session_id="bld_pll_ok",
+            link_id="C1",
+            link_type="conduit",
+            from_node="J1",
+            to_node="J2",
+        )
+
+        result = await pop_last_link(ctx, session_id="bld_pll_ok", link_id="C1")
+
+        assert result.status == "ok"
+        assert result.element_type == "link"
+        assert result.element_id == "C1"
+
+        session = await session_manager.get_session("bld_pll_ok")
+        assert session.model_builder._links == []
+
+    async def test_pop_last_link_wrong_tail_raises(self, session_manager):
+        from openswmm_mcp.tools.building import add_link, add_node, pop_last_link
+
+        ctx = await _create_building_session(session_manager, "bld_pll_wt")
+        await add_node(ctx, session_id="bld_pll_wt", node_id="J1", node_type="junction")
+        await add_node(ctx, session_id="bld_pll_wt", node_id="J2", node_type="junction")
+        await add_link(ctx, session_id="bld_pll_wt", link_id="C1",
+                       link_type="conduit", from_node="J1", to_node="J2")
+        await add_link(ctx, session_id="bld_pll_wt", link_id="C2",
+                       link_type="conduit", from_node="J1", to_node="J2")
+
+        with pytest.raises(ToolError, match="ENGINE_ERROR"):
+            await pop_last_link(ctx, session_id="bld_pll_wt", link_id="C1")
+
+    async def test_pop_last_link_empty_id(self, session_manager):
+        from openswmm_mcp.tools.building import pop_last_link
+
+        ctx = await _create_building_session(session_manager, "bld_pll_empty")
+        with pytest.raises(ToolError, match="VALIDATION_ERROR"):
+            await pop_last_link(ctx, session_id="bld_pll_empty", link_id="")
 
 
 # ---------------------------------------------------------------------------

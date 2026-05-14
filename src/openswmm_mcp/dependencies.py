@@ -130,3 +130,36 @@ def require_state(session, *valid_states: str) -> None:
         raise ToolError(
             f"Session is in state '{session.state}', but this action requires one of: {allowed}."
         )
+
+
+def require_new_engine(session, feature: str) -> None:
+    """Assert that *session* uses the new ``openswmm`` engine backend.
+
+    Tools that depend on new-engine-only APIs (ModelBuilder, ModelEditor,
+    Controls, Inflows, Infrastructure, Quality, Spatial, Tables, Statistics,
+    OutputReader, GeoPackage) call this guard to fail fast on legacy
+    sessions with a clear error code instead of an obscure ``AttributeError``
+    from the backend.
+
+    Parameters
+    ----------
+    session:
+        A session object exposing ``engine_kind``.
+    feature:
+        Human-readable name of the feature being requested, used in the
+        error message (e.g. ``"ModelBuilder"``, ``"Spatial coordinates"``).
+
+    Raises
+    ------
+    ToolError
+        With code :data:`~openswmm_mcp.errors.ErrorCode.NOT_SUPPORTED` when
+        the session was created with ``engine='legacy'``.
+    """
+    from openswmm_mcp.errors import ErrorCode
+
+    kind = getattr(session, "engine_kind", "openswmm")
+    if kind != "openswmm":
+        raise ToolError(
+            f"[{ErrorCode.NOT_SUPPORTED}] {feature} requires the new openswmm "
+            f"engine; this session was opened with engine='{kind}'."
+        )

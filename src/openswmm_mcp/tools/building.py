@@ -14,7 +14,8 @@ from pathlib import Path
 from fastmcp import Context, FastMCP
 from openswmm.engine import ModelBuilder, Tables
 
-from openswmm_mcp.dependencies import get_session_manager
+from openswmm_mcp.backends.openswmm import OpenSwmmBackend
+from openswmm_mcp.dependencies import get_session_manager, require_new_engine
 from openswmm_mcp.errors import ErrorCode, ToolError
 from openswmm_mcp.models import BuildingResult
 from openswmm_mcp.session import SimSession
@@ -116,6 +117,7 @@ async def _get_builder_session(ctx: Context, session_id: str) -> SimSession:
     """Retrieve an existing session and verify it is in the ``building`` state."""
     sm = get_session_manager(ctx)
     session = await sm.get_session(session_id)
+    require_new_engine(session, "Programmatic model building (ModelBuilder)")
     if session.state != "building":
         raise ToolError(
             f"[{ErrorCode.INVALID_STATE}] Session '{session_id}' is in state "
@@ -165,10 +167,11 @@ async def create_model(
         session_dir.mkdir(parents=True, exist_ok=True)
 
         # The solver is not available until finalize(); pass a placeholder None
-        # and set state to "building" so lifecycle tools know this is not yet
-        # runnable.
+        # backend and set state to "building" so lifecycle tools know this is
+        # not yet runnable.  ModelBuilder is openswmm-only, so engine_kind
+        # implicitly defaults to "openswmm" for building sessions.
         session = SimSession(
-            solver=None,  # type: ignore[arg-type]
+            backend=None,
             state="building",
             working_dir=session_dir,
             model_builder=builder,
@@ -242,6 +245,46 @@ async def add_node(
         element_id=node_id,
         index=idx,
         message=f"Added {node_type} node '{node_id}' at invert={invert_elev}.",
+    )
+
+
+@building_mcp.tool()
+async def pop_last_node(
+    ctx: Context,
+    session_id: str = "default",
+    node_id: str = "",
+) -> BuildingResult:
+    """Remove the most recently added node (undo of ``add_node``).
+
+    The supplied ``node_id`` must match the current tail of the node
+    list. If any link still references the tail node, the engine
+    refuses the pop — call ``pop_last_link`` for those links first.
+
+    Parameters
+    ----------
+    node_id:
+        Expected tail node identifier.
+    """
+    if not node_id:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] node_id must not be empty.")
+
+    session = await _get_builder_session(ctx, session_id)
+    builder = session.model_builder
+
+    rc = await asyncio.to_thread(builder.pop_last_node, node_id)
+    if rc != 0:
+        raise ToolError(
+            f"[{ErrorCode.ENGINE_ERROR}] pop_last_node('{node_id}') failed with code {rc} "
+            "(8 = SWMM_ERR_BADINDEX: id is not the current tail; "
+            "anything else = engine-level lifecycle or reference error)."
+        )
+
+    return BuildingResult(
+        status="ok",
+        element_type="node",
+        element_id=node_id,
+        index=-1,
+        message=f"Removed tail node '{node_id}'.",
     )
 
 
@@ -321,6 +364,44 @@ async def add_link(
             f"Added {link_type} link '{link_id}' from '{from_node}' to '{to_node}' "
             f"({xsect_shape}, geom1={xsect_geom1})."
         ),
+    )
+
+
+@building_mcp.tool()
+async def pop_last_link(
+    ctx: Context,
+    session_id: str = "default",
+    link_id: str = "",
+) -> BuildingResult:
+    """Remove the most recently added link (undo of ``add_link``).
+
+    The supplied ``link_id`` must match the current tail of the link
+    list, otherwise the engine returns ``SWMM_ERR_BADINDEX``.
+
+    Parameters
+    ----------
+    link_id:
+        Expected tail link identifier.
+    """
+    if not link_id:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] link_id must not be empty.")
+
+    session = await _get_builder_session(ctx, session_id)
+    builder = session.model_builder
+
+    rc = await asyncio.to_thread(builder.pop_last_link, link_id)
+    if rc != 0:
+        raise ToolError(
+            f"[{ErrorCode.ENGINE_ERROR}] pop_last_link('{link_id}') failed with code {rc} "
+            "(8 = SWMM_ERR_BADINDEX: id is not the current tail)."
+        )
+
+    return BuildingResult(
+        status="ok",
+        element_type="link",
+        element_id=link_id,
+        index=-1,
+        message=f"Removed tail link '{link_id}'.",
     )
 
 
@@ -632,6 +713,7 @@ async def write_model(
 
     sm = get_session_manager(ctx)
     session = await sm.get_session(session_id)
+    require_new_engine(session, "Writing models built by ModelBuilder")
 
     try:
         if session.state == "building":
@@ -642,9 +724,9 @@ async def write_model(
                     "ModelBuilder attached."
                 )
 
-            # Finalize the builder to get a solver
+            # Finalize the builder to get a solver, then wrap in a backend.
             solver = await asyncio.to_thread(builder.finalize)
-            session.solver = solver
+            session.backend = OpenSwmmBackend.from_solver(solver)
             session.state = "created"
 
             # Apply any pending options that were deferred
@@ -662,12 +744,11 @@ async def write_model(
 
             await asyncio.to_thread(solver.model_write, output_path)
         else:
-            # Session already has a solver -- write directly
-            if session.solver is None:
+            if session.backend is None:
                 raise ToolError(
                     f"[{ErrorCode.INVALID_STATE}] Session '{session_id}' has no solver."
                 )
-            await asyncio.to_thread(session.solver.model_write, output_path)
+            await asyncio.to_thread(session.backend.solver.model_write, output_path)
     except ToolError:
         raise
     except Exception as exc:

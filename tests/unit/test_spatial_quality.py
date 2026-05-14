@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
-
 import pytest
 
 from openswmm_mcp.errors import ToolError
@@ -16,109 +14,130 @@ from openswmm_mcp.tools.spatial_quality import (
     set_treatment,
 )
 
+
 # ---------------------------------------------------------------------------
-# Mock helpers
+# Helpers
 # ---------------------------------------------------------------------------
 
 
-class MockContext:
-    def __init__(self, session_manager):
-        self.lifespan_context = {"session_manager": session_manager}
+async def _open(fake_ctx, inp_path, session_id):
+    from openswmm_mcp.tools.lifecycle import open_model
+
+    await open_model(fake_ctx, inp_path=inp_path, session_id=session_id)
 
 
-def _make_session(state: str = "running"):
-    """Return a MagicMock that quacks like a SimSession."""
-    session = MagicMock()
-    session.state = state
+async def _open_and_step(fake_ctx, inp_path, session_id):
+    from openswmm_mcp.tools.lifecycle import open_model, step_simulation
 
-    # spatial facade
-    session.spatial.get_node_coord = MagicMock(return_value=(100.0, 200.0))
-    session.spatial.set_node_coord = MagicMock()
-    session.spatial.get_link_coord = MagicMock(return_value=[(0.0, 0.0), (10.0, 10.0)])
-    session.spatial.set_link_coord = MagicMock()
-    session.spatial.get_subcatch_coord = MagicMock(return_value=(50.0, 75.0))
-    session.spatial.set_subcatch_coord = MagicMock()
-
-    # quality facade
-    session.quality.get_node_quality = MagicMock(return_value={"TSS": 12.5, "BOD": 3.1})
-    session.quality.get_link_quality = MagicMock(return_value={"TSS": 8.0})
-    session.quality.get_subcatch_quality = MagicMock(return_value={})
-    session.quality.set_treatment = MagicMock()
-
-    # infrastructure facade
-    session.infrastructure.add_lid = MagicMock()
-
-    return session
-
-
-def _make_session_manager(sessions: dict | None = None):
-    sm = MagicMock()
-    _sessions = sessions or {}
-
-    async def _get_session(sid):
-        if sid not in _sessions:
-            raise ToolError(f"No session with id '{sid}'.")
-        return _sessions[sid]
-
-    sm.get_session = AsyncMock(side_effect=_get_session)
-    return sm
+    await open_model(fake_ctx, inp_path=inp_path, session_id=session_id)
+    await step_simulation(fake_ctx, session_id=session_id, num_steps=1)
 
 
 # ---------------------------------------------------------------------------
-# get_coordinates
+# get_coordinates / set_coordinates
 # ---------------------------------------------------------------------------
 
 
 class TestGetCoordinates:
-    async def test_get_coordinates_node(self):
-        """Returns SpatialResult with x, y for a node."""
-        session = _make_session()
-        sm = _make_session_manager({"default": session})
-        ctx = MockContext(sm)
-
+    async def test_get_node_coordinates_after_set(
+        self, fake_ctx, inp_path, reference_model
+    ):
+        """set_coordinates then get_coordinates round-trips for a node."""
+        await _open(fake_ctx, inp_path, "coord_node")
+        await set_coordinates(
+            fake_ctx,
+            session_id="coord_node",
+            element_type="node",
+            element_id=reference_model.FIRST_NODE_ID,
+            x=300.0,
+            y=400.0,
+        )
         result = await get_coordinates(
-            ctx, session_id="default", element_type="node", element_id="J1"
+            fake_ctx,
+            session_id="coord_node",
+            element_type="node",
+            element_id=reference_model.FIRST_NODE_ID,
         )
 
         assert isinstance(result, SpatialResult)
         assert result.element_type == "node"
-        assert result.element_id == "J1"
-        assert result.x == 100.0
-        assert result.y == 200.0
-        session.spatial.get_node_coord.assert_called_once_with("J1")
+        assert result.element_id == reference_model.FIRST_NODE_ID
+        assert result.x == pytest.approx(300.0)
+        assert result.y == pytest.approx(400.0)
 
-    async def test_get_coordinates_link(self):
-        """Returns SpatialResult with vertices for a link."""
-        session = _make_session()
-        sm = _make_session_manager({"default": session})
-        ctx = MockContext(sm)
-
+    async def test_get_link_coordinates_after_set(
+        self, fake_ctx, inp_path, reference_model
+    ):
+        """set_coordinates then get_coordinates round-trips for a link."""
+        await _open(fake_ctx, inp_path, "coord_link")
+        await set_coordinates(
+            fake_ctx,
+            session_id="coord_link",
+            element_type="link",
+            element_id=reference_model.FIRST_LINK_ID,
+            x=50.0,
+            y=60.0,
+        )
         result = await get_coordinates(
-            ctx, session_id="default", element_type="link", element_id="C1"
+            fake_ctx,
+            session_id="coord_link",
+            element_type="link",
+            element_id=reference_model.FIRST_LINK_ID,
         )
 
         assert isinstance(result, SpatialResult)
         assert result.element_type == "link"
-        assert result.vertices is not None
-        assert len(result.vertices) == 2
+        assert result.x == pytest.approx(50.0)
+        assert result.y == pytest.approx(60.0)
 
-    async def test_get_coordinates_requires_element_id(self):
+    async def test_get_subcatchment_coordinates_after_set(
+        self, fake_ctx, inp_path, reference_model
+    ):
+        """set_coordinates then get_coordinates round-trips for a subcatchment."""
+        await _open(fake_ctx, inp_path, "coord_sc")
+        await set_coordinates(
+            fake_ctx,
+            session_id="coord_sc",
+            element_type="subcatchment",
+            element_id=reference_model.FIRST_SUBCATCH_ID,
+            x=10.0,
+            y=20.0,
+        )
+        result = await get_coordinates(
+            fake_ctx,
+            session_id="coord_sc",
+            element_type="subcatchment",
+            element_id=reference_model.FIRST_SUBCATCH_ID,
+        )
+
+        assert isinstance(result, SpatialResult)
+        assert result.element_type == "subcatchment"
+        assert result.x == pytest.approx(10.0)
+        assert result.y == pytest.approx(20.0)
+
+    async def test_get_coordinates_requires_element_id(self, fake_ctx, inp_path):
         """Raises ToolError when element_id is empty."""
-        session = _make_session()
-        sm = _make_session_manager({"default": session})
-        ctx = MockContext(sm)
+        await _open(fake_ctx, inp_path, "coord_noid")
 
         with pytest.raises(ToolError, match="element_id is required"):
-            await get_coordinates(ctx, element_type="node", element_id="")
+            await get_coordinates(
+                fake_ctx,
+                session_id="coord_noid",
+                element_type="node",
+                element_id="",
+            )
 
-    async def test_get_coordinates_invalid_type(self):
+    async def test_get_coordinates_invalid_type(self, fake_ctx, inp_path):
         """Raises ToolError for unknown element_type."""
-        session = _make_session()
-        sm = _make_session_manager({"default": session})
-        ctx = MockContext(sm)
+        await _open(fake_ctx, inp_path, "coord_badtype")
 
         with pytest.raises(ToolError, match="Unknown element type"):
-            await get_coordinates(ctx, element_type="pump_station", element_id="PS1")
+            await get_coordinates(
+                fake_ctx,
+                session_id="coord_badtype",
+                element_type="pump_station",
+                element_id="J1",
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -127,44 +146,39 @@ class TestGetCoordinates:
 
 
 class TestSetCoordinates:
-    async def test_set_coordinates_node(self):
-        """set_coordinates calls the spatial facade and returns a status dict."""
-        session = _make_session()
-        sm = _make_session_manager({"default": session})
-        ctx = MockContext(sm)
-
+    async def test_set_coordinates_returns_status(
+        self, fake_ctx, inp_path, reference_model
+    ):
+        """set_coordinates returns a dict with status 'updated'."""
+        await _open(fake_ctx, inp_path, "set_coord")
         result = await set_coordinates(
-            ctx,
-            session_id="default",
+            fake_ctx,
+            session_id="set_coord",
             element_type="node",
-            element_id="J1",
-            x=300.0,
-            y=400.0,
+            element_id=reference_model.FIRST_NODE_ID,
+            x=100.0,
+            y=200.0,
         )
 
         assert result["status"] == "updated"
-        assert result["x"] == 300.0
-        assert result["y"] == 400.0
-        session.spatial.set_node_coord.assert_called_once_with("J1", 300.0, 400.0)
+        assert result["element_type"] == "node"
+        assert result["element_id"] == reference_model.FIRST_NODE_ID
+        assert result["x"] == 100.0
+        assert result["y"] == 200.0
 
-    async def test_set_coordinates_subcatchment(self):
-        """set_coordinates works for subcatchments too."""
-        session = _make_session()
-        sm = _make_session_manager({"default": session})
-        ctx = MockContext(sm)
+    async def test_set_coordinates_requires_element_id(self, fake_ctx, inp_path):
+        """set_coordinates raises ToolError when element_id is empty."""
+        await _open(fake_ctx, inp_path, "set_coord_noid")
 
-        result = await set_coordinates(
-            ctx,
-            session_id="default",
-            element_type="subcatchment",
-            element_id="S1",
-            x=10.0,
-            y=20.0,
-        )
-
-        assert result["status"] == "updated"
-        assert result["element_type"] == "subcatchment"
-        session.spatial.set_subcatch_coord.assert_called_once_with("S1", 10.0, 20.0)
+        with pytest.raises(ToolError, match="element_id is required"):
+            await set_coordinates(
+                fake_ctx,
+                session_id="set_coord_noid",
+                element_type="node",
+                element_id="",
+                x=0.0,
+                y=0.0,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -173,62 +187,84 @@ class TestSetCoordinates:
 
 
 class TestGetQuality:
-    async def test_get_quality_all_pollutants(self):
-        """get_quality returns all pollutants when no specific one is requested."""
-        session = _make_session()
-        sm = _make_session_manager({"default": session})
-        ctx = MockContext(sm)
-
-        result = await get_quality(ctx, session_id="default", element_type="node", element_id="J1")
-
-        assert result["element_type"] == "node"
-        assert result["element_id"] == "J1"
-        assert "TSS" in result["quality"]
-        assert "BOD" in result["quality"]
-
-    async def test_get_quality_single_pollutant(self):
-        """get_quality filters to a single pollutant when specified."""
-        session = _make_session()
-        sm = _make_session_manager({"default": session})
-        ctx = MockContext(sm)
-
+    async def test_get_quality_returns_dict(
+        self, fake_ctx, inp_path, reference_model
+    ):
+        """get_quality returns a dict of pollutant concentrations after stepping."""
+        await _open_and_step(fake_ctx, inp_path, "qual_step")
         result = await get_quality(
-            ctx,
-            session_id="default",
+            fake_ctx,
+            session_id="qual_step",
             element_type="node",
-            element_id="J1",
-            pollutant="TSS",
+            element_id=reference_model.FIRST_NODE_ID,
         )
 
-        assert result["quality"] == {"TSS": 12.5}
+        assert result["element_type"] == "node"
+        assert result["element_id"] == reference_model.FIRST_NODE_ID
+        assert isinstance(result["quality"], dict)
 
-    async def test_get_quality_unknown_pollutant(self):
+    async def test_get_quality_known_pollutant(
+        self, fake_ctx, inp_path, reference_model
+    ):
+        """get_quality returns only the named pollutant when specified."""
+        if reference_model.POLLUTANT_COUNT == 0:
+            pytest.skip("Model has no pollutants.")
+
+        await _open_and_step(fake_ctx, inp_path, "qual_pollut")
+        result = await get_quality(
+            fake_ctx,
+            session_id="qual_pollut",
+            element_type="node",
+            element_id=reference_model.FIRST_NODE_ID,
+            pollutant=reference_model.POLLUTANT_ID,
+        )
+
+        assert reference_model.POLLUTANT_ID in result["quality"]
+        assert len(result["quality"]) == 1
+
+    async def test_get_quality_unknown_pollutant(
+        self, fake_ctx, inp_path, reference_model
+    ):
         """get_quality raises ToolError for an unknown pollutant name."""
-        session = _make_session()
-        sm = _make_session_manager({"default": session})
-        ctx = MockContext(sm)
+        if reference_model.POLLUTANT_COUNT == 0:
+            pytest.skip("Model has no pollutants.")
 
-        with pytest.raises(ToolError, match="Pollutant.*not found"):
+        await _open_and_step(fake_ctx, inp_path, "qual_unknown")
+
+        with pytest.raises(ToolError, match="not found"):
             await get_quality(
-                ctx,
-                session_id="default",
+                fake_ctx,
+                session_id="qual_unknown",
                 element_type="node",
-                element_id="J1",
-                pollutant="LEAD",
+                element_id=reference_model.FIRST_NODE_ID,
+                pollutant="NONEXISTENT_POLLUTANT_XYZ",
             )
 
-    async def test_get_quality_empty_result(self):
-        """get_quality returns an empty dict when no pollutants are modelled."""
-        session = _make_session()
-        sm = _make_session_manager({"default": session})
-        ctx = MockContext(sm)
+    async def test_get_quality_requires_element_id(self, fake_ctx, inp_path):
+        """get_quality raises ToolError when element_id is empty."""
+        await _open(fake_ctx, inp_path, "qual_noid")
 
-        # subcatchment quality returns empty dict
+        with pytest.raises(ToolError, match="element_id is required"):
+            await get_quality(
+                fake_ctx,
+                session_id="qual_noid",
+                element_type="node",
+                element_id="",
+            )
+
+    async def test_get_quality_no_pollutants(
+        self, fake_ctx, inp_path, reference_model
+    ):
+        """get_quality returns empty dict when model has no pollutants."""
+        if reference_model.POLLUTANT_COUNT > 0:
+            pytest.skip("Model has pollutants — skipping no-pollutant test.")
+
+        await _open_and_step(fake_ctx, inp_path, "qual_empty")
         result = await get_quality(
-            ctx,
-            session_id="default",
-            element_type="subcatchment",
-            element_id="S1",
+            fake_ctx,
+            session_id="qual_empty",
+            element_type="node",
+            element_id=reference_model.FIRST_NODE_ID,
         )
 
         assert result["quality"] == {}
@@ -240,100 +276,99 @@ class TestGetQuality:
 
 
 class TestSetTreatment:
-    async def test_set_treatment(self):
-        """set_treatment calls the quality facade and returns a status dict."""
-        session = _make_session()
-        sm = _make_session_manager({"default": session})
-        ctx = MockContext(sm)
+    async def test_set_treatment(self, fake_ctx, inp_path, reference_model):
+        """set_treatment calls the quality engine and returns a status dict."""
+        if reference_model.POLLUTANT_COUNT == 0:
+            pytest.skip("Model has no pollutants.")
 
+        await _open(fake_ctx, inp_path, "treat_set")
         result = await set_treatment(
-            ctx,
-            session_id="default",
-            node_id="J1",
-            pollutant="TSS",
+            fake_ctx,
+            session_id="treat_set",
+            node_id=reference_model.FIRST_NODE_ID,
+            pollutant=reference_model.POLLUTANT_ID,
             expression="R = 0.5 * C",
         )
 
         assert result["status"] == "treatment_set"
-        assert result["node_id"] == "J1"
-        assert result["pollutant"] == "TSS"
+        assert result["node_id"] == reference_model.FIRST_NODE_ID
+        assert result["pollutant"] == reference_model.POLLUTANT_ID
         assert result["expression"] == "R = 0.5 * C"
-        session.quality.set_treatment.assert_called_once_with("J1", "TSS", "R = 0.5 * C")
 
-    async def test_set_treatment_requires_node_id(self):
-        session = _make_session()
-        sm = _make_session_manager({"default": session})
-        ctx = MockContext(sm)
+    async def test_set_treatment_requires_node_id(self, fake_ctx, inp_path):
+        """set_treatment raises ToolError when node_id is empty."""
+        await _open(fake_ctx, inp_path, "treat_noid")
 
         with pytest.raises(ToolError, match="node_id is required"):
-            await set_treatment(ctx, node_id="", pollutant="TSS", expression="R = 0.5 * C")
+            await set_treatment(
+                fake_ctx,
+                node_id="",
+                pollutant="TSS",
+                expression="R = 0.5 * C",
+            )
 
-    async def test_set_treatment_requires_pollutant(self):
-        session = _make_session()
-        sm = _make_session_manager({"default": session})
-        ctx = MockContext(sm)
+    async def test_set_treatment_requires_pollutant(self, fake_ctx, inp_path):
+        """set_treatment raises ToolError when pollutant is empty."""
+        await _open(fake_ctx, inp_path, "treat_nopoll")
 
         with pytest.raises(ToolError, match="pollutant is required"):
-            await set_treatment(ctx, node_id="J1", pollutant="", expression="R = 0.5 * C")
+            await set_treatment(
+                fake_ctx,
+                node_id="J1",
+                pollutant="",
+                expression="R = 0.5 * C",
+            )
 
-    async def test_set_treatment_requires_expression(self):
-        session = _make_session()
-        sm = _make_session_manager({"default": session})
-        ctx = MockContext(sm)
+    async def test_set_treatment_requires_expression(self, fake_ctx, inp_path):
+        """set_treatment raises ToolError when expression is empty."""
+        await _open(fake_ctx, inp_path, "treat_noexpr")
 
         with pytest.raises(ToolError, match="expression is required"):
-            await set_treatment(ctx, node_id="J1", pollutant="TSS", expression="")
+            await set_treatment(
+                fake_ctx,
+                node_id="J1",
+                pollutant="TSS",
+                expression="",
+            )
 
 
 # ---------------------------------------------------------------------------
-# add_lid
+# add_lid (input validation only — real LID control requires model with LIDs)
 # ---------------------------------------------------------------------------
 
 
 class TestAddLid:
-    async def test_add_lid(self):
-        """add_lid calls infrastructure facade and returns a status dict."""
-        session = _make_session()
-        sm = _make_session_manager({"default": session})
-        ctx = MockContext(sm)
-
-        result = await add_lid(
-            ctx,
-            session_id="default",
-            subcatch_id="S1",
-            lid_type="BC",
-            area=500.0,
-        )
-
-        assert result["status"] == "lid_added"
-        assert result["subcatch_id"] == "S1"
-        assert result["lid_type"] == "BC"
-        assert result["area"] == 500.0
-        session.infrastructure.add_lid.assert_called_once_with("S1", "BC", 500.0)
-
-    async def test_add_lid_requires_subcatch_id(self):
-        session = _make_session()
-        sm = _make_session_manager({"default": session})
-        ctx = MockContext(sm)
+    async def test_add_lid_requires_subcatch_id(self, fake_ctx, inp_path):
+        """add_lid raises ToolError when subcatch_id is empty."""
+        await _open(fake_ctx, inp_path, "lid_noid")
 
         with pytest.raises(ToolError, match="subcatch_id is required"):
-            await add_lid(ctx, subcatch_id="", lid_type="BC", area=100.0)
+            await add_lid(
+                fake_ctx,
+                session_id="lid_noid",
+                subcatch_id="",
+                lid_idx=0,
+                area=100.0,
+            )
 
-    async def test_add_lid_requires_lid_type(self):
-        session = _make_session()
-        sm = _make_session_manager({"default": session})
-        ctx = MockContext(sm)
-
-        with pytest.raises(ToolError, match="lid_type is required"):
-            await add_lid(ctx, subcatch_id="S1", lid_type="", area=100.0)
-
-    async def test_add_lid_requires_positive_area(self):
-        session = _make_session()
-        sm = _make_session_manager({"default": session})
-        ctx = MockContext(sm)
+    async def test_add_lid_requires_positive_area(self, fake_ctx, inp_path):
+        """add_lid raises ToolError when area is not positive."""
+        await _open(fake_ctx, inp_path, "lid_area")
 
         with pytest.raises(ToolError, match="area must be a positive"):
-            await add_lid(ctx, subcatch_id="S1", lid_type="BC", area=0.0)
+            await add_lid(
+                fake_ctx,
+                session_id="lid_area",
+                subcatch_id="S1",
+                lid_idx=0,
+                area=0.0,
+            )
 
         with pytest.raises(ToolError, match="area must be a positive"):
-            await add_lid(ctx, subcatch_id="S1", lid_type="BC", area=-10.0)
+            await add_lid(
+                fake_ctx,
+                session_id="lid_area",
+                subcatch_id="S1",
+                lid_idx=0,
+                area=-10.0,
+            )

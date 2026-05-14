@@ -24,7 +24,7 @@
 
 ## Features
 
-The server exposes **37 tools** organized across 7 namespaced sub-servers, along with **9 URI-based resources**, **7 prompt templates**, and full authentication support.
+The server exposes **45 tools** organized across 8 namespaced sub-servers, along with **9 URI-based resources**, **7 prompt templates**, and full authentication support.
 
 ### Tool Namespaces
 
@@ -32,7 +32,8 @@ The server exposes **37 tools** organized across 7 namespaced sub-servers, along
 - **query\_\***: Read properties and runtime state for nodes, links, subcatchments, and gages; search elements by regex pattern
 - **forcing\_\***: Apply runtime forcing overrides (rainfall, inflows, boundary conditions), set link controls, add control rules
 - **analysis\_\***: Retrieve post-simulation statistics, mass balance, time series, flooding summaries, capacity summaries, scenario comparison, and CSV/JSON export
-- **building\_\***: Construct models from scratch -- add nodes, links, subcatchments, gages, time series, curves; set options; validate and write `.inp` files
+- **building\_\***: Construct models from scratch — add nodes, links, subcatchments, gages, time series, curves; pop (undo) the last added element; set options; validate and write `.inp` files
+- **editing\_\***: Delete model objects with cascade analysis, preview impacts non-destructively, and convert nodes or links to different types in place
 - **hotstart\_\***: Save and load simulation state checkpoints; clone sessions for scenario branching
 - **spatial\_\***: Query and set element coordinates, retrieve water-quality concentrations, assign treatment expressions, add LID controls
 
@@ -172,7 +173,9 @@ Claude: [calls hotstart_clone_session] Cloned "default" to "whatif_upsize".
 |------|-------------|
 | `building_create_model` | Create an empty model and start a building session |
 | `building_add_node` | Add a junction, outfall, storage, or divider node |
+| `building_pop_last_node` | Remove the most recently added node (undo) |
 | `building_add_link` | Add a conduit, pump, orifice, weir, or outlet |
+| `building_pop_last_link` | Remove the most recently added link (undo) |
 | `building_add_subcatchment` | Add a subcatchment with hydrological parameters |
 | `building_add_gage` | Add a rain gage |
 | `building_set_option` | Set a simulation option (flow units, routing model, etc.) |
@@ -180,6 +183,15 @@ Claude: [calls hotstart_clone_session] Cloned "default" to "whatif_upsize".
 | `building_add_curve` | Add a curve (storage, pump, rating, diversion, etc.) |
 | `building_validate_model` | Run built-in validation checks |
 | `building_write_model` | Finalize and write the model to an `.inp` file |
+
+### editing (Object Deletion and Type Conversion)
+
+| Tool | Description |
+|------|-------------|
+| `editing_analyze_impact` | Preview what would be deleted or nullified without making any changes |
+| `editing_delete_object` | Delete a model object and cascade-delete or nullify all references |
+| `editing_convert_node` | Convert a node to a different type in place, preserving common properties |
+| `editing_convert_link` | Convert a link to a different type in place, preserving endpoints and offsets |
 
 ### hotstart (State Management)
 
@@ -304,12 +316,12 @@ The documentation site uses [PyData Sphinx Theme](https://pydata-sphinx-theme.re
                         |  (openswmm-mcp)       |
                         +-----------+-----------+
                                     |
-          +-------+-------+--------+--------+-------+--------+
-          |       |       |        |        |       |        |
-     lifecycle  query  forcing  analysis building hotstart spatial
-       (mcp)   (mcp)   (mcp)    (mcp)    (mcp)    (mcp)    (mcp)
-          |       |       |        |        |       |        |
-          +-------+-------+--------+--------+-------+--------+
+          +-------+-------+--------+--------+---------+-------+--------+--------+
+          |       |       |        |        |         |       |        |        |
+     lifecycle  query  forcing  analysis  building editing hotstart spatial
+       (mcp)   (mcp)   (mcp)    (mcp)     (mcp)    (mcp)   (mcp)    (mcp)
+          |       |       |        |        |         |       |        |        |
+          +-------+-------+--------+--------+---------+-------+--------+--------+
                                     |
                            SessionManager
                           /      |       \

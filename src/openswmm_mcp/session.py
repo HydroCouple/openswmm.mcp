@@ -1,8 +1,7 @@
 """Session management for the OpenSWMM MCP server.
 
-Provides :class:`SimSession` (a thin wrapper around a :class:`Solver` with lazy
-domain accessors) and :class:`SessionManager` (a concurrent-safe registry of
-active sessions).
+Provides :class:`SimSession` (a thin wrapper around a :class:`Backend`) and
+:class:`SessionManager` (a concurrent-safe registry of active sessions).
 """
 
 from __future__ import annotations
@@ -11,54 +10,12 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
-from openswmm.engine import (
-    Controls,
-    Forcing,
-    Gages,
-    HotStart,
-    Inflows,
-    Infrastructure,
-    Links,
-    MassBalance,
-    ModelBuilder,
-    Nodes,
-    OutputReader,
-    Pollutants,
-    Quality,
-    Solver,
-    Spatial,
-    Statistics,
-    Subcatchments,
-    Tables,
-)
-
+from openswmm_mcp.backends import Backend, EngineKind, make_backend
 from openswmm_mcp.errors import ErrorCode, ToolError
 
 logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Mapping from attribute name -> domain class constructor
-# ---------------------------------------------------------------------------
-
-_DOMAIN_CLASSES: dict[str, type] = {
-    "nodes": Nodes,
-    "links": Links,
-    "subcatchments": Subcatchments,
-    "gages": Gages,
-    "forcing": Forcing,
-    "mass_balance": MassBalance,
-    "pollutants": Pollutants,
-    "statistics": Statistics,
-    "spatial": Spatial,
-    "tables": Tables,
-    "controls": Controls,
-    "inflows": Inflows,
-    "infrastructure": Infrastructure,
-    "quality": Quality,
-    "hotstart": HotStart,
-}
 
 
 # ---------------------------------------------------------------------------
@@ -68,62 +25,85 @@ _DOMAIN_CLASSES: dict[str, type] = {
 
 @dataclass
 class SimSession:
-    """Wraps a :class:`Solver` instance with lazy domain accessors.
+    """Wraps a :class:`Backend` instance with lazy domain-accessor delegation.
 
-    Domain objects (``nodes``, ``links``, ``subcatchments``, etc.) are created
-    on first access and cached for the lifetime of the session.  This avoids
-    constructing objects that a particular tool invocation may never touch.
+    The backend supplies ``solver``, ``nodes``, ``links``, etc. and tools call
+    those attributes through this session object as if it were the backend
+    itself.  Setting ``session.<attr>`` for arbitrary attributes (e.g.
+    ``model_builder``, ``output_reader``) is still supported for tools that
+    cache state on the session.
 
     Parameters
     ----------
-    solver:
-        The underlying SWMM engine handle.
+    backend:
+        The engine backend wrapping the underlying solver and domain objects.
+        Optional: ``None`` while in the ``"building"`` state (no solver
+        exists yet — the session uses ``model_builder`` instead).
     state:
         Human-readable lifecycle label.  One of ``"created"``, ``"opened"``,
-        ``"initialized"``, ``"running"``, ``"ended"``, ``"closed"``.
+        ``"initialized"``, ``"running"``, ``"ended"``, ``"closed"``,
+        ``"building"``.
     working_dir:
         Scratch directory used for temporary / output files.
+    inp_path / rpt_path / out_path:
+        File paths the session was created with.  Stored on the session so
+        tools that need them (e.g. the output reader) don't depend on
+        engine-specific solver attributes.
     model_builder:
-        Optional :class:`ModelBuilder` when the session was created
-        programmatically rather than from an ``.inp`` file.
+        Optional new-engine ``ModelBuilder`` when the session was created
+        programmatically rather than from an ``.inp`` file.  Always ``None``
+        on the legacy backend.
     """
 
-    solver: Solver
+    backend: Backend | None = None
     state: str = "created"
     working_dir: Path = field(default_factory=lambda: Path("."))
-    model_builder: ModelBuilder | None = None
+    inp_path: str = ""
+    rpt_path: str = ""
+    out_path: str = ""
+    model_builder: Any = None
 
     # Private fields ---------------------------------------------------------
-    _output_reader: OutputReader | None = field(default=None, repr=False)
-    _cache: dict[str, Any] = field(default_factory=dict, repr=False)
+    _output_reader: Any = field(default=None, repr=False)
 
-    # -- Lazy domain accessors via __getattr__ -------------------------------
+    # -- Convenience -------------------------------------------------------
+
+    @property
+    def engine_kind(self) -> str:
+        # ModelBuilder is openswmm-only, so a session without a backend (in
+        # the "building" state) is implicitly an openswmm session.
+        if self.backend is None:
+            return "openswmm"
+        return self.backend.engine_kind
+
+    # -- Backend delegation --------------------------------------------------
 
     def __getattr__(self, name: str) -> Any:
-        """Lazily instantiate and cache domain accessor objects.
-
-        Any attribute listed in :data:`_DOMAIN_CLASSES` is constructed the
-        first time it is requested and then stored in ``_cache`` so that
-        subsequent accesses return the same instance.
-        """
-        if name in _DOMAIN_CLASSES:
-            # Guard against infinite recursion during __init__
-            cache = object.__getattribute__(self, "_cache")
-            if name not in cache:
-                solver = object.__getattribute__(self, "solver")
-                cache[name] = _DOMAIN_CLASSES[name](solver)
-            return cache[name]
-        raise AttributeError(f"'{type(self).__name__}' has no attribute '{name}'")
+        """Delegate unknown attributes to the backend (``nodes``, ``links``, …)."""
+        # ``__getattr__`` only fires when normal attribute lookup fails, so
+        # the dataclass fields above continue to take precedence.
+        backend = object.__getattribute__(self, "backend")
+        if backend is None:
+            raise AttributeError(
+                f"'{type(self).__name__}' has no attribute '{name}' "
+                "(session has no backend yet — still in 'building' state?)"
+            )
+        try:
+            return getattr(backend, name)
+        except AttributeError as exc:
+            raise AttributeError(
+                f"'{type(self).__name__}' has no attribute '{name}' "
+                f"(backend kind = {backend.engine_kind!r})"
+            ) from exc
 
     # -- OutputReader property -----------------------------------------------
 
     @property
-    def output_reader(self) -> OutputReader | None:
-        """Return the current :class:`OutputReader`, if one has been set."""
+    def output_reader(self) -> Any:
         return self._output_reader
 
     @output_reader.setter
-    def output_reader(self, value: OutputReader | None) -> None:
+    def output_reader(self, value: Any) -> None:
         self._output_reader = value
 
     # -- Cleanup -------------------------------------------------------------
@@ -137,11 +117,17 @@ class SimSession:
         ``try / except`` so that one failure does not prevent subsequent
         teardown steps.
         """
+        if self.backend is None:
+            # Building session that never finalized — nothing to tear down.
+            self.state = "closed"
+            return
+
+        solver = self.backend.solver
         state = self.state
 
         if state in ("running", "initialized"):
             try:
-                self.solver.end()
+                solver.end()
                 self.state = "ended"
                 state = "ended"
             except Exception:
@@ -149,31 +135,33 @@ class SimSession:
 
         if state == "ended":
             try:
-                self.solver.report()
+                solver.report()
             except Exception:
                 logger.debug("solver.report() failed during cleanup", exc_info=True)
 
         if state in ("ended", "opened"):
             try:
-                self.solver.close()
+                solver.close()
                 self.state = "closed"
                 state = "closed"
             except Exception:
                 logger.debug("solver.close() failed during cleanup", exc_info=True)
 
-        # Always attempt to destroy the underlying C handle.
+        # Always attempt to destroy the underlying handle (no-op on legacy).
         try:
-            self.solver.destroy()
+            solver.destroy()
         except Exception:
             logger.debug("solver.destroy() failed during cleanup", exc_info=True)
 
         self.state = "closed"
-        self._cache.clear()
 
 
 # ---------------------------------------------------------------------------
 # SessionManager
 # ---------------------------------------------------------------------------
+
+
+_VALID_ENGINES: tuple[str, ...] = get_args(EngineKind)
 
 
 class SessionManager:
@@ -202,11 +190,13 @@ class SessionManager:
         inp_path: str,
         rpt_path: str | None = None,
         out_path: str | None = None,
+        engine: str = "openswmm",
     ) -> SimSession:
         """Create a new :class:`SimSession` and register it.
 
-        The solver is created and its file paths are set, but the caller is
-        responsible for opening / initializing / starting the engine.
+        The backend (and its solver) is created and its file paths are set,
+        but the caller is responsible for opening / initializing / starting
+        the engine.
 
         Parameters
         ----------
@@ -220,6 +210,10 @@ class SessionManager:
         out_path:
             Optional path for the binary output file.  Defaults to
             ``<inp_stem>.out`` next to the input file.
+        engine:
+            Which backend to use: ``"openswmm"`` (default, full-feature) or
+            ``"legacy"`` (EPA SWMM 5.x — basic query / forcing / mass balance
+            only).
 
         Returns
         -------
@@ -229,8 +223,15 @@ class SessionManager:
         Raises
         ------
         ToolError
-            If *max_sessions* has been reached or *session_id* already exists.
+            If *max_sessions* has been reached, *session_id* already exists,
+            or *engine* is unknown.
         """
+        if engine not in _VALID_ENGINES:
+            raise ToolError(
+                f"[{ErrorCode.VALIDATION_ERROR}] Unknown engine '{engine}'. "
+                f"Valid choices: {', '.join(_VALID_ENGINES)}."
+            )
+
         async with self._lock:
             if session_id in self._sessions:
                 raise ToolError(
@@ -251,19 +252,27 @@ class SessionManager:
             if out_path is None:
                 out_path = str(inp.with_suffix(".out"))
 
-            solver = Solver(str(inp), rpt_path, out_path)
+            backend = make_backend(engine, str(inp), rpt_path, out_path)
 
             session_dir = self._working_dir / session_id
             session_dir.mkdir(parents=True, exist_ok=True)
 
             session = SimSession(
-                solver=solver,
+                backend=backend,
                 state="created",
                 working_dir=session_dir,
+                inp_path=str(inp),
+                rpt_path=rpt_path,
+                out_path=out_path,
             )
 
             self._sessions[session_id] = session
-            logger.info("Session '%s' created (inp=%s)", session_id, inp_path)
+            logger.info(
+                "Session '%s' created (engine=%s, inp=%s)",
+                session_id,
+                engine,
+                inp_path,
+            )
             return session
 
     async def get_session(self, session_id: str) -> SimSession:
@@ -304,7 +313,8 @@ class SessionManager:
         Returns
         -------
         list[dict]
-            Each dict contains ``id``, ``state``, and ``working_dir``.
+            Each dict contains ``id``, ``state``, ``engine``, and
+            ``working_dir``.
         """
         async with self._lock:
             items = list(self._sessions.items())
@@ -313,6 +323,7 @@ class SessionManager:
             {
                 "id": sid,
                 "state": session.state,
+                "engine": session.engine_kind,
                 "working_dir": str(session.working_dir),
             }
             for sid, session in items

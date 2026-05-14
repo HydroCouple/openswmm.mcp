@@ -1,4 +1,9 @@
-"""Unit tests for lifecycle tool functions."""
+"""Unit tests for lifecycle tool functions against the real engine.
+
+The lifecycle tools are parametrized over both backends (``openswmm`` and
+``legacy``) wherever the underlying behaviour is supposed to be uniform —
+mass-balance shape, step-loop semantics, and result-model fields.
+"""
 
 from __future__ import annotations
 
@@ -7,177 +12,236 @@ import pytest
 from openswmm_mcp.errors import ToolError
 from openswmm_mcp.models import ModelSummary, SimulationResult, StepResult
 
-# ---------------------------------------------------------------------------
-# Mock MCP Context
-# ---------------------------------------------------------------------------
-
-
-class MockContext:
-    """Minimal stand-in for ``fastmcp.Context`` used by tool handlers."""
-
-    def __init__(self, session_manager):
-        self.lifespan_context = {"session_manager": session_manager}
-        self._progress = []
-
-    async def report_progress(self, current, total):
-        self._progress.append((current, total))
-
 
 # ---------------------------------------------------------------------------
-# Tests
+# TestOpenModel — both engines
 # ---------------------------------------------------------------------------
 
 
 class TestOpenModel:
-    async def test_open_model(self, session_manager, tmp_inp):
+    async def test_open_model_default_engine(self, fake_ctx, inp_path):
+        """Default engine is ``openswmm``."""
         from openswmm_mcp.tools.lifecycle import open_model
 
-        ctx = MockContext(session_manager)
-        result = await open_model(ctx, inp_path=tmp_inp, session_id="test")
+        result = await open_model(fake_ctx, inp_path=inp_path, session_id="test")
 
         assert isinstance(result, ModelSummary)
         assert result.session_id == "test"
         assert result.state == "initialized"
+        assert result.engine == "openswmm"
 
-    async def test_open_model_returns_correct_counts(self, session_manager, tmp_inp):
+    async def test_open_model_each_engine(
+        self, fake_ctx, inp_path, engine, reference_model
+    ):
         from openswmm_mcp.tools.lifecycle import open_model
 
-        ctx = MockContext(session_manager)
-        result = await open_model(ctx, inp_path=tmp_inp, session_id="counts")
+        result = await open_model(
+            fake_ctx, inp_path=inp_path, session_id="t", engine=engine
+        )
 
-        assert result.node_count == 12
-        assert result.link_count == 11
-        assert result.subcatchment_count == 8
-        assert result.gage_count == 2
-        assert result.pollutant_count == 0
+        assert result.engine == engine
+        assert result.state == "initialized"
+        assert result.node_count == reference_model.NODE_COUNT
+        assert result.link_count == reference_model.LINK_COUNT
+        assert result.subcatchment_count == reference_model.SUBCATCH_COUNT
+        assert result.gage_count == reference_model.GAGE_COUNT
+        assert result.pollutant_count == reference_model.POLLUTANT_COUNT
 
-    async def test_open_model_flow_units(self, session_manager, tmp_inp):
+    async def test_open_model_flow_units(self, fake_ctx, inp_path):
         from openswmm_mcp.tools.lifecycle import open_model
 
-        ctx = MockContext(session_manager)
-        result = await open_model(ctx, inp_path=tmp_inp, session_id="opts")
+        result = await open_model(fake_ctx, inp_path=inp_path, session_id="opts")
 
         assert result.flow_units == "CFS"
+        # ROUTING_MODEL is exposed by the new engine but not by the legacy
+        # toolkit; only assert it for openswmm.
         assert result.route_model == "DYNWAVE"
 
-    async def test_open_model_timing(self, session_manager, tmp_inp):
+    async def test_open_model_legacy_route_model_unknown(self, fake_ctx, inp_path):
+        """Legacy doesn't expose ROUTING_MODEL via the toolkit; falls back to UNKNOWN."""
         from openswmm_mcp.tools.lifecycle import open_model
 
-        ctx = MockContext(session_manager)
-        result = await open_model(ctx, inp_path=tmp_inp, session_id="timing")
+        result = await open_model(
+            fake_ctx, inp_path=inp_path, session_id="leg_opts", engine="legacy"
+        )
 
-        assert result.start_time == 45000.0
-        assert result.end_time == 45000.25
-        assert result.routing_step == 30.0
+        assert result.flow_units == "CFS"  # legacy can read FLOW_UNITS
+        assert result.route_model == "UNKNOWN"
 
-    async def test_open_model_duplicate(self, session_manager, tmp_inp):
+    async def test_open_model_timing(
+        self, fake_ctx, inp_path, engine, reference_model
+    ):
         from openswmm_mcp.tools.lifecycle import open_model
 
-        ctx = MockContext(session_manager)
-        await open_model(ctx, inp_path=tmp_inp, session_id="dup")
+        result = await open_model(
+            fake_ctx, inp_path=inp_path, session_id="timing", engine=engine
+        )
+
+        # Both backends present elapsed-day floats; the actual epoch differs
+        # (openswmm uses Julian, legacy uses simulation-start = 0.0), so we
+        # assert on the *duration*, not absolute values.
+        duration = result.end_time - result.start_time
+        assert duration == pytest.approx(
+            reference_model.EXPECTED_DURATION_DAYS, rel=1e-3
+        )
+        assert result.routing_step == pytest.approx(
+            reference_model.EXPECTED_ROUTING_STEP_SECS, rel=1e-3
+        )
+
+    async def test_open_model_duplicate(self, fake_ctx, inp_path):
+        from openswmm_mcp.tools.lifecycle import open_model
+
+        await open_model(fake_ctx, inp_path=inp_path, session_id="dup")
 
         with pytest.raises(ToolError, match="already exists"):
-            await open_model(ctx, inp_path=tmp_inp, session_id="dup")
+            await open_model(fake_ctx, inp_path=inp_path, session_id="dup")
+
+    async def test_open_model_unknown_engine(self, fake_ctx, inp_path):
+        from openswmm_mcp.tools.lifecycle import open_model
+
+        with pytest.raises(ToolError, match="Unknown engine"):
+            await open_model(
+                fake_ctx, inp_path=inp_path, session_id="bad", engine="unknown"
+            )
+
+
+# ---------------------------------------------------------------------------
+# TestRunSimulation — both engines
+# ---------------------------------------------------------------------------
 
 
 class TestRunSimulation:
-    async def test_run_simulation(self, session_manager, tmp_inp):
+    async def test_run_simulation_completes(self, fake_ctx, inp_path, engine):
         from openswmm_mcp.tools.lifecycle import open_model, run_simulation
 
-        ctx = MockContext(session_manager)
-        await open_model(ctx, inp_path=tmp_inp, session_id="run")
+        await open_model(
+            fake_ctx, inp_path=inp_path, session_id="run", engine=engine
+        )
 
-        result = await run_simulation(ctx, session_id="run")
+        result = await run_simulation(fake_ctx, session_id="run")
 
         assert isinstance(result, SimulationResult)
         assert result.session_id == "run"
-        assert result.steps_completed == 100
-        assert result.runoff_continuity_error == -0.01
-        assert result.routing_continuity_error == -0.02
+        assert result.steps_completed > 0
+        # Continuity errors are returned as fractions (new-engine convention).
+        # The site-drainage example produces small but nonzero errors;
+        # require they be in a sane range rather than a specific value.
+        assert -0.5 < result.runoff_continuity_error < 0.5
+        assert -0.5 < result.routing_continuity_error < 0.5
 
-    async def test_run_simulation_reports_progress(self, session_manager, tmp_inp):
+    async def test_run_simulation_reports_progress(self, fake_ctx, inp_path):
         from openswmm_mcp.tools.lifecycle import open_model, run_simulation
 
-        ctx = MockContext(session_manager)
-        await open_model(ctx, inp_path=tmp_inp, session_id="prog")
-
-        await run_simulation(ctx, session_id="prog")
+        await open_model(fake_ctx, inp_path=inp_path, session_id="prog")
+        await run_simulation(fake_ctx, session_id="prog")
 
         # Must have called report_progress at least once + the 100% call
-        assert len(ctx._progress) > 0
-        assert ctx._progress[-1] == (100, 100)
+        assert len(fake_ctx.progress_calls) > 0
+        assert fake_ctx.progress_calls[-1] == (100, 100)
 
-    async def test_run_simulation_wall_time(self, session_manager, tmp_inp):
+    async def test_run_simulation_wall_time(self, fake_ctx, inp_path):
         from openswmm_mcp.tools.lifecycle import open_model, run_simulation
 
-        ctx = MockContext(session_manager)
-        await open_model(ctx, inp_path=tmp_inp, session_id="wall")
-
-        result = await run_simulation(ctx, session_id="wall")
+        await open_model(fake_ctx, inp_path=inp_path, session_id="wall")
+        result = await run_simulation(fake_ctx, session_id="wall")
 
         assert result.elapsed_wall_time >= 0.0
 
+    async def test_run_simulation_leaves_session_ended(
+        self, fake_ctx, inp_path, session_manager, engine
+    ):
+        from openswmm_mcp.tools.lifecycle import open_model, run_simulation
+
+        await open_model(
+            fake_ctx, inp_path=inp_path, session_id="ended", engine=engine
+        )
+        await run_simulation(fake_ctx, session_id="ended")
+
+        session = await session_manager.get_session("ended")
+        assert session.state == "ended"
+
+
+# ---------------------------------------------------------------------------
+# TestStepSimulation — both engines
+# ---------------------------------------------------------------------------
+
 
 class TestStepSimulation:
-    async def test_step_simulation_single(self, session_manager, tmp_inp):
+    async def test_step_simulation_single(self, fake_ctx, inp_path, engine):
         from openswmm_mcp.tools.lifecycle import open_model, step_simulation
 
-        ctx = MockContext(session_manager)
-        await open_model(ctx, inp_path=tmp_inp, session_id="step1")
+        await open_model(
+            fake_ctx, inp_path=inp_path, session_id="step1", engine=engine
+        )
 
-        result = await step_simulation(ctx, session_id="step1", num_steps=1)
+        result = await step_simulation(fake_ctx, session_id="step1", num_steps=1)
 
         assert isinstance(result, StepResult)
         assert result.steps_taken == 1
         assert result.completed is False
 
-    async def test_step_simulation_multiple(self, session_manager, tmp_inp):
+    async def test_step_simulation_multiple(self, fake_ctx, inp_path, engine):
         from openswmm_mcp.tools.lifecycle import open_model, step_simulation
 
-        ctx = MockContext(session_manager)
-        await open_model(ctx, inp_path=tmp_inp, session_id="step5")
+        await open_model(
+            fake_ctx, inp_path=inp_path, session_id="step5", engine=engine
+        )
 
-        result = await step_simulation(ctx, session_id="step5", num_steps=5)
+        result = await step_simulation(fake_ctx, session_id="step5", num_steps=5)
 
         assert result.steps_taken == 5
         assert result.completed is False
 
-    async def test_step_simulation_to_completion(self, session_manager, tmp_inp):
+    async def test_step_simulation_to_completion(
+        self, fake_ctx, inp_path, engine
+    ):
         from openswmm_mcp.tools.lifecycle import open_model, step_simulation
 
-        ctx = MockContext(session_manager)
-        await open_model(ctx, inp_path=tmp_inp, session_id="stepall")
+        await open_model(
+            fake_ctx, inp_path=inp_path, session_id="stepall", engine=engine
+        )
 
-        # Step far beyond the 100-step limit to ensure completion
-        result = await step_simulation(ctx, session_id="stepall", num_steps=200)
+        # site_drainage_model.inp runs 30 h at 5 s routing step = ~21 600 steps;
+        # over-step generously to guarantee completion within one call.
+        result = await step_simulation(
+            fake_ctx, session_id="stepall", num_steps=100_000
+        )
 
         assert result.completed is True
-        assert result.steps_taken == 100
+        assert result.steps_taken > 0
 
-    async def test_step_auto_starts(self, session_manager, tmp_inp):
+    async def test_step_auto_starts(
+        self, fake_ctx, inp_path, session_manager, engine
+    ):
         from openswmm_mcp.tools.lifecycle import open_model, step_simulation
 
-        ctx = MockContext(session_manager)
-        await open_model(ctx, inp_path=tmp_inp, session_id="autostart")
+        await open_model(
+            fake_ctx, inp_path=inp_path, session_id="autostart", engine=engine
+        )
 
-        # Session is in "initialized" state; step should auto-start
         session = await session_manager.get_session("autostart")
         assert session.state == "initialized"
 
-        await step_simulation(ctx, session_id="autostart", num_steps=1)
+        await step_simulation(fake_ctx, session_id="autostart", num_steps=1)
 
         session = await session_manager.get_session("autostart")
         assert session.state == "running"
 
 
+# ---------------------------------------------------------------------------
+# TestCloseModel
+# ---------------------------------------------------------------------------
+
+
 class TestCloseModel:
-    async def test_close_model(self, session_manager, tmp_inp):
+    async def test_close_model(self, fake_ctx, inp_path, session_manager, engine):
         from openswmm_mcp.tools.lifecycle import close_model, open_model
 
-        ctx = MockContext(session_manager)
-        await open_model(ctx, inp_path=tmp_inp, session_id="close")
+        await open_model(
+            fake_ctx, inp_path=inp_path, session_id="close", engine=engine
+        )
 
-        result = await close_model(ctx, session_id="close")
+        result = await close_model(fake_ctx, session_id="close")
 
         assert result["status"] == "closed"
         assert result["session_id"] == "close"
@@ -185,31 +249,47 @@ class TestCloseModel:
         with pytest.raises(ToolError):
             await session_manager.get_session("close")
 
-    async def test_close_nonexistent(self, session_manager):
+    async def test_close_nonexistent(self, fake_ctx):
         from openswmm_mcp.tools.lifecycle import close_model
 
-        ctx = MockContext(session_manager)
         with pytest.raises(ToolError, match="SESSION_NOT_FOUND"):
-            await close_model(ctx, session_id="nope")
+            await close_model(fake_ctx, session_id="nope")
+
+
+# ---------------------------------------------------------------------------
+# TestListSessions
+# ---------------------------------------------------------------------------
 
 
 class TestListSessions:
-    async def test_list_sessions_empty(self, session_manager):
+    async def test_list_sessions_empty(self, fake_ctx):
         from openswmm_mcp.tools.lifecycle import list_sessions
 
-        ctx = MockContext(session_manager)
-        result = await list_sessions(ctx)
-
+        result = await list_sessions(fake_ctx)
         assert result == []
 
-    async def test_list_sessions_after_open(self, session_manager, tmp_inp):
+    async def test_list_sessions_after_open(self, fake_ctx, inp_path):
         from openswmm_mcp.tools.lifecycle import list_sessions, open_model
 
-        ctx = MockContext(session_manager)
-        await open_model(ctx, inp_path=tmp_inp, session_id="listed")
+        await open_model(fake_ctx, inp_path=inp_path, session_id="listed")
 
-        result = await list_sessions(ctx)
+        result = await list_sessions(fake_ctx)
 
         assert len(result) == 1
         assert result[0]["id"] == "listed"
         assert result[0]["state"] == "initialized"
+        assert result[0]["engine"] == "openswmm"
+
+    async def test_list_sessions_mixed_engines(self, fake_ctx, inp_path):
+        from openswmm_mcp.tools.lifecycle import list_sessions, open_model
+
+        await open_model(
+            fake_ctx, inp_path=inp_path, session_id="ows", engine="openswmm"
+        )
+        await open_model(
+            fake_ctx, inp_path=inp_path, session_id="leg", engine="legacy"
+        )
+
+        result = await list_sessions(fake_ctx)
+        engines = {s["id"]: s["engine"] for s in result}
+        assert engines == {"ows": "openswmm", "leg": "legacy"}

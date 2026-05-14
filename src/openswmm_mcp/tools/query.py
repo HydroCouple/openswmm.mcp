@@ -57,6 +57,8 @@ async def _build_node_info(session, nodes, index: int) -> NodeInfo:
     lat_inflow: float | None = None
     overflow: float | None = None
 
+    outfall_route_to: int | None = None
+
     if session.state in ("running", "ended"):
         try:
             depth = await asyncio.to_thread(nodes.get_depth, index)
@@ -64,6 +66,15 @@ async def _build_node_info(session, nodes, index: int) -> NodeInfo:
             volume = await asyncio.to_thread(nodes.get_volume, index)
             lat_inflow = await asyncio.to_thread(nodes.get_lateral_inflow, index)
             overflow = await asyncio.to_thread(nodes.get_overflow, index)
+        except Exception:
+            pass
+
+    # Outfall route-to subcatchment (available in any state)
+    if hasattr(nodes, "get_outfall_route_to"):
+        try:
+            rt = await asyncio.to_thread(nodes.get_outfall_route_to, index)
+            if rt >= 0:
+                outfall_route_to = rt
         except Exception:
             pass
 
@@ -78,6 +89,7 @@ async def _build_node_info(session, nodes, index: int) -> NodeInfo:
         volume=volume,
         lateral_inflow=lat_inflow,
         overflow=overflow,
+        outfall_route_to=outfall_route_to,
     )
 
 
@@ -98,6 +110,11 @@ async def _build_link_info(session, links, nodes, index: int) -> LinkInfo:
     velocity: float | None = None
     capacity: float | None = None
 
+    hydraulic_power: float | None = None
+    pump_cycles: int | None = None
+    pump_on_time: float | None = None
+    pump_volume: float | None = None
+
     if session.state in ("running", "ended"):
         try:
             flow = await asyncio.to_thread(links.get_flow, index)
@@ -106,6 +123,22 @@ async def _build_link_info(session, links, nodes, index: int) -> LinkInfo:
             capacity = await asyncio.to_thread(links.get_capacity, index)
         except Exception:
             pass
+
+        # Hydraulic power (available for all link types)
+        if hasattr(links, "get_hyd_power"):
+            try:
+                hydraulic_power = await asyncio.to_thread(links.get_hyd_power, index)
+            except Exception:
+                pass
+
+        # Pump statistics (only for PUMP type links, type_code == 1)
+        if type_code == 1 and hasattr(links, "get_stat_pump_cycles"):
+            try:
+                pump_cycles = await asyncio.to_thread(links.get_stat_pump_cycles, index)
+                pump_on_time = await asyncio.to_thread(links.get_stat_pump_on_time, index)
+                pump_volume = await asyncio.to_thread(links.get_stat_pump_volume, index)
+            except Exception:
+                pass
 
     return LinkInfo(
         link_id=link_id,
@@ -119,6 +152,10 @@ async def _build_link_info(session, links, nodes, index: int) -> LinkInfo:
         depth=depth,
         velocity=velocity,
         capacity=capacity,
+        hydraulic_power=hydraulic_power,
+        pump_cycles=pump_cycles,
+        pump_on_time=pump_on_time,
+        pump_volume=pump_volume,
     )
 
 
@@ -343,13 +380,24 @@ async def get_system_summary(
     end_time = await asyncio.to_thread(solver.get_end_time)
     routing_step = await asyncio.to_thread(solver.get_routing_step)
 
+    _FLOW_UNITS = {0: "CFS", 1: "GPM", 2: "MGD", 3: "CMS", 4: "LPS", 5: "MLD"}
+    _ROUTE_MODELS = {0: "STEADY", 1: "KINWAVE", 2: "DYNWAVE"}
+
     try:
-        flow_units = await asyncio.to_thread(solver.get_option, "FLOW_UNITS")
+        raw_units = await asyncio.to_thread(solver.get_option, "FLOW_UNITS")
+        try:
+            flow_units = _FLOW_UNITS.get(int(raw_units), "UNKNOWN")
+        except (ValueError, TypeError):
+            flow_units = str(raw_units).upper() or "UNKNOWN"
     except Exception:
         flow_units = "UNKNOWN"
 
     try:
-        route_model = await asyncio.to_thread(solver.get_option, "ROUTING_MODEL")
+        raw_route = await asyncio.to_thread(solver.get_option, "FLOW_ROUTING")
+        try:
+            route_model = _ROUTE_MODELS.get(int(raw_route), "UNKNOWN")
+        except (ValueError, TypeError):
+            route_model = str(raw_route).upper() or "UNKNOWN"
     except Exception:
         route_model = "UNKNOWN"
 
@@ -360,9 +408,43 @@ async def get_system_summary(
         except Exception:
             pass
 
+    # Extended fields from refactored engine
+    surcharge_method: str | None = None
+    dps_celerity: float | None = None
+    dps_alpha: float | None = None
+    dps_decay_time: float | None = None
+    event_count: int | None = None
+    steady_state_skip: bool | None = None
+
+    try:
+        surcharge_method = await asyncio.to_thread(solver.get_option, "SURCHARGE_METHOD")
+    except Exception:
+        pass
+
+    if surcharge_method and "DYNAMIC" in str(surcharge_method).upper():
+        try:
+            dps_celerity = float(await asyncio.to_thread(solver.get_option, "DPS_CELERITY"))
+            dps_alpha = float(await asyncio.to_thread(solver.get_option, "DPS_ALPHA"))
+            dps_decay_time = float(await asyncio.to_thread(solver.get_option, "DPS_DECAY_TIME"))
+        except Exception:
+            pass
+
+    if hasattr(solver, "get_event_count"):
+        try:
+            event_count = await asyncio.to_thread(solver.get_event_count)
+        except Exception:
+            pass
+
+    if hasattr(solver, "get_steady_state_skip"):
+        try:
+            steady_state_skip = await asyncio.to_thread(solver.get_steady_state_skip)
+        except Exception:
+            pass
+
     return SystemSummary(
         session_id=session_id,
         state=session.state,
+        engine=session.engine_kind,
         node_count=node_count,
         link_count=link_count,
         subcatchment_count=subcatch_count,
@@ -374,6 +456,12 @@ async def get_system_summary(
         end_time=end_time,
         routing_step=routing_step,
         current_time=current_time,
+        surcharge_method=surcharge_method,
+        dps_celerity=dps_celerity,
+        dps_alpha=dps_alpha,
+        dps_decay_time=dps_decay_time,
+        event_count=event_count,
+        steady_state_skip=steady_state_skip,
     )
 
 

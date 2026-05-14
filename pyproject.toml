@@ -3,8 +3,8 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "openswmm-mcp"
-version = "0.1.0"
+name = "openswmm.mcp"
+version = "0.1.0.dev0"
 description = "MCP server for the OpenSWMM stormwater engine"
 readme = "README.md"
 license = "MIT"
@@ -25,7 +25,7 @@ classifiers = [
 ]
 dependencies = [
     "fastmcp[auth]>=3.0",
-    "openswmm>=6.0.0a1",
+    "openswmm",
     "pydantic>=2.0",
     "pydantic-settings>=2.0",
     "numpy>=1.21",
@@ -46,7 +46,7 @@ docs = [
 ]
 
 [project.scripts]
-openswmm-mcp = "openswmm_mcp.__main__:main"
+"openswmm.mcp" = "openswmm_mcp.__main__:main"
 
 [project.urls]
 Homepage = "https://github.com/HydroCouple/openswmm.mcp"
