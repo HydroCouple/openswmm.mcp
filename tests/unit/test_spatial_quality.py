@@ -14,7 +14,6 @@ from openswmm_mcp.tools.spatial_quality import (
     set_treatment,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -39,9 +38,7 @@ async def _open_and_step(fake_ctx, inp_path, session_id):
 
 
 class TestGetCoordinates:
-    async def test_get_node_coordinates_after_set(
-        self, fake_ctx, inp_path, reference_model
-    ):
+    async def test_get_node_coordinates_after_set(self, fake_ctx, inp_path, reference_model):
         """set_coordinates then get_coordinates round-trips for a node."""
         await _open(fake_ctx, inp_path, "coord_node")
         await set_coordinates(
@@ -65,9 +62,7 @@ class TestGetCoordinates:
         assert result.x == pytest.approx(300.0)
         assert result.y == pytest.approx(400.0)
 
-    async def test_get_link_coordinates_after_set(
-        self, fake_ctx, inp_path, reference_model
-    ):
+    async def test_get_link_coordinates_after_set(self, fake_ctx, inp_path, reference_model):
         """set_coordinates then get_coordinates round-trips for a link."""
         await _open(fake_ctx, inp_path, "coord_link")
         await set_coordinates(
@@ -146,9 +141,7 @@ class TestGetCoordinates:
 
 
 class TestSetCoordinates:
-    async def test_set_coordinates_returns_status(
-        self, fake_ctx, inp_path, reference_model
-    ):
+    async def test_set_coordinates_returns_status(self, fake_ctx, inp_path, reference_model):
         """set_coordinates returns a dict with status 'updated'."""
         await _open(fake_ctx, inp_path, "set_coord")
         result = await set_coordinates(
@@ -187,9 +180,7 @@ class TestSetCoordinates:
 
 
 class TestGetQuality:
-    async def test_get_quality_returns_dict(
-        self, fake_ctx, inp_path, reference_model
-    ):
+    async def test_get_quality_returns_dict(self, fake_ctx, inp_path, reference_model):
         """get_quality returns a dict of pollutant concentrations after stepping."""
         await _open_and_step(fake_ctx, inp_path, "qual_step")
         result = await get_quality(
@@ -203,9 +194,7 @@ class TestGetQuality:
         assert result["element_id"] == reference_model.FIRST_NODE_ID
         assert isinstance(result["quality"], dict)
 
-    async def test_get_quality_known_pollutant(
-        self, fake_ctx, inp_path, reference_model
-    ):
+    async def test_get_quality_known_pollutant(self, fake_ctx, inp_path, reference_model):
         """get_quality returns only the named pollutant when specified."""
         if reference_model.POLLUTANT_COUNT == 0:
             pytest.skip("Model has no pollutants.")
@@ -222,9 +211,7 @@ class TestGetQuality:
         assert reference_model.POLLUTANT_ID in result["quality"]
         assert len(result["quality"]) == 1
 
-    async def test_get_quality_unknown_pollutant(
-        self, fake_ctx, inp_path, reference_model
-    ):
+    async def test_get_quality_unknown_pollutant(self, fake_ctx, inp_path, reference_model):
         """get_quality raises ToolError for an unknown pollutant name."""
         if reference_model.POLLUTANT_COUNT == 0:
             pytest.skip("Model has no pollutants.")
@@ -252,9 +239,7 @@ class TestGetQuality:
                 element_id="",
             )
 
-    async def test_get_quality_no_pollutants(
-        self, fake_ctx, inp_path, reference_model
-    ):
+    async def test_get_quality_no_pollutants(self, fake_ctx, inp_path, reference_model):
         """get_quality returns empty dict when model has no pollutants."""
         if reference_model.POLLUTANT_COUNT > 0:
             pytest.skip("Model has pollutants — skipping no-pollutant test.")

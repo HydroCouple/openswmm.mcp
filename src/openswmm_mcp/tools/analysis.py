@@ -224,9 +224,7 @@ async def get_statistics(
         nodes = session.nodes
         idx = await asyncio.to_thread(nodes.get_index, element_id)
         if idx < 0:
-            raise ToolError(
-                f"[{ErrorCode.ELEMENT_NOT_FOUND}] Node '{element_id}' not found."
-            )
+            raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Node '{element_id}' not found.")
         try:
             return {
                 "element_type": "node",
@@ -246,9 +244,7 @@ async def get_statistics(
         links = session.links
         idx = await asyncio.to_thread(links.get_index, element_id)
         if idx < 0:
-            raise ToolError(
-                f"[{ErrorCode.ELEMENT_NOT_FOUND}] Link '{element_id}' not found."
-            )
+            raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Link '{element_id}' not found.")
         try:
             return {
                 "element_type": "link",
@@ -466,9 +462,7 @@ async def get_time_series(
         var_enum = _resolve_node_var(variable)
         node_idx = await asyncio.to_thread(session.nodes.get_index, element_id)
         if node_idx < 0:
-            raise ToolError(
-                f"[{ErrorCode.ELEMENT_NOT_FOUND}] Node '{element_id}' not found."
-            )
+            raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Node '{element_id}' not found.")
         raw = await asyncio.to_thread(
             reader.get_node_series, node_idx, var_enum, start_period, end_period
         )
@@ -476,9 +470,7 @@ async def get_time_series(
         var_enum = _resolve_link_var(variable)
         link_idx = await asyncio.to_thread(session.links.get_index, element_id)
         if link_idx < 0:
-            raise ToolError(
-                f"[{ErrorCode.ELEMENT_NOT_FOUND}] Link '{element_id}' not found."
-            )
+            raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Link '{element_id}' not found.")
         raw = await asyncio.to_thread(
             reader.get_link_series, link_idx, var_enum, start_period, end_period
         )
@@ -490,7 +482,11 @@ async def get_time_series(
                 f"[{ErrorCode.ELEMENT_NOT_FOUND}] Subcatchment '{element_id}' not found."
             )
         raw = await asyncio.to_thread(
-            reader.get_subcatch_series, sc_idx, var_enum, start_period, end_period,
+            reader.get_subcatch_series,
+            sc_idx,
+            var_enum,
+            start_period,
+            end_period,
         )
     else:  # system
         var_enum = _resolve_system_var(variable)
@@ -724,9 +720,7 @@ async def compare_scenarios(
 
         async def _get_series(reader, idx):
             n = await asyncio.to_thread(reader.get_period_count)
-            return await asyncio.to_thread(
-                reader.get_subcatch_series, idx, var_enum, 0, n - 1
-            )
+            return await asyncio.to_thread(reader.get_subcatch_series, idx, var_enum, 0, n - 1)
 
     else:
         raise ToolError(

@@ -12,7 +12,6 @@ import pytest
 from openswmm_mcp.errors import ToolError
 from openswmm_mcp.models import ModelSummary, SimulationResult, StepResult
 
-
 # ---------------------------------------------------------------------------
 # TestOpenModel — both engines
 # ---------------------------------------------------------------------------
@@ -30,14 +29,10 @@ class TestOpenModel:
         assert result.state == "initialized"
         assert result.engine == "openswmm"
 
-    async def test_open_model_each_engine(
-        self, fake_ctx, inp_path, engine, reference_model
-    ):
+    async def test_open_model_each_engine(self, fake_ctx, inp_path, engine, reference_model):
         from openswmm_mcp.tools.lifecycle import open_model
 
-        result = await open_model(
-            fake_ctx, inp_path=inp_path, session_id="t", engine=engine
-        )
+        result = await open_model(fake_ctx, inp_path=inp_path, session_id="t", engine=engine)
 
         assert result.engine == engine
         assert result.state == "initialized"
@@ -68,22 +63,16 @@ class TestOpenModel:
         assert result.flow_units == "CFS"  # legacy can read FLOW_UNITS
         assert result.route_model == "UNKNOWN"
 
-    async def test_open_model_timing(
-        self, fake_ctx, inp_path, engine, reference_model
-    ):
+    async def test_open_model_timing(self, fake_ctx, inp_path, engine, reference_model):
         from openswmm_mcp.tools.lifecycle import open_model
 
-        result = await open_model(
-            fake_ctx, inp_path=inp_path, session_id="timing", engine=engine
-        )
+        result = await open_model(fake_ctx, inp_path=inp_path, session_id="timing", engine=engine)
 
         # Both backends present elapsed-day floats; the actual epoch differs
         # (openswmm uses Julian, legacy uses simulation-start = 0.0), so we
         # assert on the *duration*, not absolute values.
         duration = result.end_time - result.start_time
-        assert duration == pytest.approx(
-            reference_model.EXPECTED_DURATION_DAYS, rel=1e-3
-        )
+        assert duration == pytest.approx(reference_model.EXPECTED_DURATION_DAYS, rel=1e-3)
         assert result.routing_step == pytest.approx(
             reference_model.EXPECTED_ROUTING_STEP_SECS, rel=1e-3
         )
@@ -100,9 +89,7 @@ class TestOpenModel:
         from openswmm_mcp.tools.lifecycle import open_model
 
         with pytest.raises(ToolError, match="Unknown engine"):
-            await open_model(
-                fake_ctx, inp_path=inp_path, session_id="bad", engine="unknown"
-            )
+            await open_model(fake_ctx, inp_path=inp_path, session_id="bad", engine="unknown")
 
 
 # ---------------------------------------------------------------------------
@@ -114,9 +101,7 @@ class TestRunSimulation:
     async def test_run_simulation_completes(self, fake_ctx, inp_path, engine):
         from openswmm_mcp.tools.lifecycle import open_model, run_simulation
 
-        await open_model(
-            fake_ctx, inp_path=inp_path, session_id="run", engine=engine
-        )
+        await open_model(fake_ctx, inp_path=inp_path, session_id="run", engine=engine)
 
         result = await run_simulation(fake_ctx, session_id="run")
 
@@ -152,9 +137,7 @@ class TestRunSimulation:
     ):
         from openswmm_mcp.tools.lifecycle import open_model, run_simulation
 
-        await open_model(
-            fake_ctx, inp_path=inp_path, session_id="ended", engine=engine
-        )
+        await open_model(fake_ctx, inp_path=inp_path, session_id="ended", engine=engine)
         await run_simulation(fake_ctx, session_id="ended")
 
         session = await session_manager.get_session("ended")
@@ -170,9 +153,7 @@ class TestStepSimulation:
     async def test_step_simulation_single(self, fake_ctx, inp_path, engine):
         from openswmm_mcp.tools.lifecycle import open_model, step_simulation
 
-        await open_model(
-            fake_ctx, inp_path=inp_path, session_id="step1", engine=engine
-        )
+        await open_model(fake_ctx, inp_path=inp_path, session_id="step1", engine=engine)
 
         result = await step_simulation(fake_ctx, session_id="step1", num_steps=1)
 
@@ -183,41 +164,29 @@ class TestStepSimulation:
     async def test_step_simulation_multiple(self, fake_ctx, inp_path, engine):
         from openswmm_mcp.tools.lifecycle import open_model, step_simulation
 
-        await open_model(
-            fake_ctx, inp_path=inp_path, session_id="step5", engine=engine
-        )
+        await open_model(fake_ctx, inp_path=inp_path, session_id="step5", engine=engine)
 
         result = await step_simulation(fake_ctx, session_id="step5", num_steps=5)
 
         assert result.steps_taken == 5
         assert result.completed is False
 
-    async def test_step_simulation_to_completion(
-        self, fake_ctx, inp_path, engine
-    ):
+    async def test_step_simulation_to_completion(self, fake_ctx, inp_path, engine):
         from openswmm_mcp.tools.lifecycle import open_model, step_simulation
 
-        await open_model(
-            fake_ctx, inp_path=inp_path, session_id="stepall", engine=engine
-        )
+        await open_model(fake_ctx, inp_path=inp_path, session_id="stepall", engine=engine)
 
         # site_drainage_model.inp runs 30 h at 5 s routing step = ~21 600 steps;
         # over-step generously to guarantee completion within one call.
-        result = await step_simulation(
-            fake_ctx, session_id="stepall", num_steps=100_000
-        )
+        result = await step_simulation(fake_ctx, session_id="stepall", num_steps=100_000)
 
         assert result.completed is True
         assert result.steps_taken > 0
 
-    async def test_step_auto_starts(
-        self, fake_ctx, inp_path, session_manager, engine
-    ):
+    async def test_step_auto_starts(self, fake_ctx, inp_path, session_manager, engine):
         from openswmm_mcp.tools.lifecycle import open_model, step_simulation
 
-        await open_model(
-            fake_ctx, inp_path=inp_path, session_id="autostart", engine=engine
-        )
+        await open_model(fake_ctx, inp_path=inp_path, session_id="autostart", engine=engine)
 
         session = await session_manager.get_session("autostart")
         assert session.state == "initialized"
@@ -237,9 +206,7 @@ class TestCloseModel:
     async def test_close_model(self, fake_ctx, inp_path, session_manager, engine):
         from openswmm_mcp.tools.lifecycle import close_model, open_model
 
-        await open_model(
-            fake_ctx, inp_path=inp_path, session_id="close", engine=engine
-        )
+        await open_model(fake_ctx, inp_path=inp_path, session_id="close", engine=engine)
 
         result = await close_model(fake_ctx, session_id="close")
 
@@ -283,12 +250,8 @@ class TestListSessions:
     async def test_list_sessions_mixed_engines(self, fake_ctx, inp_path):
         from openswmm_mcp.tools.lifecycle import list_sessions, open_model
 
-        await open_model(
-            fake_ctx, inp_path=inp_path, session_id="ows", engine="openswmm"
-        )
-        await open_model(
-            fake_ctx, inp_path=inp_path, session_id="leg", engine="legacy"
-        )
+        await open_model(fake_ctx, inp_path=inp_path, session_id="ows", engine="openswmm")
+        await open_model(fake_ctx, inp_path=inp_path, session_id="leg", engine="legacy")
 
         result = await list_sessions(fake_ctx)
         engines = {s["id"]: s["engine"] for s in result}

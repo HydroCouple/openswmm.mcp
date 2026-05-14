@@ -10,7 +10,6 @@ from openswmm_mcp.errors import ToolError
 from openswmm_mcp.models import HotStartResult
 from openswmm_mcp.tools.hotstart import clone_session, load_hotstart, save_hotstart
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -150,9 +149,7 @@ class TestCloneSession:
         with pytest.raises(ToolError, match="target_id is required"):
             await clone_session(fake_ctx, source_id="source", target_id="")
 
-    async def test_clone_session_source_must_be_running_or_ended(
-        self, fake_ctx, inp_path
-    ):
+    async def test_clone_session_source_must_be_running_or_ended(self, fake_ctx, inp_path):
         """clone_session rejects source sessions not in 'running' or 'ended' state."""
         await _open(fake_ctx, inp_path, "hs_uninit")
         # Session is "initialized" — not valid for cloning

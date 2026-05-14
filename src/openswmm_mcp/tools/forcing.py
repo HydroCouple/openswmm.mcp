@@ -146,8 +146,7 @@ async def set_forcing(
     element_idx = await asyncio.to_thread(accessor.get_index, element_id)
     if element_idx < 0:
         raise ToolError(
-            f"[{ErrorCode.ELEMENT_NOT_FOUND}] {target_lower.capitalize()} "
-            f"'{element_id}' not found."
+            f"[{ErrorCode.ELEMENT_NOT_FOUND}] {target_lower.capitalize()} '{element_id}' not found."
         )
 
     forcing = session.forcing
@@ -233,14 +232,16 @@ async def clear_forcing(
             )
         # clear(target_type_code, element_idx): NODE=0, LINK=1, SUBCATCH=2, GAGE=3
         _type_codes = {"node": 0, "link": 1, "subcatchment": 2, "gage": 3}
-        _accessor_map = {"node": "nodes", "link": "links",
-                         "subcatchment": "subcatchments", "gage": "gages"}
+        _accessor_map = {
+            "node": "nodes",
+            "link": "links",
+            "subcatchment": "subcatchments",
+            "gage": "gages",
+        }
         type_lower = target_type.strip().lower()
         type_code = _type_codes.get(type_lower)
         if type_code is None:
-            raise ToolError(
-                f"[{ErrorCode.VALIDATION_ERROR}] Unknown target_type '{target_type}'."
-            )
+            raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] Unknown target_type '{target_type}'.")
         accessor = getattr(session, _accessor_map[type_lower])
         element_idx = await asyncio.to_thread(accessor.get_index, element_id)
         if element_idx < 0:

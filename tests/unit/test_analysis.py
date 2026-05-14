@@ -17,8 +17,6 @@ from openswmm_mcp.models import (
     TimeSeries,
 )
 
-
-# ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
 
@@ -59,8 +57,9 @@ class TestGetStatistics:
         from openswmm_mcp.tools.analysis import get_statistics
 
         ctx = await _open_and_step(session_manager, tmp_inp, "stat_node")
-        result = await get_statistics(ctx, session_id="stat_node", element_type="node", element_id="J1")
-
+        result = await get_statistics(
+            ctx, session_id="stat_node", element_type="node", element_id="J1"
+        )
         assert result["element_type"] == "node"
         assert result["element_id"] == "J1"
         assert "max_depth" in result
@@ -75,7 +74,9 @@ class TestGetStatistics:
         from openswmm_mcp.tools.analysis import get_statistics
 
         ctx = await _open_and_step(session_manager, tmp_inp, "stat_outfall")
-        result = await get_statistics(ctx, session_id="stat_outfall", element_type="node", element_id="O1")
+        result = await get_statistics(
+            ctx, session_id="stat_outfall", element_type="node", element_id="O1"
+        )
 
         assert result["element_id"] == "O1"
         assert result["max_depth"] >= 0
@@ -84,7 +85,9 @@ class TestGetStatistics:
         from openswmm_mcp.tools.analysis import get_statistics
 
         ctx = await _open_and_step(session_manager, tmp_inp, "stat_link")
-        result = await get_statistics(ctx, session_id="stat_link", element_type="link", element_id="C1")
+        result = await get_statistics(
+            ctx, session_id="stat_link", element_type="link", element_id="C1"
+        )
 
         assert result["element_type"] == "link"
         assert result["element_id"] == "C1"
@@ -99,7 +102,12 @@ class TestGetStatistics:
         from openswmm_mcp.tools.analysis import get_statistics
 
         ctx = await _open_and_step(session_manager, tmp_inp, "stat_sc")
-        result = await get_statistics(ctx, session_id="stat_sc", element_type="subcatchment", element_id="S1")
+        result = await get_statistics(
+            ctx,
+            session_id="stat_sc",
+            element_type="subcatchment",
+            element_id="S1",
+        )
 
         assert result["element_type"] == "subcatchment"
         assert result["element_id"] == "S1"
@@ -111,7 +119,12 @@ class TestGetStatistics:
 
         ctx = await _open_and_step(session_manager, tmp_inp, "stat_bad_node")
         with pytest.raises(ToolError, match="ELEMENT_NOT_FOUND"):
-            await get_statistics(ctx, session_id="stat_bad_node", element_type="node", element_id="NOEXIST")
+            await get_statistics(
+                ctx,
+                session_id="stat_bad_node",
+                element_type="node",
+                element_id="NOEXIST",
+            )
 
     async def test_empty_element_id_raises(self, session_manager, tmp_inp):
         from openswmm_mcp.tools.analysis import get_statistics
@@ -125,7 +138,12 @@ class TestGetStatistics:
 
         ctx = await _open_and_step(session_manager, tmp_inp, "stat_badtype")
         with pytest.raises(ToolError, match="VALIDATION_ERROR"):
-            await get_statistics(ctx, session_id="stat_badtype", element_type="bogus", element_id="J1")
+            await get_statistics(
+                ctx,
+                session_id="stat_badtype",
+                element_type="bogus",
+                element_id="J1",
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -146,7 +164,9 @@ class TestGetMassBalance:
         assert -5.0 < result.runoff_continuity_error < 5.0
         assert -5.0 < result.routing_continuity_error < 5.0
 
-    async def test_mass_balance_has_pollutant_error(self, session_manager, tmp_inp, reference_model):
+    async def test_mass_balance_has_pollutant_error(
+        self, session_manager, tmp_inp, reference_model
+    ):
         from openswmm_mcp.tools.analysis import get_mass_balance
 
         ctx = await _open_and_run(session_manager, tmp_inp, "mb_qual")
@@ -286,8 +306,9 @@ class TestGetTimeSeries:
         from openswmm_mcp.tools.analysis import get_time_series
 
         ctx = await _open_and_run(session_manager, tmp_inp, "ts_node")
-        result = await get_time_series(ctx, session_id="ts_node", element_type="node",
-                                       element_id="J1", variable="depth")
+        result = await get_time_series(
+            ctx, session_id="ts_node", element_type="node", element_id="J1", variable="depth"
+        )
 
         assert isinstance(result, TimeSeries)
         assert result.element_type == "node"
@@ -301,8 +322,9 @@ class TestGetTimeSeries:
         from openswmm_mcp.tools.analysis import get_time_series
 
         ctx = await _open_and_run(session_manager, tmp_inp, "ts_link")
-        result = await get_time_series(ctx, session_id="ts_link", element_type="link",
-                                       element_id="C1", variable="flow")
+        result = await get_time_series(
+            ctx, session_id="ts_link", element_type="link", element_id="C1", variable="flow"
+        )
 
         assert isinstance(result, TimeSeries)
         assert result.element_id == "C1"
@@ -312,8 +334,9 @@ class TestGetTimeSeries:
         from openswmm_mcp.tools.analysis import get_time_series
 
         ctx = await _open_and_run(session_manager, tmp_inp, "ts_sc")
-        result = await get_time_series(ctx, session_id="ts_sc", element_type="subcatchment",
-                                       element_id="S1", variable="runoff")
+        result = await get_time_series(
+            ctx, session_id="ts_sc", element_type="subcatchment", element_id="S1", variable="runoff"
+        )
 
         assert isinstance(result, TimeSeries)
         assert result.element_id == "S1"
@@ -323,8 +346,9 @@ class TestGetTimeSeries:
         from openswmm_mcp.tools.analysis import get_time_series
 
         ctx = await _open_and_run(session_manager, tmp_inp, "ts_sys")
-        result = await get_time_series(ctx, session_id="ts_sys", element_type="system",
-                                       variable="rainfall")
+        result = await get_time_series(
+            ctx, session_id="ts_sys", element_type="system", variable="rainfall"
+        )
 
         assert isinstance(result, TimeSeries)
         assert result.element_type == "system"
@@ -334,10 +358,22 @@ class TestGetTimeSeries:
         from openswmm_mcp.tools.analysis import get_time_series
 
         ctx = await _open_and_run(session_manager, tmp_inp, "ts_ds")
-        full = await get_time_series(ctx, session_id="ts_ds", element_type="node",
-                                     element_id="J1", variable="depth", downsample=1)
-        downsampled = await get_time_series(ctx, session_id="ts_ds", element_type="node",
-                                            element_id="J1", variable="depth", downsample=10)
+        full = await get_time_series(
+            ctx,
+            session_id="ts_ds",
+            element_type="node",
+            element_id="J1",
+            variable="depth",
+            downsample=1,
+        )
+        downsampled = await get_time_series(
+            ctx,
+            session_id="ts_ds",
+            element_type="node",
+            element_id="J1",
+            variable="depth",
+            downsample=10,
+        )
 
         assert len(downsampled.values) < len(full.values)
 
@@ -346,16 +382,18 @@ class TestGetTimeSeries:
 
         ctx = await _open_and_run(session_manager, tmp_inp, "ts_bad")
         with pytest.raises(ToolError, match="ELEMENT_NOT_FOUND"):
-            await get_time_series(ctx, session_id="ts_bad", element_type="node",
-                                  element_id="NOPE", variable="depth")
+            await get_time_series(
+                ctx, session_id="ts_bad", element_type="node", element_id="NOPE", variable="depth"
+            )
 
     async def test_invalid_variable_raises(self, session_manager, tmp_inp):
         from openswmm_mcp.tools.analysis import get_time_series
 
         ctx = await _open_and_run(session_manager, tmp_inp, "ts_badvar")
         with pytest.raises(ToolError, match="VALIDATION_ERROR"):
-            await get_time_series(ctx, session_id="ts_badvar", element_type="node",
-                                  element_id="J1", variable="bogus")
+            await get_time_series(
+                ctx, session_id="ts_badvar", element_type="node", element_id="J1", variable="bogus"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -372,6 +410,7 @@ class TestExportResults:
         result = await export_results(ctx, session_id="exp_csv", output_path=out_file, format="csv")
 
         import os
+
         assert result.status == "exported"
         assert result.format == "csv"
         assert result.record_count > 0
@@ -380,11 +419,14 @@ class TestExportResults:
 
     async def test_export_json(self, session_manager, tmp_inp, tmp_path):
         import json
+
         from openswmm_mcp.tools.analysis import export_results
 
         ctx = await _open_and_run(session_manager, tmp_inp, "exp_json")
         out_file = str(tmp_path / "results.json")
-        result = await export_results(ctx, session_id="exp_json", output_path=out_file, format="json")
+        result = await export_results(
+            ctx, session_id="exp_json", output_path=out_file, format="json"
+        )
 
         assert result.status == "exported"
         assert result.format == "json"
@@ -405,8 +447,9 @@ class TestExportResults:
 
         ctx = await _open_and_run(session_manager, tmp_inp, "exp_badfmt")
         with pytest.raises(ToolError, match="VALIDATION_ERROR"):
-            await export_results(ctx, session_id="exp_badfmt",
-                                 output_path=str(tmp_path / "out.xyz"), format="xyz")
+            await export_results(
+                ctx, session_id="exp_badfmt", output_path=str(tmp_path / "out.xyz"), format="xyz"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -425,8 +468,9 @@ class TestCompareScenarios:
         await run_simulation(ctx, session_id="cmp_a")
         await run_simulation(ctx, session_id="cmp_b")
 
-        result = await compare_scenarios(ctx, session_a="cmp_a", session_b="cmp_b",
-                                         element_type="node", variable="depth")
+        result = await compare_scenarios(
+            ctx, session_a="cmp_a", session_b="cmp_b", element_type="node", variable="depth"
+        )
 
         assert result["elements_compared"] > 0
         # Identical runs -> all differences should be near zero
@@ -437,5 +481,6 @@ class TestCompareScenarios:
 
         ctx = _Ctx(session_manager)
         with pytest.raises(ToolError, match="VALIDATION_ERROR"):
-            await compare_scenarios(ctx, session_a="", session_b="b",
-                                    element_type="node", variable="depth")
+            await compare_scenarios(
+                ctx, session_a="", session_b="b", element_type="node", variable="depth"
+            )

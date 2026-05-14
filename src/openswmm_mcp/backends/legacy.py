@@ -35,6 +35,8 @@ from typing import Any
 
 from openswmm.legacy.engine import (
     Solver as LegacySolver,
+)
+from openswmm.legacy.engine import (
     SWMMFlowUnits,
     SWMMLinkProperties,
     SWMMNodeProperties,
@@ -43,7 +45,6 @@ from openswmm.legacy.engine import (
     SWMMSubcatchmentProperties,
     SWMMSystemProperties,
 )
-
 
 # ---------------------------------------------------------------------------
 # Solver adapter
@@ -212,9 +213,7 @@ class _LegacySolverAdapter:
         upper = key.strip().upper()
         if upper == "FLOW_UNITS":
             code = int(
-                self._solver.get_value(
-                    SWMMObjects.SYSTEM, SWMMSystemProperties.FLOW_UNITS, 0
-                )
+                self._solver.get_value(SWMMObjects.SYSTEM, SWMMSystemProperties.FLOW_UNITS, 0)
             )
             try:
                 return _FLOW_UNIT_NAMES[SWMMFlowUnits(code)]
@@ -249,49 +248,31 @@ class _LegacyNodes:
             return -1
 
     def get_type(self, index: int) -> int:
-        return int(
-            self._solver.get_value(SWMMObjects.NODE, SWMMNodeProperties.TYPE, index)
-        )
+        return int(self._solver.get_value(SWMMObjects.NODE, SWMMNodeProperties.TYPE, index))
 
     def get_invert_elev(self, index: int) -> float:
-        return self._solver.get_value(
-            SWMMObjects.NODE, SWMMNodeProperties.INVERT_ELEVATION, index
-        )
+        return self._solver.get_value(SWMMObjects.NODE, SWMMNodeProperties.INVERT_ELEVATION, index)
 
     def get_max_depth(self, index: int) -> float:
-        return self._solver.get_value(
-            SWMMObjects.NODE, SWMMNodeProperties.MAX_DEPTH, index
-        )
+        return self._solver.get_value(SWMMObjects.NODE, SWMMNodeProperties.MAX_DEPTH, index)
 
     def get_depth(self, index: int) -> float:
-        return self._solver.get_value(
-            SWMMObjects.NODE, SWMMNodeProperties.DEPTH, index
-        )
+        return self._solver.get_value(SWMMObjects.NODE, SWMMNodeProperties.DEPTH, index)
 
     def get_head(self, index: int) -> float:
-        return self._solver.get_value(
-            SWMMObjects.NODE, SWMMNodeProperties.HYDRAULIC_HEAD, index
-        )
+        return self._solver.get_value(SWMMObjects.NODE, SWMMNodeProperties.HYDRAULIC_HEAD, index)
 
     def get_volume(self, index: int) -> float:
-        return self._solver.get_value(
-            SWMMObjects.NODE, SWMMNodeProperties.VOLUME, index
-        )
+        return self._solver.get_value(SWMMObjects.NODE, SWMMNodeProperties.VOLUME, index)
 
     def get_lateral_inflow(self, index: int) -> float:
-        return self._solver.get_value(
-            SWMMObjects.NODE, SWMMNodeProperties.LATERAL_INFLOW, index
-        )
+        return self._solver.get_value(SWMMObjects.NODE, SWMMNodeProperties.LATERAL_INFLOW, index)
 
     def get_overflow(self, index: int) -> float:
-        return self._solver.get_value(
-            SWMMObjects.NODE, SWMMNodeProperties.FLOODING, index
-        )
+        return self._solver.get_value(SWMMObjects.NODE, SWMMNodeProperties.FLOODING, index)
 
     def set_lateral_inflow(self, index: int, value: float) -> None:
-        self._solver.set_value(
-            SWMMObjects.NODE, SWMMNodeProperties.LATERAL_INFLOW, index, value
-        )
+        self._solver.set_value(SWMMObjects.NODE, SWMMNodeProperties.LATERAL_INFLOW, index, value)
 
 
 class _LegacyLinks:
@@ -313,26 +294,16 @@ class _LegacyLinks:
             return -1
 
     def get_type(self, index: int) -> int:
-        return int(
-            self._solver.get_value(SWMMObjects.LINK, SWMMLinkProperties.TYPE, index)
-        )
+        return int(self._solver.get_value(SWMMObjects.LINK, SWMMLinkProperties.TYPE, index))
 
     def get_from_node(self, index: int) -> int:
-        return int(
-            self._solver.get_value(
-                SWMMObjects.LINK, SWMMLinkProperties.START_NODE, index
-            )
-        )
+        return int(self._solver.get_value(SWMMObjects.LINK, SWMMLinkProperties.START_NODE, index))
 
     def get_to_node(self, index: int) -> int:
-        return int(
-            self._solver.get_value(SWMMObjects.LINK, SWMMLinkProperties.END_NODE, index)
-        )
+        return int(self._solver.get_value(SWMMObjects.LINK, SWMMLinkProperties.END_NODE, index))
 
     def get_length(self, index: int) -> float:
-        return self._solver.get_value(
-            SWMMObjects.LINK, SWMMLinkProperties.LENGTH, index
-        )
+        return self._solver.get_value(SWMMObjects.LINK, SWMMLinkProperties.LENGTH, index)
 
     def get_roughness(self, index: int) -> float:
         # Legacy doesn't expose roughness via the toolkit get_value API on
@@ -343,34 +314,22 @@ class _LegacyLinks:
         )
 
     def get_max_depth(self, index: int) -> float:
-        return self._solver.get_value(
-            SWMMObjects.LINK, SWMMLinkProperties.FULL_DEPTH, index
-        )
+        return self._solver.get_value(SWMMObjects.LINK, SWMMLinkProperties.FULL_DEPTH, index)
 
     def get_flow(self, index: int) -> float:
-        return self._solver.get_value(
-            SWMMObjects.LINK, SWMMLinkProperties.FLOW, index
-        )
+        return self._solver.get_value(SWMMObjects.LINK, SWMMLinkProperties.FLOW, index)
 
     def get_depth(self, index: int) -> float:
-        return self._solver.get_value(
-            SWMMObjects.LINK, SWMMLinkProperties.DEPTH, index
-        )
+        return self._solver.get_value(SWMMObjects.LINK, SWMMLinkProperties.DEPTH, index)
 
     def get_velocity(self, index: int) -> float:
-        return self._solver.get_value(
-            SWMMObjects.LINK, SWMMLinkProperties.VELOCITY, index
-        )
+        return self._solver.get_value(SWMMObjects.LINK, SWMMLinkProperties.VELOCITY, index)
 
     def get_capacity(self, index: int) -> float:
-        return self._solver.get_value(
-            SWMMObjects.LINK, SWMMLinkProperties.CAPACITY, index
-        )
+        return self._solver.get_value(SWMMObjects.LINK, SWMMLinkProperties.CAPACITY, index)
 
     def set_setting(self, index: int, value: float) -> None:
-        self._solver.set_value(
-            SWMMObjects.LINK, SWMMLinkProperties.SETTING, index, value
-        )
+        self._solver.set_value(SWMMObjects.LINK, SWMMLinkProperties.SETTING, index, value)
 
 
 class _LegacySubcatchments:
@@ -404,9 +363,7 @@ class _LegacySubcatchments:
         if prop is None:
             return None
         try:
-            return (
-                self._solver.get_value(SWMMObjects.SUBCATCHMENT, prop, index) * 100.0
-            )
+            return self._solver.get_value(SWMMObjects.SUBCATCHMENT, prop, index) * 100.0
         except Exception:
             return None
 
@@ -564,27 +521,19 @@ class _LegacyForcing:
             return target
         return accessor.get_index(target)
 
-    def node_lat_inflow(
-        self, target: Any, value: float, mode: int = 0, persist: int = 0
-    ) -> None:
+    def node_lat_inflow(self, target: Any, value: float, mode: int = 0, persist: int = 0) -> None:
         idx = self._resolve_index(self._nodes, target)
         self._nodes.set_lateral_inflow(idx, value)
 
-    def link_setting(
-        self, target: Any, value: float, mode: int = 0, persist: int = 0
-    ) -> None:
+    def link_setting(self, target: Any, value: float, mode: int = 0, persist: int = 0) -> None:
         idx = self._resolve_index(self._links, target)
         self._links.set_setting(idx, value)
 
-    def subcatch_rainfall(
-        self, target: Any, value: float, mode: int = 0, persist: int = 0
-    ) -> None:
+    def subcatch_rainfall(self, target: Any, value: float, mode: int = 0, persist: int = 0) -> None:
         idx = self._resolve_index(self._subcatchments, target)
         self._subcatchments.set_rainfall_override(idx, value)
 
-    def gage_rainfall(
-        self, target: Any, value: float, mode: int = 0, persist: int = 0
-    ) -> None:
+    def gage_rainfall(self, target: Any, value: float, mode: int = 0, persist: int = 0) -> None:
         idx = self._resolve_index(self._gages, target)
         self._gages.set_rainfall(idx, value)
 
@@ -594,9 +543,7 @@ class _LegacyForcing:
         )
 
     def node_quality(self, *args: Any, **kw: Any) -> None:
-        raise NotImplementedError(
-            "Forcing 'node quality' is not supported by the legacy engine."
-        )
+        raise NotImplementedError("Forcing 'node quality' is not supported by the legacy engine.")
 
     def link_flow(self, *args: Any, **kw: Any) -> None:
         raise NotImplementedError(
@@ -605,8 +552,7 @@ class _LegacyForcing:
 
     def subcatch_evap(self, *args: Any, **kw: Any) -> None:
         raise NotImplementedError(
-            "Forcing 'subcatchment evaporation override' is not supported by "
-            "the legacy engine."
+            "Forcing 'subcatchment evaporation override' is not supported by the legacy engine."
         )
 
     def clear_all(self) -> None:
@@ -688,14 +634,11 @@ class LegacyBackend:
         elif name == "mass_balance":
             cache[name] = _LegacyMassBalance(raw)
         elif name == "forcing":
-            cache[name] = _LegacyForcing(
-                self.nodes, self.links, self.subcatchments, self.gages
-            )
+            cache[name] = _LegacyForcing(self.nodes, self.links, self.subcatchments, self.gages)
         elif name == "hotstart":
             cache[name] = _LegacyHotstart(raw)
         else:
             raise AttributeError(
-                f"LegacyBackend has no attribute '{name}'. "
-                f"This feature requires engine='openswmm'."
+                f"LegacyBackend has no attribute '{name}'. This feature requires engine='openswmm'."
             )
         return cache[name]

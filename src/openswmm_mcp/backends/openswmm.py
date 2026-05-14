@@ -57,7 +57,7 @@ class OpenSwmmBackend:
         self._cache: dict[str, Any] = {}
 
     @classmethod
-    def from_solver(cls, solver: Solver) -> "OpenSwmmBackend":
+    def from_solver(cls, solver: Solver) -> OpenSwmmBackend:
         """Wrap an already-constructed :class:`Solver` (e.g. from ModelBuilder.finalize)."""
         instance = cls.__new__(cls)
         instance._solver = solver

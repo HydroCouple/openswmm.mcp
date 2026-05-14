@@ -72,7 +72,9 @@ class TestGetNodeInfo:
         assert len(result) == reference_model.NODE_COUNT
         assert all(isinstance(r, NodeInfo) for r in result)
 
-    async def test_get_node_info_sequential_indices(self, session_manager, tmp_inp, reference_model):
+    async def test_get_node_info_sequential_indices(
+        self, session_manager, tmp_inp, reference_model
+    ):
         from openswmm_mcp.tools.query import get_node_info
 
         ctx = await _open(session_manager, tmp_inp, "qn_idx")
@@ -92,19 +94,23 @@ class TestGetNodeInfo:
         from openswmm_mcp.tools.query import get_node_info
 
         ctx = await _open(session_manager, tmp_inp, "qn_norun")
-        result = await get_node_info(ctx, session_id="qn_norun",
-                                     node_id=reference_model.FIRST_NODE_ID)
+        result = await get_node_info(
+            ctx, session_id="qn_norun", node_id=reference_model.FIRST_NODE_ID
+        )
         assert result.depth is None
 
-    async def test_runtime_depth_present_after_step(self, session_manager, tmp_inp, reference_model):
+    async def test_runtime_depth_present_after_step(
+        self, session_manager, tmp_inp, reference_model
+    ):
         from openswmm_mcp.tools.lifecycle import open_model, step_simulation
         from openswmm_mcp.tools.query import get_node_info
 
         ctx = _Ctx(session_manager)
         await open_model(ctx, inp_path=tmp_inp, session_id="qn_run")
         await step_simulation(ctx, session_id="qn_run", num_steps=10)
-        result = await get_node_info(ctx, session_id="qn_run",
-                                     node_id=reference_model.FIRST_NODE_ID)
+        result = await get_node_info(
+            ctx, session_id="qn_run", node_id=reference_model.FIRST_NODE_ID
+        )
         assert result.depth is not None
         assert result.head is not None
 
@@ -176,8 +182,9 @@ class TestGetSubcatchmentInfo:
         from openswmm_mcp.tools.query import get_subcatchment_info
 
         ctx = await _open(session_manager, tmp_inp, "qs1")
-        result = await get_subcatchment_info(ctx, session_id="qs1",
-                                              subcatch_id=reference_model.FIRST_SUBCATCH_ID)
+        result = await get_subcatchment_info(
+            ctx, session_id="qs1", subcatch_id=reference_model.FIRST_SUBCATCH_ID
+        )
 
         assert isinstance(result, SubcatchmentInfo)
         assert result.subcatch_id == reference_model.FIRST_SUBCATCH_ID
@@ -272,7 +279,9 @@ class TestGetSystemSummary:
 
         duration = result.end_time - result.start_time
         assert duration == pytest.approx(reference_model.EXPECTED_DURATION_DAYS, rel=1e-3)
-        assert result.routing_step == pytest.approx(reference_model.EXPECTED_ROUTING_STEP_SECS, rel=1e-3)
+        assert result.routing_step == pytest.approx(
+            reference_model.EXPECTED_ROUTING_STEP_SECS, rel=1e-3
+        )
 
     async def test_current_time_none_before_run(self, session_manager, tmp_inp):
         from openswmm_mcp.tools.query import get_system_summary
@@ -319,8 +328,9 @@ class TestFindElements:
         from openswmm_mcp.tools.query import find_elements
 
         ctx = await _open(session_manager, tmp_inp, "fe_junc")
-        result = await find_elements(ctx, session_id="fe_junc", pattern="^J[0-9]+$",
-                                     element_type="node")
+        result = await find_elements(
+            ctx, session_id="fe_junc", pattern="^J[0-9]+$", element_type="node"
+        )
 
         assert len(result) == 11
 

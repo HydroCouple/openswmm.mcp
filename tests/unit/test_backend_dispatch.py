@@ -14,18 +14,14 @@ from openswmm_mcp.errors import ToolError
 class TestEngineSelection:
     async def test_unknown_engine_raises(self, session_manager, tmp_inp):
         with pytest.raises(ToolError, match="Unknown engine"):
-            await session_manager.create_session(
-                "bad", tmp_inp, engine="not-a-real-engine"
-            )
+            await session_manager.create_session("bad", tmp_inp, engine="not-a-real-engine")
 
     async def test_default_engine_is_openswmm(self, session_manager, tmp_inp):
         session = await session_manager.create_session("default_engine", tmp_inp)
         assert session.engine_kind == "openswmm"
 
     async def test_explicit_openswmm_engine(self, session_manager, tmp_inp):
-        session = await session_manager.create_session(
-            "explicit", tmp_inp, engine="openswmm"
-        )
+        session = await session_manager.create_session("explicit", tmp_inp, engine="openswmm")
         assert session.engine_kind == "openswmm"
 
     def test_make_backend_unknown_raises_value_error(self, tmp_path):

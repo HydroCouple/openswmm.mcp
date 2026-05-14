@@ -306,10 +306,22 @@ class TestPopLastLink:
         ctx = await _create_building_session(session_manager, "bld_pll_wt")
         await add_node(ctx, session_id="bld_pll_wt", node_id="J1", node_type="junction")
         await add_node(ctx, session_id="bld_pll_wt", node_id="J2", node_type="junction")
-        await add_link(ctx, session_id="bld_pll_wt", link_id="C1",
-                       link_type="conduit", from_node="J1", to_node="J2")
-        await add_link(ctx, session_id="bld_pll_wt", link_id="C2",
-                       link_type="conduit", from_node="J1", to_node="J2")
+        await add_link(
+            ctx,
+            session_id="bld_pll_wt",
+            link_id="C1",
+            link_type="conduit",
+            from_node="J1",
+            to_node="J2",
+        )
+        await add_link(
+            ctx,
+            session_id="bld_pll_wt",
+            link_id="C2",
+            link_type="conduit",
+            from_node="J1",
+            to_node="J2",
+        )
 
         with pytest.raises(ToolError, match="ENGINE_ERROR"):
             await pop_last_link(ctx, session_id="bld_pll_wt", link_id="C1")

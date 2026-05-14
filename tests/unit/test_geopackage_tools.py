@@ -12,14 +12,12 @@ import pytest
 gpkg_available = False
 try:
     from openswmm.engine import HAS_GEOPACKAGE
+
     gpkg_available = HAS_GEOPACKAGE
 except (ImportError, AttributeError):
     pass
 
-pytestmark = pytest.mark.skipif(
-    not gpkg_available,
-    reason="GeoPackage bindings not available"
-)
+pytestmark = pytest.mark.skipif(not gpkg_available, reason="GeoPackage bindings not available")
 
 
 class TestGeoPackageToolsImport:
@@ -27,10 +25,12 @@ class TestGeoPackageToolsImport:
 
     def test_import_geopackage_mcp(self):
         from openswmm_mcp.tools.geopackage import geopackage_mcp
+
         assert geopackage_mcp is not None
 
     def test_tool_functions_exist(self):
         from openswmm_mcp.tools import geopackage
+
         assert hasattr(geopackage, "open_geopackage")
         assert hasattr(geopackage, "list_simulations")
         assert hasattr(geopackage, "get_result_timeseries")
@@ -45,6 +45,7 @@ class TestGeoPackageServerMount:
 
     def test_server_imports(self):
         from openswmm_mcp.server import mcp
+
         assert mcp is not None
 
 
@@ -53,6 +54,7 @@ class TestModelsExtended:
 
     def test_system_summary_new_fields(self):
         from openswmm_mcp.models import SystemSummary
+
         s = SystemSummary(
             session_id="test",
             state="running",
@@ -79,6 +81,7 @@ class TestModelsExtended:
 
     def test_node_info_new_fields(self):
         from openswmm_mcp.models import NodeInfo
+
         n = NodeInfo(
             node_id="J1",
             index=0,
@@ -89,7 +92,8 @@ class TestModelsExtended:
 
     def test_link_info_new_fields(self):
         from openswmm_mcp.models import LinkInfo
-        l = LinkInfo(
+
+        link = LinkInfo(
             link_id="C1",
             index=0,
             link_type="CONDUIT",
@@ -100,11 +104,12 @@ class TestModelsExtended:
             pump_on_time=1800.0,
             pump_volume=9000.0,
         )
-        assert l.hydraulic_power == 3120.0
-        assert l.pump_cycles == 5
+        assert link.hydraulic_power == 3120.0
+        assert link.pump_cycles == 5
 
     def test_mass_balance_new_fields(self):
         from openswmm_mcp.models import MassBalanceResult
+
         mb = MassBalanceResult(
             session_id="test",
             runoff_continuity_error=0.001,
@@ -125,12 +130,21 @@ class TestModelsExtended:
 
     def test_backward_compatible_defaults(self):
         """New fields should default to None (backward compatible)."""
-        from openswmm_mcp.models import SystemSummary, NodeInfo, LinkInfo
+        from openswmm_mcp.models import LinkInfo, NodeInfo, SystemSummary
+
         s = SystemSummary(
-            session_id="t", state="created", node_count=0, link_count=0,
-            subcatchment_count=0, gage_count=0, pollutant_count=0,
-            flow_units="CFS", route_model="DYNWAVE",
-            start_time=0, end_time=0, routing_step=0,
+            session_id="t",
+            state="created",
+            node_count=0,
+            link_count=0,
+            subcatchment_count=0,
+            gage_count=0,
+            pollutant_count=0,
+            flow_units="CFS",
+            route_model="DYNWAVE",
+            start_time=0,
+            end_time=0,
+            routing_step=0,
         )
         assert s.surcharge_method is None
         assert s.dps_celerity is None
@@ -140,7 +154,6 @@ class TestModelsExtended:
         n = NodeInfo(node_id="J1", index=0, node_type="JUNCTION")
         assert n.outfall_route_to is None
 
-        l = LinkInfo(link_id="C1", index=0, link_type="CONDUIT",
-                     from_node="J1", to_node="J2")
-        assert l.hydraulic_power is None
-        assert l.pump_cycles is None
+        link = LinkInfo(link_id="C1", index=0, link_type="CONDUIT", from_node="J1", to_node="J2")
+        assert link.hydraulic_power is None
+        assert link.pump_cycles is None

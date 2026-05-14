@@ -52,6 +52,7 @@ _OBJECT_TYPES = {"node", "link", "subcatchment", "gage", "table", "transect"}
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+
 def _resolve_node_type(name: str) -> int:
     key = name.strip().lower()
     if key not in _NODE_TYPES:
@@ -89,9 +90,7 @@ def _make_editor(session: SimSession) -> ModelEditor:
     """Create a ModelEditor from whichever engine handle is live."""
     if session.state == "building":
         if session.model_builder is None:
-            raise ToolError(
-                f"[{ErrorCode.INVALID_STATE}] No ModelBuilder attached to session."
-            )
+            raise ToolError(f"[{ErrorCode.INVALID_STATE}] No ModelBuilder attached to session.")
         return ModelEditor(session.model_builder)
     # "opened" state: solver is available
     return ModelEditor(session.solver)
@@ -159,9 +158,7 @@ async def analyze_impact(
             case "table":
                 impacts = await asyncio.to_thread(editor.analyze_table_impact, object_id)
             case "transect":
-                impacts = await asyncio.to_thread(
-                    editor.analyze_transect_impact, int(object_id)
-                )
+                impacts = await asyncio.to_thread(editor.analyze_transect_impact, int(object_id))
             case _:
                 impacts = []
     except (KeyError, ValueError) as exc:
@@ -225,9 +222,7 @@ async def delete_object(
 
     obj_type_key = object_type.strip().lower()
     if obj_type_key not in _OBJECT_TYPES:
-        raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] Unknown object_type '{object_type}'."
-        )
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] Unknown object_type '{object_type}'.")
 
     session = await _get_editable_session(ctx, session_id)
     editor = _make_editor(session)
@@ -264,9 +259,7 @@ async def delete_object(
                 case "table":
                     impacts = await asyncio.to_thread(editor.delete_table, object_id)
                 case "transect":
-                    impacts = await asyncio.to_thread(
-                        editor.delete_transect, int(object_id)
-                    )
+                    impacts = await asyncio.to_thread(editor.delete_transect, int(object_id))
                 case _:
                     impacts = []
 
@@ -282,7 +275,11 @@ async def delete_object(
         action = "deleted" if not dry_run else "analysed"
         logger.info(
             "Session '%s': %s '%s' %s (%d impacts).",
-            session_id, obj_type_key, object_id, action, len(impacts),
+            session_id,
+            obj_type_key,
+            object_id,
+            action,
+            len(impacts),
         )
 
     return ImpactReportModel(
@@ -332,15 +329,11 @@ async def convert_node(
     try:
         result = await asyncio.to_thread(editor.convert_node, node_id, type_code)
     except KeyError as exc:
-        raise ToolError(
-            f"[{ErrorCode.ELEMENT_NOT_FOUND}] Node '{node_id}' not found: {exc}"
-        )
+        raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Node '{node_id}' not found: {exc}")
     except RuntimeError as exc:
         raise ToolError(f"[{ErrorCode.ENGINE_ERROR}] {exc}")
 
-    logger.info(
-        "Session '%s': node '%s' converted to %s.", session_id, node_id, new_type
-    )
+    logger.info("Session '%s': node '%s' converted to %s.", session_id, node_id, new_type)
 
     return ConversionResultModel(
         session_id=session_id,
@@ -381,15 +374,11 @@ async def convert_link(
     try:
         result = await asyncio.to_thread(editor.convert_link, link_id, type_code)
     except KeyError as exc:
-        raise ToolError(
-            f"[{ErrorCode.ELEMENT_NOT_FOUND}] Link '{link_id}' not found: {exc}"
-        )
+        raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Link '{link_id}' not found: {exc}")
     except RuntimeError as exc:
         raise ToolError(f"[{ErrorCode.ENGINE_ERROR}] {exc}")
 
-    logger.info(
-        "Session '%s': link '%s' converted to %s.", session_id, link_id, new_type
-    )
+    logger.info("Session '%s': link '%s' converted to %s.", session_id, link_id, new_type)
 
     return ConversionResultModel(
         session_id=session_id,

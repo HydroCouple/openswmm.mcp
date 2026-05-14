@@ -15,9 +15,9 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from fastmcp import FastMCP, Context
+from fastmcp import Context, FastMCP
 
-from ..errors import ToolError, ErrorCode
+from ..errors import ErrorCode, ToolError
 
 geopackage_mcp = FastMCP("OpenSWMM GeoPackage Tools")
 
@@ -30,6 +30,7 @@ def _get_gpkg_class():
     if _GeoPackage is None:
         try:
             from openswmm.engine import GeoPackage
+
             _GeoPackage = GeoPackage
         except ImportError:
             raise ToolError(
@@ -124,10 +125,11 @@ async def get_result_timeseries(
         raise ToolError(ErrorCode.NOT_FOUND, f"GeoPackage session '{session_id}' not found")
 
     times, values = await asyncio.to_thread(
-        gpkg.read_result_ts, simulation_id,
-        element_type.upper(), element_id, variable)
+        gpkg.read_result_ts, simulation_id, element_type.upper(), element_id, variable
+    )
 
     from .._util.formatting import ndarray_to_list
+
     return {
         "simulation_id": simulation_id,
         "element_type": element_type,
@@ -162,8 +164,8 @@ async def get_result_summary(
         raise ToolError(ErrorCode.NOT_FOUND, f"GeoPackage session '{session_id}' not found")
 
     value = await asyncio.to_thread(
-        gpkg.read_summary, simulation_id,
-        element_type.upper(), element_id, variable)
+        gpkg.read_summary, simulation_id, element_type.upper(), element_id, variable
+    )
 
     return {
         "simulation_id": simulation_id,
@@ -209,14 +211,13 @@ async def import_observed_data(
         raise ToolError(ErrorCode.BAD_PARAM, "timestamps and values must have same length")
 
     series_id = await asyncio.to_thread(
-        gpkg.create_observed_series, name, variable,
-        element_type, element_id, source, units)
+        gpkg.create_observed_series, name, variable, element_type, element_id, source, units
+    )
 
     # Bulk write with transaction
     await asyncio.to_thread(gpkg.begin)
     try:
-        await asyncio.to_thread(
-            gpkg.write_observed_values, series_id, timestamps, values)
+        await asyncio.to_thread(gpkg.write_observed_values, series_id, timestamps, values)
         await asyncio.to_thread(gpkg.commit)
     except Exception:
         await asyncio.to_thread(gpkg.rollback)
@@ -257,12 +258,13 @@ async def compare_sim_vs_observed(
 
     # Read simulated
     sim_times, sim_values = await asyncio.to_thread(
-        gpkg.read_result_ts, simulation_id,
-        element_type.upper(), element_id, variable)
+        gpkg.read_result_ts, simulation_id, element_type.upper(), element_id, variable
+    )
 
     # Read observed
     obs_timestamps, obs_values = await asyncio.to_thread(
-        gpkg.read_observed_values, observed_series_id)
+        gpkg.read_observed_values, observed_series_id
+    )
 
     n_sim = len(sim_values)
     n_obs = len(obs_values)
@@ -276,12 +278,12 @@ async def compare_sim_vs_observed(
     obs = obs_values[:n]
 
     residuals = sim - obs
-    rmse = float(np.sqrt(np.mean(residuals ** 2)))
+    rmse = float(np.sqrt(np.mean(residuals**2)))
     bias = float(np.mean(residuals))
     obs_mean = float(np.mean(obs))
-    ss_res = float(np.sum(residuals ** 2))
+    ss_res = float(np.sum(residuals**2))
     ss_tot = float(np.sum((obs - obs_mean) ** 2))
-    nse = 1.0 - ss_res / ss_tot if ss_tot > 0 else float('nan')
+    nse = 1.0 - ss_res / ss_tot if ss_tot > 0 else float("nan")
 
     return {
         "simulation_id": simulation_id,

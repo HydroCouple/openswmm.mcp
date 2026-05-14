@@ -7,7 +7,6 @@ import pytest
 from openswmm_mcp.errors import ToolError
 from openswmm_mcp.session import SessionManager, SimSession
 
-
 # ---------------------------------------------------------------------------
 # TestSessionManager
 # ---------------------------------------------------------------------------
@@ -162,7 +161,5 @@ class TestSimSession:
         assert session.engine_kind == "openswmm"
 
     async def test_engine_kind_legacy(self, session_manager, inp_path):
-        session = await session_manager.create_session(
-            "legacy_eng", inp_path, engine="legacy"
-        )
+        session = await session_manager.create_session("legacy_eng", inp_path, engine="legacy")
         assert session.engine_kind == "legacy"

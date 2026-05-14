@@ -32,21 +32,17 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-import pytest
-
 # Hard-import the engines at collection time so any environment that lacks the
 # compiled extension fails fast instead of silently falling back to mocks.
 import openswmm.engine  # noqa: F401
 import openswmm.legacy.engine  # noqa: F401
-
+import pytest
 
 # ---------------------------------------------------------------------------
 # Reference INP and expected counts
 # ---------------------------------------------------------------------------
 
-_REFERENCE_INP = (
-    Path(__file__).parent / "data" / "site_drainage_example.inp"
-).resolve()
+_REFERENCE_INP = (Path(__file__).parent / "data" / "site_drainage_example.inp").resolve()
 
 # Sanity-check that the reference INP travelled with the repo.  If this raises
 # at collection time, the user knows immediately that the fixture is missing.

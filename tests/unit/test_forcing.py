@@ -265,8 +265,9 @@ class TestSetRainfallOverride:
         from openswmm_mcp.tools.forcing import set_rainfall_override
 
         ctx = await _open_and_run(session_manager, tmp_inp, "f_rain")
-        result = await set_rainfall_override(ctx, session_id="f_rain",
-                                              gage_id=reference_model.GAGE_ID, rainfall=1.5)
+        result = await set_rainfall_override(
+            ctx, session_id="f_rain", gage_id=reference_model.GAGE_ID, rainfall=1.5
+        )
 
         assert result["status"] == "applied"
         assert result["gage_id"] == reference_model.GAGE_ID
