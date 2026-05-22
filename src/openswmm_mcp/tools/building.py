@@ -12,7 +12,7 @@ import logging
 from pathlib import Path
 
 from fastmcp import Context, FastMCP
-from openswmm.engine import ModelBuilder, Tables
+from openswmm.engine import ModelBuilder, Pollutants, Tables
 
 from openswmm_mcp.backends.openswmm import OpenSwmmBackend
 from openswmm_mcp.dependencies import get_session_manager, require_new_engine
@@ -222,14 +222,27 @@ async def add_node(
     builder = session.model_builder
 
     try:
-        idx = await asyncio.to_thread(builder.add_node, node_id, type_code)
-        await asyncio.to_thread(builder.set_node_invert, node_id, invert_elev)
-        await asyncio.to_thread(builder.set_node_max_depth, node_id, max_depth)
+        # builder.add_node returns the SWMM error code (0 on success), not
+        # the new node's index. Resolve the actual integer index via Nodes
+        # so the subsequent setters target the right slot.
+        await asyncio.to_thread(builder.add_node, node_id, type_code)
+        from openswmm.engine import Nodes
+        nodes_accessor = Nodes(builder)
+        idx = await asyncio.to_thread(nodes_accessor.get_index, node_id)
+        if idx < 0:
+            raise ToolError(
+                f"[{ErrorCode.ENGINE_ERROR}] add_node returned success but "
+                f"node '{node_id}' could not be resolved by id."
+            )
+        # set_node_invert / set_node_max_depth / set_node_coord take an
+        # integer index, not the string id.
+        await asyncio.to_thread(builder.set_node_invert, idx, invert_elev)
+        await asyncio.to_thread(builder.set_node_max_depth, idx, max_depth)
 
         if x is not None and y is not None:
             try:
                 spatial = session.spatial
-                await asyncio.to_thread(spatial.set_node_coord, node_id, x, y)
+                await asyncio.to_thread(spatial.set_node_coord, idx, x, y)
             except Exception:
                 logger.debug("Could not set coordinates for node '%s'", node_id, exc_info=True)
     except ToolError:
@@ -334,14 +347,37 @@ async def add_link(
     session = await _get_builder_session(ctx, session_id)
     builder = session.model_builder
 
+    # set_link_* methods take integer indices for both the link and (in the
+    # case of set_link_nodes) the upstream / downstream node indices.
+    # builder.add_link returns the SWMM error code (0 on success), not the
+    # new link's index — resolve via Links / Nodes after the call.
     try:
-        idx = await asyncio.to_thread(builder.add_link, link_id, type_code)
-        await asyncio.to_thread(builder.set_link_nodes, link_id, from_node, to_node)
-        await asyncio.to_thread(builder.set_link_length, link_id, length)
-        await asyncio.to_thread(builder.set_link_roughness, link_id, roughness)
+        await asyncio.to_thread(builder.add_link, link_id, type_code)
+        from openswmm.engine import Links, Nodes
+        links_accessor = Links(builder)
+        nodes_accessor = Nodes(builder)
+        idx = await asyncio.to_thread(links_accessor.get_index, link_id)
+        if idx < 0:
+            raise ToolError(
+                f"[{ErrorCode.ENGINE_ERROR}] add_link returned success but "
+                f"link '{link_id}' could not be resolved by id."
+            )
+        from_idx = await asyncio.to_thread(nodes_accessor.get_index, from_node)
+        if from_idx < 0:
+            raise ToolError(
+                f"[{ErrorCode.ELEMENT_NOT_FOUND}] from_node '{from_node}' not found."
+            )
+        to_idx = await asyncio.to_thread(nodes_accessor.get_index, to_node)
+        if to_idx < 0:
+            raise ToolError(
+                f"[{ErrorCode.ELEMENT_NOT_FOUND}] to_node '{to_node}' not found."
+            )
+        await asyncio.to_thread(builder.set_link_nodes, idx, from_idx, to_idx)
+        await asyncio.to_thread(builder.set_link_length, idx, length)
+        await asyncio.to_thread(builder.set_link_roughness, idx, roughness)
         await asyncio.to_thread(
             builder.set_link_xsect,
-            link_id,
+            idx,
             shape_code,
             xsect_geom1,
             xsect_geom2,
@@ -439,15 +475,33 @@ async def add_subcatchment(
     session = await _get_builder_session(ctx, session_id)
     builder = session.model_builder
 
+    # ModelBuilder.add_subcatchment returns the SWMM error code, not the
+    # new index. Subcatchment property setters live on the Subcatchments
+    # accessor (not on ModelBuilder), and all take integer indices.
     try:
-        idx = await asyncio.to_thread(builder.add_subcatchment, subcatch_id)
-        await asyncio.to_thread(builder.set_subcatch_area, subcatch_id, area)
-        await asyncio.to_thread(builder.set_subcatch_slope, subcatch_id, slope)
-        await asyncio.to_thread(builder.set_subcatch_width, subcatch_id, width)
-        await asyncio.to_thread(builder.set_subcatch_imperv, subcatch_id, imperv_pct)
+        await asyncio.to_thread(builder.add_subcatchment, subcatch_id)
+        from openswmm.engine import Nodes, Subcatchments
+        sc_accessor = Subcatchments(builder)
+        idx = await asyncio.to_thread(sc_accessor.get_index, subcatch_id)
+        if idx < 0:
+            raise ToolError(
+                f"[{ErrorCode.ENGINE_ERROR}] add_subcatchment returned success "
+                f"but subcatchment '{subcatch_id}' could not be resolved by id."
+            )
+        await asyncio.to_thread(sc_accessor.set_area, idx, area)
+        await asyncio.to_thread(sc_accessor.set_slope, idx, slope)
+        await asyncio.to_thread(sc_accessor.set_width, idx, width)
+        await asyncio.to_thread(sc_accessor.set_imperv_pct, idx, imperv_pct)
 
         if outlet_node:
-            await asyncio.to_thread(builder.set_subcatch_outlet, subcatch_id, outlet_node)
+            nodes_accessor = Nodes(builder)
+            outlet_idx = await asyncio.to_thread(nodes_accessor.get_index, outlet_node)
+            if outlet_idx < 0:
+                raise ToolError(
+                    f"[{ErrorCode.ELEMENT_NOT_FOUND}] outlet_node '{outlet_node}' "
+                    f"not found."
+                )
+            await asyncio.to_thread(sc_accessor.set_outlet, idx, outlet_idx)
     except ToolError:
         raise
     except Exception as exc:
@@ -762,3 +816,111 @@ async def write_model(
         "path": resolved,
         "message": f"Model written to '{resolved}'.",
     }
+
+
+# ---------------------------------------------------------------------------
+# Pollutant management
+# ---------------------------------------------------------------------------
+
+_POLLUTANT_UNITS: dict[str, int] = {
+    "mg/l": 0,
+    "ug/l": 1,
+    "#/l": 2,
+}
+
+_POLLUTANT_UNITS_NAMES: dict[int, str] = {v: k.upper() for k, v in _POLLUTANT_UNITS.items()}
+
+
+@building_mcp.tool()
+async def add_pollutant(
+    ctx: Context,
+    session_id: str = "default",
+    pollutant_id: str = "",
+    units: str = "mg/l",
+    kdecay: float = 0.0,
+    rain_conc: float = 0.0,
+    gw_conc: float = 0.0,
+    init_conc: float = 0.0,
+    snow_only: bool = False,
+) -> BuildingResult:
+    """Add a pollutant to the model.
+
+    Valid in ``building`` or ``opened`` state.  After adding, the pollutant
+    can be referenced by its ID when configuring buildup/washoff or quality
+    injection.
+
+    Parameters
+    ----------
+    pollutant_id:
+        Unique pollutant identifier (e.g. ``TSS``, ``TN``).
+    units:
+        Concentration units: ``mg/l``, ``ug/l``, or ``#/l``.
+    kdecay:
+        First-order decay coefficient (1/days).
+    rain_conc:
+        Concentration in rainfall (same units as pollutant).
+    gw_conc:
+        Concentration in groundwater inflow.
+    init_conc:
+        Initial concentration in the network.
+    snow_only:
+        If True, buildup occurs only during snow accumulation.
+    """
+    if not pollutant_id:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] pollutant_id must not be empty.")
+
+    units_key = units.strip().lower()
+    if units_key not in _POLLUTANT_UNITS:
+        valid = ", ".join(sorted(_POLLUTANT_UNITS))
+        raise ToolError(
+            f"[{ErrorCode.VALIDATION_ERROR}] Unknown units '{units}'. Valid: {valid}."
+        )
+    units_code = _POLLUTANT_UNITS[units_key]
+
+    sm = get_session_manager(ctx)
+    session = await sm.get_session(session_id)
+    require_new_engine(session, "Adding pollutants")
+    if session.state not in ("building", "opened"):
+        raise ToolError(
+            f"[{ErrorCode.INVALID_STATE}] Session '{session_id}' is in state "
+            f"'{session.state}'. Adding pollutants requires 'building' or 'opened' state."
+        )
+
+    # Resolve the engine handle — either builder or solver
+    if session.state == "building":
+        if session.model_builder is None:
+            raise ToolError(
+                f"[{ErrorCode.INVALID_STATE}] Session '{session_id}' has no ModelBuilder."
+            )
+        engine_obj = session.model_builder
+    else:
+        engine_obj = session.solver
+
+    pollutants = Pollutants(engine_obj)
+
+    try:
+        new_idx = await asyncio.to_thread(pollutants.add, pollutant_id, units_code)
+        if kdecay != 0.0:
+            await asyncio.to_thread(pollutants.set_kdecay, new_idx, kdecay)
+        if rain_conc != 0.0:
+            await asyncio.to_thread(pollutants.set_rain_conc, new_idx, rain_conc)
+        if gw_conc != 0.0:
+            await asyncio.to_thread(pollutants.set_gw_conc, new_idx, gw_conc)
+        if init_conc != 0.0:
+            await asyncio.to_thread(pollutants.set_init_conc, new_idx, init_conc)
+        if snow_only:
+            await asyncio.to_thread(pollutants.set_snow_only, new_idx, True)
+    except RuntimeError as exc:
+        raise ToolError(f"[{ErrorCode.ENGINE_ERROR}] {exc}")
+
+    logger.info(
+        "Session '%s': pollutant '%s' added at index %d (units=%s).",
+        session_id, pollutant_id, new_idx, units,
+    )
+    return BuildingResult(
+        status="ok",
+        element_type="pollutant",
+        element_id=pollutant_id,
+        index=new_idx,
+        message=f"Pollutant '{pollutant_id}' added with units '{units.upper()}'.",
+    )
