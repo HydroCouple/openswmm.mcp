@@ -32,6 +32,7 @@ mcp = FastMCP(
 
 from openswmm_mcp.tools.analysis import analysis_mcp  # noqa: E402
 from openswmm_mcp.tools.building import building_mcp  # noqa: E402
+from openswmm_mcp.tools.controls import controls_mcp  # noqa: E402
 from openswmm_mcp.tools.editing import editing_mcp  # noqa: E402
 from openswmm_mcp.tools.forcing import forcing_mcp  # noqa: E402
 from openswmm_mcp.tools.geopackage import geopackage_mcp  # noqa: E402
@@ -53,6 +54,7 @@ mcp.mount(spatial_quality_mcp, namespace="spatial")
 mcp.mount(geopackage_mcp, namespace="geopackage")
 mcp.mount(tables_mcp, namespace="tables")
 mcp.mount(inflows_mcp, namespace="inflows")
+mcp.mount(controls_mcp, namespace="controls")
 
 # ---------------------------------------------------------------------------
 # Resource and prompt sub-servers (no namespace -- keep URIs short)
