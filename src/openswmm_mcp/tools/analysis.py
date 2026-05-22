@@ -1467,3 +1467,164 @@ async def output_system_result(
         "period": period,
         "value": value,
     }
+
+
+# ===========================================================================
+# Output reader: per-period array readers (Phase 2.5 follow-up)
+#
+# Distinct semantic from the *_attribute tools above:
+#   - *_attribute(elem_id, period)  -> all variables for ONE object at one period
+#   - *_results(variable, period)   -> ONE variable across ALL objects at one period
+#
+# Useful for heatmap-style snapshots: "show me flow across the whole link
+# network at period 42". Returns a list of {id, value} pairs so the caller
+# can correlate with element identity without a separate lookup.
+# ===========================================================================
+
+
+@analysis_mcp.tool()
+async def output_node_results(
+    ctx: Context,
+    session_id: str = "default",
+    variable: str = "depth",
+    period: int = 0,
+) -> dict:
+    """Return one node variable across all nodes at a single reporting period.
+
+    ``variable`` is one of: ``depth``, ``head``, ``volume``,
+    ``lateral_inflow``, ``total_inflow``, ``overflow``.
+
+    Returns a list of ``{id, index, value}`` records ordered by node index
+    (which matches the .out file's stored order).
+    """
+    sm = get_session_manager(ctx)
+    session = await sm.get_session(session_id)
+    require_state(session, "ended")
+    require_new_engine(session, "Output reader node results")
+
+    reader = await _ensure_output_reader(session)
+    n_periods = await asyncio.to_thread(reader.get_period_count)
+    if not 0 <= period < n_periods:
+        raise ToolError(
+            f"[{ErrorCode.VALIDATION_ERROR}] period must be in [0, {n_periods}); "
+            f"got {period}."
+        )
+
+    var_enum = _resolve_node_var(variable)
+    n_nodes = await asyncio.to_thread(reader.get_node_count)
+    arr = await asyncio.to_thread(reader.get_node_result, period, var_enum)
+    values = ndarray_to_list(arr)
+
+    def _ids() -> list[str]:
+        return [reader.get_node_id(i) for i in range(n_nodes)]
+
+    ids = await asyncio.to_thread(_ids)
+    records = [
+        {"id": ids[i], "index": i, "value": values[i]}
+        for i in range(min(n_nodes, len(values)))
+    ]
+    return {
+        "session_id": session_id,
+        "variable": variable,
+        "period": period,
+        "count": len(records),
+        "results": records,
+    }
+
+
+@analysis_mcp.tool()
+async def output_link_results(
+    ctx: Context,
+    session_id: str = "default",
+    variable: str = "flow",
+    period: int = 0,
+) -> dict:
+    """Return one link variable across all links at a single reporting period.
+
+    ``variable`` is one of: ``flow``, ``depth``, ``velocity``, ``volume``,
+    ``capacity``.
+
+    Returns a list of ``{id, index, value}`` records.
+    """
+    sm = get_session_manager(ctx)
+    session = await sm.get_session(session_id)
+    require_state(session, "ended")
+    require_new_engine(session, "Output reader link results")
+
+    reader = await _ensure_output_reader(session)
+    n_periods = await asyncio.to_thread(reader.get_period_count)
+    if not 0 <= period < n_periods:
+        raise ToolError(
+            f"[{ErrorCode.VALIDATION_ERROR}] period must be in [0, {n_periods}); "
+            f"got {period}."
+        )
+
+    var_enum = _resolve_link_var(variable)
+    n_links = await asyncio.to_thread(reader.get_link_count)
+    arr = await asyncio.to_thread(reader.get_link_result, period, var_enum)
+    values = ndarray_to_list(arr)
+
+    def _ids() -> list[str]:
+        return [reader.get_link_id(i) for i in range(n_links)]
+
+    ids = await asyncio.to_thread(_ids)
+    records = [
+        {"id": ids[i], "index": i, "value": values[i]}
+        for i in range(min(n_links, len(values)))
+    ]
+    return {
+        "session_id": session_id,
+        "variable": variable,
+        "period": period,
+        "count": len(records),
+        "results": records,
+    }
+
+
+@analysis_mcp.tool()
+async def output_subcatch_results(
+    ctx: Context,
+    session_id: str = "default",
+    variable: str = "runoff",
+    period: int = 0,
+) -> dict:
+    """Return one subcatchment variable across all subcatchments at a period.
+
+    ``variable`` is one of: ``rainfall``, ``snow_depth``, ``evap``, ``infil``,
+    ``runoff``, ``gw_flow``, ``gw_elev``, ``soil_moist``.
+
+    Returns a list of ``{id, index, value}`` records.
+    """
+    sm = get_session_manager(ctx)
+    session = await sm.get_session(session_id)
+    require_state(session, "ended")
+    require_new_engine(session, "Output reader subcatchment results")
+
+    reader = await _ensure_output_reader(session)
+    n_periods = await asyncio.to_thread(reader.get_period_count)
+    if not 0 <= period < n_periods:
+        raise ToolError(
+            f"[{ErrorCode.VALIDATION_ERROR}] period must be in [0, {n_periods}); "
+            f"got {period}."
+        )
+
+    var_enum = _resolve_subcatch_var(variable)
+    n_sub = await asyncio.to_thread(reader.get_subcatch_count)
+    arr = await asyncio.to_thread(reader.get_subcatch_result, period, var_enum)
+    values = ndarray_to_list(arr)
+
+    def _ids() -> list[str]:
+        return [reader.get_subcatch_id(i) for i in range(n_sub)]
+
+    ids = await asyncio.to_thread(_ids)
+    records = [
+        {"id": ids[i], "index": i, "value": values[i]}
+        for i in range(min(n_sub, len(values)))
+    ]
+    return {
+        "session_id": session_id,
+        "variable": variable,
+        "period": period,
+        "count": len(records),
+        "results": records,
+    }

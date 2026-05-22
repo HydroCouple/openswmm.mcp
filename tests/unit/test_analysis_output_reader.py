@@ -244,3 +244,74 @@ class TestStateGuard:
         # Session is now 'initialized', not 'ended'.
         with pytest.raises(ToolError, match="state.*ended|requires.*ended"):
             await output_period_count(ctx, session_id="om_state")
+
+
+# ===========================================================================
+# Per-period array readers (Phase 2.5 follow-up)
+# ===========================================================================
+
+
+class TestOutputNodeResults:
+    async def test_node_results_returns_all_nodes(self, session_manager, inp_path):
+        from openswmm_mcp.tools.analysis import output_node_results
+
+        ctx = await _run_to_ended(session_manager, inp_path, "om_nr")
+        result = await output_node_results(
+            ctx, session_id="om_nr", variable="depth", period=0,
+        )
+        # Reference model has 12 nodes.
+        assert result["count"] == 12
+        ids = [r["id"] for r in result["results"]]
+        assert "J1" in ids
+        for r in result["results"]:
+            assert isinstance(r["value"], float)
+
+    async def test_unknown_variable_rejected(self, session_manager, inp_path):
+        from openswmm_mcp.tools.analysis import output_node_results
+
+        ctx = await _run_to_ended(session_manager, inp_path, "om_nr_bad")
+        with pytest.raises(ToolError, match="Unknown node variable"):
+            await output_node_results(
+                ctx, session_id="om_nr_bad", variable="bogus", period=0,
+            )
+
+    async def test_period_out_of_range_rejected(self, session_manager, inp_path):
+        from openswmm_mcp.tools.analysis import (
+            output_node_results,
+            output_period_count,
+        )
+
+        ctx = await _run_to_ended(session_manager, inp_path, "om_nr_p")
+        n = (await output_period_count(ctx, session_id="om_nr_p"))["period_count"]
+        with pytest.raises(ToolError, match="period must be in"):
+            await output_node_results(
+                ctx, session_id="om_nr_p", variable="depth", period=n,
+            )
+
+
+class TestOutputLinkResults:
+    async def test_link_results_returns_all_links(self, session_manager, inp_path):
+        from openswmm_mcp.tools.analysis import output_link_results
+
+        ctx = await _run_to_ended(session_manager, inp_path, "om_lr")
+        result = await output_link_results(
+            ctx, session_id="om_lr", variable="flow", period=0,
+        )
+        assert result["count"] == 11
+        ids = [r["id"] for r in result["results"]]
+        assert "C1" in ids
+
+
+class TestOutputSubcatchResults:
+    async def test_subcatch_results_returns_all_subcatchments(
+        self, session_manager, inp_path
+    ):
+        from openswmm_mcp.tools.analysis import output_subcatch_results
+
+        ctx = await _run_to_ended(session_manager, inp_path, "om_sr_all")
+        result = await output_subcatch_results(
+            ctx, session_id="om_sr_all", variable="runoff", period=0,
+        )
+        assert result["count"] == 7
+        ids = [r["id"] for r in result["results"]]
+        assert "S1" in ids
