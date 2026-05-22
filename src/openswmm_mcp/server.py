@@ -39,6 +39,7 @@ from openswmm_mcp.tools.hotstart import hotstart_mcp  # noqa: E402
 from openswmm_mcp.tools.lifecycle import lifecycle_mcp  # noqa: E402
 from openswmm_mcp.tools.query import query_mcp  # noqa: E402
 from openswmm_mcp.tools.spatial_quality import spatial_quality_mcp  # noqa: E402
+from openswmm_mcp.tools.tables import tables_mcp  # noqa: E402
 
 mcp.mount(lifecycle_mcp, namespace="lifecycle")
 mcp.mount(query_mcp, namespace="query")
@@ -49,6 +50,7 @@ mcp.mount(editing_mcp, namespace="editing")
 mcp.mount(hotstart_mcp, namespace="hotstart")
 mcp.mount(spatial_quality_mcp, namespace="spatial")
 mcp.mount(geopackage_mcp, namespace="geopackage")
+mcp.mount(tables_mcp, namespace="tables")
 
 # ---------------------------------------------------------------------------
 # Resource and prompt sub-servers (no namespace -- keep URIs short)
