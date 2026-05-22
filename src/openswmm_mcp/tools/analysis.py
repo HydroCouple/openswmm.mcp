@@ -22,7 +22,16 @@ from openswmm_mcp.models import (
     CapacitySummaryItem,
     ExportResult,
     FloodingSummaryItem,
+    LinkFlowEntryModel,
     MassBalanceResult,
+    NodeFloodingEntryModel,
+    PumpEntryModel,
+    QualityContinuityModel,
+    ReportSnapshotModel,
+    RoutingContinuityModel,
+    RoutingDiagnosticsModel,
+    RunoffContinuityModel,
+    SubcatchmentEntryModel,
     TimeSeries,
 )
 
@@ -226,13 +235,19 @@ async def get_statistics(
         if idx < 0:
             raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Node '{element_id}' not found.")
         try:
+            max_depth, max_overflow, vol_flooded, time_flooded = await asyncio.gather(
+                asyncio.to_thread(stats.node_max_depth, idx),
+                asyncio.to_thread(stats.node_max_overflow, idx),
+                asyncio.to_thread(stats.node_vol_flooded, idx),
+                asyncio.to_thread(stats.node_time_flooded, idx),
+            )
             return {
                 "element_type": "node",
                 "element_id": element_id,
-                "max_depth": await asyncio.to_thread(stats.node_max_depth, idx),
-                "max_overflow": await asyncio.to_thread(stats.node_max_overflow, idx),
-                "vol_flooded": await asyncio.to_thread(stats.node_vol_flooded, idx),
-                "time_flooded": await asyncio.to_thread(stats.node_time_flooded, idx),
+                "max_depth": max_depth,
+                "max_overflow": max_overflow,
+                "vol_flooded": vol_flooded,
+                "time_flooded": time_flooded,
             }
         except Exception as exc:
             raise ToolError(
@@ -246,14 +261,34 @@ async def get_statistics(
         if idx < 0:
             raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Link '{element_id}' not found.")
         try:
-            return {
+            ltype, max_flow, max_vel, max_fill, surcharge, vol_flow = await asyncio.gather(
+                asyncio.to_thread(links.get_type, idx),
+                asyncio.to_thread(stats.link_max_flow, idx),
+                asyncio.to_thread(stats.link_max_velocity, idx),
+                asyncio.to_thread(stats.link_max_filling, idx),
+                asyncio.to_thread(stats.link_surcharge_time, idx),
+                asyncio.to_thread(stats.link_vol_flow, idx),
+            )
+            result = {
                 "element_type": "link",
                 "element_id": element_id,
-                "max_flow": await asyncio.to_thread(stats.link_max_flow, idx),
-                "max_velocity": await asyncio.to_thread(stats.link_max_velocity, idx),
-                "max_filling": await asyncio.to_thread(stats.link_max_filling, idx),
-                "surcharge_time": await asyncio.to_thread(stats.link_surcharge_time, idx),
+                "max_flow": max_flow,
+                "max_velocity": max_vel,
+                "max_filling": max_fill,
+                "surcharge_time": surcharge,
+                "vol_flow": vol_flow,
             }
+            # Pump-specific stats (type code 1 = PUMP)
+            if ltype == 1:
+                pump_cycles, pump_on_time, pump_volume = await asyncio.gather(
+                    asyncio.to_thread(links.get_stat_pump_cycles, idx),
+                    asyncio.to_thread(links.get_stat_pump_on_time, idx),
+                    asyncio.to_thread(links.get_stat_pump_volume, idx),
+                )
+                result["pump_cycles"] = pump_cycles
+                result["pump_on_time"] = pump_on_time
+                result["pump_volume"] = pump_volume
+            return result
         except Exception as exc:
             raise ToolError(
                 f"[{ErrorCode.ENGINE_ERROR}] Failed to get link statistics "
@@ -268,10 +303,18 @@ async def get_statistics(
                 f"[{ErrorCode.ELEMENT_NOT_FOUND}] Subcatchment '{element_id}' not found."
             )
         try:
+            precip, runoff_vol, max_runoff = await asyncio.gather(
+                asyncio.to_thread(stats.subcatch_precip, idx),
+                asyncio.to_thread(stats.subcatch_runoff_vol, idx),
+                asyncio.to_thread(stats.subcatch_max_runoff, idx),
+            )
             return {
                 "element_type": "subcatchment",
                 "element_id": element_id,
-                "max_runoff": await asyncio.to_thread(stats.subcatch_max_runoff, idx),
+                "total_precip": precip,
+                "total_runoff_vol": runoff_vol,
+                "max_runoff": max_runoff,
+                "runoff_coefficient": runoff_vol / precip if precip > 0 else 0.0,
             }
         except Exception as exc:
             raise ToolError(
@@ -540,39 +583,29 @@ async def get_flooding_summary(
     nodes = session.nodes
     node_count = await asyncio.to_thread(nodes.count)
 
-    results: list[FloodingSummaryItem] = []
+    def _fetch_all():
+        result = []
+        for i in range(node_count):
+            try:
+                vol = stats.node_vol_flooded(i)
+            except Exception:
+                continue
+            if vol <= min_flood_volume:
+                continue
+            try:
+                result.append(FloodingSummaryItem(
+                    node_id=nodes.get_id(i),
+                    max_overflow_rate=stats.node_max_overflow(i),
+                    total_flood_volume=vol,
+                    time_flooded=stats.node_time_flooded(i),
+                    max_depth=stats.node_max_depth(i),
+                ))
+            except Exception:
+                continue
+        result.sort(key=lambda x: x.total_flood_volume, reverse=True)
+        return result
 
-    for i in range(node_count):
-        node_id = await asyncio.to_thread(nodes.get_id, i)
-
-        try:
-            vol_flooded = await asyncio.to_thread(stats.node_vol_flooded, i)
-        except Exception:
-            continue
-
-        if vol_flooded <= min_flood_volume:
-            continue
-
-        try:
-            max_overflow = await asyncio.to_thread(stats.node_max_overflow, i)
-            time_flooded = await asyncio.to_thread(stats.node_time_flooded, i)
-            max_depth = await asyncio.to_thread(stats.node_max_depth, i)
-        except Exception:
-            continue
-
-        results.append(
-            FloodingSummaryItem(
-                node_id=node_id,
-                max_overflow_rate=max_overflow,
-                total_flood_volume=vol_flooded,
-                time_flooded=time_flooded,
-                max_depth=max_depth,
-            )
-        )
-
-    # Sort by total flood volume, largest first
-    results.sort(key=lambda item: item.total_flood_volume, reverse=True)
-    return results
+    return await asyncio.to_thread(_fetch_all)
 
 
 @analysis_mcp.tool()
@@ -603,39 +636,113 @@ async def get_capacity_summary(
     links = session.links
     link_count = await asyncio.to_thread(links.count)
 
-    results: list[CapacitySummaryItem] = []
+    def _fetch_all():
+        result = []
+        for i in range(link_count):
+            try:
+                filling = stats.link_max_filling(i)
+            except Exception:
+                continue
+            if filling <= max_filling_threshold:
+                continue
+            try:
+                result.append(CapacitySummaryItem(
+                    link_id=links.get_id(i),
+                    max_filling=filling,
+                    max_flow=stats.link_max_flow(i),
+                    max_velocity=stats.link_max_velocity(i),
+                    time_above_threshold=stats.link_surcharge_time(i),
+                    vol_flow=stats.link_vol_flow(i),
+                ))
+            except Exception:
+                continue
+        result.sort(key=lambda x: x.max_filling, reverse=True)
+        return result
 
-    for i in range(link_count):
-        link_id = await asyncio.to_thread(links.get_id, i)
+    return await asyncio.to_thread(_fetch_all)
 
-        try:
-            filling = await asyncio.to_thread(stats.link_max_filling, i)
-        except Exception:
-            continue
 
-        if filling <= max_filling_threshold:
-            continue
+@analysis_mcp.tool()
+async def get_report_snapshot(
+    ctx: Context,
+    session_id: str = "default",
+) -> ReportSnapshotModel:
+    """Return the full post-simulation report as structured data.
 
-        try:
-            max_flow = await asyncio.to_thread(stats.link_max_flow, i)
-            max_velocity = await asyncio.to_thread(stats.link_max_velocity, i)
-            surcharge_time = await asyncio.to_thread(stats.link_surcharge_time, i)
-        except Exception:
-            continue
+    Assembles the programmatic equivalent of the SWMM ``.rpt`` file into a
+    single structured response covering:
 
-        results.append(
-            CapacitySummaryItem(
-                link_id=link_id,
-                max_filling=filling,
-                max_flow=max_flow,
-                max_velocity=max_velocity,
-                time_above_threshold=surcharge_time,
-            )
-        )
+    * **Routing diagnostics** — time-step statistics and convergence metrics
+      (average/min/max step, total steps, number and percentage of
+      non-converging steps, average iterations, maximum Courant number)
+    * **Runoff continuity** — rainfall, evaporation, infiltration, runoff, and
+      storage change volumes with continuity error
+    * **Flow routing continuity** — inflow components, flooding, outflow, and
+      loss volumes with continuity error
+    * **Quality continuity** — per-pollutant mass balance with seep and evap
+      losses (empty when no pollutants are modelled)
+    * **Node flooding summary** — all nodes that experienced overflow, sorted
+      by total flood volume
+    * **Storage volume summary** — all STORAGE-type nodes with depth and
+      volume statistics
+    * **Link flow summary** — all links with peak flow, velocity, filling
+      ratio, total volume, and surcharge time
+    * **Pump summary** — PUMP links with startup count, total on-time,
+      volume pumped, and percentage time on
+    * **Subcatchment runoff summary** — precipitation, runoff volume, peak
+      rate, and runoff coefficient per subcatchment
 
-    # Sort by filling ratio, largest first
-    results.sort(key=lambda item: item.max_filling, reverse=True)
-    return results
+    Parameters
+    ----------
+    session_id:
+        Identifier of the session.  Defaults to ``"default"``.
+    """
+    from dataclasses import asdict
+    from openswmm.engine import get_report_snapshot as _engine_snapshot
+
+    sm = get_session_manager(ctx)
+    session = await sm.get_session(session_id)
+    require_state(session, "running", "ended")
+    require_new_engine(session, "Report snapshot")
+
+    snapshot = await asyncio.to_thread(_engine_snapshot, session.solver)
+    return ReportSnapshotModel.model_validate(asdict(snapshot))
+
+
+@analysis_mcp.tool()
+async def get_pump_summary(
+    ctx: Context,
+    session_id: str = "default",
+) -> list[PumpEntryModel]:
+    """Return post-simulation performance statistics for all pump links.
+
+    Equivalent to the Pumping Summary section of the SWMM ``.rpt`` file.
+    Only links of type PUMP are returned; if the model has no pumps the
+    list will be empty.
+
+    Each entry includes:
+
+    * ``link_id`` — pump identifier
+    * ``pump_curve_idx`` — index of the pump curve used (``-1`` = ideal pump)
+    * ``num_startups`` — total on/off cycles during the simulation
+    * ``total_on_time`` — cumulative run time (seconds)
+    * ``total_volume`` — total volume pumped
+    * ``pct_time_on`` — percentage of simulation duration the pump was active
+
+    Parameters
+    ----------
+    session_id:
+        Identifier of the session.  Defaults to ``"default"``.
+    """
+    from openswmm.engine import get_report_snapshot as _engine_snapshot
+
+    sm = get_session_manager(ctx)
+    session = await sm.get_session(session_id)
+    require_state(session, "running", "ended")
+    require_new_engine(session, "Pump summary")
+
+    snapshot = await asyncio.to_thread(_engine_snapshot, session.solver)
+    return [PumpEntryModel.model_validate(vars(p)) for p in snapshot.pump_summary]
 
 
 @analysis_mcp.tool()
@@ -1040,3 +1147,323 @@ def _write_json(
         json.dump(output, f, indent=2)
 
     return len(records)
+
+
+# ===========================================================================
+# Output reader breadth (Phase 2.5)
+#
+# Wraps the remaining OutputReader entry points that get_time_series doesn't
+# already cover: per-period metadata, snapshot ("attribute") readers for a
+# single object across all of its variables, system-level time series, and
+# the pollutant count from the .out file header.
+#
+# State contract: all of these read the binary .out file written when the
+# simulation reaches ENDED. require_state(session, "ended") enforces it;
+# callers must run the simulation to completion (e.g. via
+# lifecycle.run_simulation) before invoking these tools.
+# ===========================================================================
+
+
+def _node_attribute_keys(n_pollutants: int) -> list[str]:
+    """Variable order in the row returned by reader.get_node_attribute.
+
+    Index 0..5 are the engine base variables; indices 6..6+n_pollutants
+    are pollutant concentrations (one column per defined pollutant).
+    """
+    base = ["depth", "head", "volume", "lateral_inflow", "total_inflow", "overflow"]
+    return base + [f"pollutant_{i}" for i in range(n_pollutants)]
+
+
+def _link_attribute_keys(n_pollutants: int) -> list[str]:
+    base = ["flow", "depth", "velocity", "volume", "capacity"]
+    return base + [f"pollutant_{i}" for i in range(n_pollutants)]
+
+
+def _subcatch_attribute_keys(n_pollutants: int) -> list[str]:
+    base = [
+        "rainfall", "snow_depth", "evap", "infil", "runoff",
+        "gw_flow", "gw_elev", "soil_moist",
+    ]
+    return base + [f"pollutant_{i}" for i in range(n_pollutants)]
+
+
+@analysis_mcp.tool()
+async def output_metadata(ctx: Context, session_id: str = "default") -> dict:
+    """Return header metadata for the .out file (counts + timing + version).
+
+    Combines several small reader getters into one call so an LLM can size
+    a subsequent batch read in a single round-trip.
+    """
+    sm = get_session_manager(ctx)
+    session = await sm.get_session(session_id)
+    require_state(session, "ended")
+    require_new_engine(session, "Output reader metadata")
+
+    reader = await _ensure_output_reader(session)
+    version, units, n_sub, n_node, n_link, n_poll, n_periods, start, step, err = (
+        await asyncio.to_thread(
+            lambda: (
+                reader.get_version(),
+                reader.get_flow_units(),
+                reader.get_subcatch_count(),
+                reader.get_node_count(),
+                reader.get_link_count(),
+                reader.get_pollut_count(),
+                reader.get_period_count(),
+                reader.get_start_date(),
+                reader.get_report_step(),
+                reader.get_error_code(),
+            )
+        )
+    )
+    return {
+        "session_id": session_id,
+        "version": version,
+        "flow_units_code": units,
+        "subcatchment_count": n_sub,
+        "node_count": n_node,
+        "link_count": n_link,
+        "pollutant_count": n_poll,
+        "period_count": n_periods,
+        "start_date": start,
+        "report_step_seconds": step,
+        "error_code": err,
+    }
+
+
+@analysis_mcp.tool()
+async def output_period_count(ctx: Context, session_id: str = "default") -> dict:
+    """Return the number of reporting periods written to the .out file."""
+    sm = get_session_manager(ctx)
+    session = await sm.get_session(session_id)
+    require_state(session, "ended")
+    require_new_engine(session, "Output reader period count")
+
+    reader = await _ensure_output_reader(session)
+    n = await asyncio.to_thread(reader.get_period_count)
+    return {"session_id": session_id, "period_count": n}
+
+
+@analysis_mcp.tool()
+async def output_pollutant_count(ctx: Context, session_id: str = "default") -> dict:
+    """Return the number of pollutants tracked in the .out file."""
+    sm = get_session_manager(ctx)
+    session = await sm.get_session(session_id)
+    require_state(session, "ended")
+    require_new_engine(session, "Output reader pollutant count")
+
+    reader = await _ensure_output_reader(session)
+    n = await asyncio.to_thread(reader.get_pollut_count)
+    return {"session_id": session_id, "pollutant_count": n}
+
+
+@analysis_mcp.tool()
+async def output_period_time(
+    ctx: Context, session_id: str = "default", period: int = 0
+) -> dict:
+    """Return the elapsed time (project time units) for a reporting period.
+
+    The value combines with ``start_date`` (from :func:`output_metadata`)
+    to produce an absolute timestamp.
+    """
+    sm = get_session_manager(ctx)
+    session = await sm.get_session(session_id)
+    require_state(session, "ended")
+    require_new_engine(session, "Output reader period time")
+
+    reader = await _ensure_output_reader(session)
+    n_periods = await asyncio.to_thread(reader.get_period_count)
+    if not 0 <= period < n_periods:
+        raise ToolError(
+            f"[{ErrorCode.VALIDATION_ERROR}] period must be in [0, {n_periods}); "
+            f"got {period}."
+        )
+    elapsed = await asyncio.to_thread(reader.get_period_time, period)
+    return {
+        "session_id": session_id,
+        "period": period,
+        "elapsed_time": elapsed,
+    }
+
+
+@analysis_mcp.tool()
+async def output_node_attribute(
+    ctx: Context,
+    session_id: str = "default",
+    node_id: str = "",
+    period: int = 0,
+) -> dict:
+    """Return all variable values for a node at a single reporting period.
+
+    Variables are returned as a dict keyed by name: ``depth``, ``head``,
+    ``volume``, ``lateral_inflow``, ``total_inflow``, ``overflow``, plus
+    ``pollutant_0`` .. ``pollutant_{n-1}`` when pollutants are tracked.
+
+    Wraps ``swmm_output_get_node_attribute`` — the per-object snapshot
+    accessor distinct from ``get_time_series`` (one variable over time)
+    and ``get_node_result`` (one variable over all nodes at one period).
+    """
+    if not node_id:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] node_id must not be empty.")
+    sm = get_session_manager(ctx)
+    session = await sm.get_session(session_id)
+    require_state(session, "ended")
+    require_new_engine(session, "Output reader node attribute")
+
+    reader = await _ensure_output_reader(session)
+    n_periods = await asyncio.to_thread(reader.get_period_count)
+    if not 0 <= period < n_periods:
+        raise ToolError(
+            f"[{ErrorCode.VALIDATION_ERROR}] period must be in [0, {n_periods}); "
+            f"got {period}."
+        )
+
+    node_idx = await asyncio.to_thread(session.nodes.get_index, node_id)
+    if node_idx < 0:
+        raise ToolError(
+            f"[{ErrorCode.ELEMENT_NOT_FOUND}] Node '{node_id}' not found."
+        )
+
+    n_poll = await asyncio.to_thread(reader.get_pollut_count)
+    arr = await asyncio.to_thread(reader.get_node_attribute, node_idx, period)
+    keys = _node_attribute_keys(n_poll)
+    values = ndarray_to_list(arr)
+    return {
+        "session_id": session_id,
+        "node_id": node_id,
+        "node_index": node_idx,
+        "period": period,
+        "attributes": dict(zip(keys, values[: len(keys)], strict=False)),
+    }
+
+
+@analysis_mcp.tool()
+async def output_link_attribute(
+    ctx: Context,
+    session_id: str = "default",
+    link_id: str = "",
+    period: int = 0,
+) -> dict:
+    """Return all variable values for a link at a single reporting period.
+
+    Variables are returned as a dict keyed by name: ``flow``, ``depth``,
+    ``velocity``, ``volume``, ``capacity``, plus ``pollutant_i`` columns
+    when pollutants are tracked.
+    """
+    if not link_id:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] link_id must not be empty.")
+    sm = get_session_manager(ctx)
+    session = await sm.get_session(session_id)
+    require_state(session, "ended")
+    require_new_engine(session, "Output reader link attribute")
+
+    reader = await _ensure_output_reader(session)
+    n_periods = await asyncio.to_thread(reader.get_period_count)
+    if not 0 <= period < n_periods:
+        raise ToolError(
+            f"[{ErrorCode.VALIDATION_ERROR}] period must be in [0, {n_periods}); "
+            f"got {period}."
+        )
+
+    link_idx = await asyncio.to_thread(session.links.get_index, link_id)
+    if link_idx < 0:
+        raise ToolError(
+            f"[{ErrorCode.ELEMENT_NOT_FOUND}] Link '{link_id}' not found."
+        )
+
+    n_poll = await asyncio.to_thread(reader.get_pollut_count)
+    arr = await asyncio.to_thread(reader.get_link_attribute, link_idx, period)
+    keys = _link_attribute_keys(n_poll)
+    values = ndarray_to_list(arr)
+    return {
+        "session_id": session_id,
+        "link_id": link_id,
+        "link_index": link_idx,
+        "period": period,
+        "attributes": dict(zip(keys, values[: len(keys)], strict=False)),
+    }
+
+
+@analysis_mcp.tool()
+async def output_subcatch_attribute(
+    ctx: Context,
+    session_id: str = "default",
+    subcatch_id: str = "",
+    period: int = 0,
+) -> dict:
+    """Return all variable values for a subcatchment at a reporting period.
+
+    Variables: ``rainfall``, ``snow_depth``, ``evap``, ``infil``, ``runoff``,
+    ``gw_flow``, ``gw_elev``, ``soil_moist``, plus ``pollutant_i`` columns
+    when pollutants are tracked.
+    """
+    if not subcatch_id:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] subcatch_id must not be empty.")
+    sm = get_session_manager(ctx)
+    session = await sm.get_session(session_id)
+    require_state(session, "ended")
+    require_new_engine(session, "Output reader subcatchment attribute")
+
+    reader = await _ensure_output_reader(session)
+    n_periods = await asyncio.to_thread(reader.get_period_count)
+    if not 0 <= period < n_periods:
+        raise ToolError(
+            f"[{ErrorCode.VALIDATION_ERROR}] period must be in [0, {n_periods}); "
+            f"got {period}."
+        )
+
+    sc_idx = await asyncio.to_thread(session.subcatchments.get_index, subcatch_id)
+    if sc_idx < 0:
+        raise ToolError(
+            f"[{ErrorCode.ELEMENT_NOT_FOUND}] Subcatchment '{subcatch_id}' not found."
+        )
+
+    n_poll = await asyncio.to_thread(reader.get_pollut_count)
+    arr = await asyncio.to_thread(reader.get_subcatch_attribute, sc_idx, period)
+    keys = _subcatch_attribute_keys(n_poll)
+    values = ndarray_to_list(arr)
+    return {
+        "session_id": session_id,
+        "subcatch_id": subcatch_id,
+        "subcatch_index": sc_idx,
+        "period": period,
+        "attributes": dict(zip(keys, values[: len(keys)], strict=False)),
+    }
+
+
+@analysis_mcp.tool()
+async def output_system_result(
+    ctx: Context,
+    session_id: str = "default",
+    variable: str = "rainfall",
+    period: int = 0,
+) -> dict:
+    """Return a single system-level variable at a single reporting period.
+
+    Cheaper than ``get_time_series`` when only one timestep is needed.
+    ``variable`` is one of: ``temperature``, ``rainfall``, ``snow_depth``,
+    ``evap``, ``infil``, ``runoff``, ``dw_inflow``, ``gw_inflow``,
+    ``lat_inflow``, ``flooding``, ``outflow``, ``storage``, ``evap_total``,
+    ``pet``.
+    """
+    sm = get_session_manager(ctx)
+    session = await sm.get_session(session_id)
+    require_state(session, "ended")
+    require_new_engine(session, "Output reader system result")
+
+    reader = await _ensure_output_reader(session)
+    n_periods = await asyncio.to_thread(reader.get_period_count)
+    if not 0 <= period < n_periods:
+        raise ToolError(
+            f"[{ErrorCode.VALIDATION_ERROR}] period must be in [0, {n_periods}); "
+            f"got {period}."
+        )
+
+    var_enum = _resolve_system_var(variable)
+    value = await asyncio.to_thread(reader.get_system_result, period, var_enum)
+    return {
+        "session_id": session_id,
+        "variable": variable,
+        "period": period,
+        "value": value,
+    }
