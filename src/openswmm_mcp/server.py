@@ -38,6 +38,7 @@ from openswmm_mcp.tools.forcing import forcing_mcp  # noqa: E402
 from openswmm_mcp.tools.geopackage import geopackage_mcp  # noqa: E402
 from openswmm_mcp.tools.hotstart import hotstart_mcp  # noqa: E402
 from openswmm_mcp.tools.inflows import inflows_mcp  # noqa: E402
+from openswmm_mcp.tools.infrastructure import infrastructure_mcp  # noqa: E402
 from openswmm_mcp.tools.lifecycle import lifecycle_mcp  # noqa: E402
 from openswmm_mcp.tools.query import query_mcp  # noqa: E402
 from openswmm_mcp.tools.spatial_quality import spatial_quality_mcp  # noqa: E402
@@ -55,6 +56,7 @@ mcp.mount(geopackage_mcp, namespace="geopackage")
 mcp.mount(tables_mcp, namespace="tables")
 mcp.mount(inflows_mcp, namespace="inflows")
 mcp.mount(controls_mcp, namespace="controls")
+mcp.mount(infrastructure_mcp, namespace="infrastructure")
 
 # ---------------------------------------------------------------------------
 # Resource and prompt sub-servers (no namespace -- keep URIs short)
