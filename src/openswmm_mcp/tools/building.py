@@ -726,13 +726,31 @@ async def validate_model(
     session = await _get_builder_session(ctx, session_id)
     builder = session.model_builder
 
+    # ModelBuilder.validate() returns None on success and raises EngineError
+    # / RuntimeError on validation failure (the engine doesn't surface a
+    # warning list the way an older API did). Catch the failure path and
+    # forward the engine's message; on success report no warnings.
     try:
         messages = await asyncio.to_thread(builder.validate)
     except ToolError:
         raise
     except Exception as exc:
-        raise ToolError(f"[{ErrorCode.ENGINE_ERROR}] Validation failed: {exc}") from exc
+        # Validation failed — the engine raised. Surface the message as a
+        # single warning so the caller can see the failure reason without
+        # having to catch the tool error.
+        return {
+            "status": "warnings",
+            "session_id": session_id,
+            "valid": False,
+            "message_count": 1,
+            "messages": [str(exc)],
+        }
 
+    # validate() may return None (no messages) or a list / tuple of messages.
+    if messages is None:
+        messages = []
+    elif not isinstance(messages, list):
+        messages = list(messages)
     is_valid = len(messages) == 0
 
     return {
@@ -778,10 +796,17 @@ async def write_model(
                     "ModelBuilder attached."
                 )
 
-            # Finalize the builder to get a solver, then wrap in a backend.
-            solver = await asyncio.to_thread(builder.finalize)
+            # Finalize the model (builds connectivity, allocates arrays),
+            # then transfer ownership of the engine handle to a Solver via
+            # to_solver(). builder.finalize() returns None — the engine
+            # handle stays on the builder until to_solver() steals it.
+            await asyncio.to_thread(builder.finalize)
+            solver = await asyncio.to_thread(builder.to_solver)
             session.backend = OpenSwmmBackend.from_solver(solver)
             session.state = "created"
+            # The builder is now invalidated; drop the reference so future
+            # tool calls don't accidentally try to use it.
+            session.model_builder = None
 
             # Apply any pending options that were deferred
             pending = getattr(session, "_pending_options", {})

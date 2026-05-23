@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+pytest.importorskip("openswmm.engine")
+
 from openswmm_mcp.errors import ToolError
 from openswmm_mcp.models import BuildingResult
 
@@ -156,6 +158,7 @@ class TestAddNode:
 
 class TestPopLastNode:
     async def test_pop_last_node_undoes_add(self, session_manager):
+        from openswmm.engine import Nodes
         from openswmm_mcp.tools.building import add_node, pop_last_node
 
         ctx = await _create_building_session(session_manager, "bld_pln_ok")
@@ -169,11 +172,15 @@ class TestPopLastNode:
         assert result.element_type == "node"
         assert result.element_id == "J2"
 
-        # The mock builder's _nodes list should now be back to ["J1"].
+        # After popping J2, only J1 should remain. Use the public Nodes API
+        # rather than the (no-longer-existent) builder._nodes mock attr.
         session = await session_manager.get_session("bld_pln_ok")
-        assert session.model_builder._nodes == ["J1"]
+        nodes = Nodes(session.model_builder)
+        assert nodes.count() == 1
+        assert nodes.get_id(0) == "J1"
 
     async def test_pop_last_node_wrong_tail_raises(self, session_manager):
+        from openswmm.engine import Nodes
         from openswmm_mcp.tools.building import add_node, pop_last_node
 
         ctx = await _create_building_session(session_manager, "bld_pln_wt")
@@ -186,7 +193,10 @@ class TestPopLastNode:
 
         # The list is unchanged on failure.
         session = await session_manager.get_session("bld_pln_wt")
-        assert session.model_builder._nodes == ["J1", "J2"]
+        nodes = Nodes(session.model_builder)
+        assert nodes.count() == 2
+        assert nodes.get_id(0) == "J1"
+        assert nodes.get_id(1) == "J2"
 
     async def test_pop_last_node_empty_id(self, session_manager):
         from openswmm_mcp.tools.building import pop_last_node
@@ -277,6 +287,7 @@ class TestAddLink:
 
 class TestPopLastLink:
     async def test_pop_last_link_undoes_add(self, session_manager):
+        from openswmm.engine import Links
         from openswmm_mcp.tools.building import add_link, add_node, pop_last_link
 
         ctx = await _create_building_session(session_manager, "bld_pll_ok")
@@ -297,8 +308,10 @@ class TestPopLastLink:
         assert result.element_type == "link"
         assert result.element_id == "C1"
 
+        # After popping C1, no links should remain. Use the public Links API.
         session = await session_manager.get_session("bld_pll_ok")
-        assert session.model_builder._links == []
+        links = Links(session.model_builder)
+        assert links.count() == 0
 
     async def test_pop_last_link_wrong_tail_raises(self, session_manager):
         from openswmm_mcp.tools.building import add_link, add_node, pop_last_link
@@ -341,9 +354,11 @@ class TestPopLastLink:
 
 class TestAddSubcatchment:
     async def test_add_subcatchment(self, session_manager):
-        from openswmm_mcp.tools.building import add_subcatchment
+        from openswmm_mcp.tools.building import add_node, add_subcatchment
 
         ctx = await _create_building_session(session_manager, "bld_sc")
+        # outlet_node must exist before add_subcatchment can reference it.
+        await add_node(ctx, session_id="bld_sc", node_id="J1", node_type="junction")
         result = await add_subcatchment(
             ctx,
             session_id="bld_sc",
@@ -374,13 +389,32 @@ class TestAddSubcatchment:
 # ---------------------------------------------------------------------------
 
 
+async def _build_minimal_valid_model(session_manager, session_id: str):
+    """Helper: build the smallest model that ModelBuilder.validate() accepts.
+
+    The engine requires at least an outfall plus a sensible simulation time
+    window. We add one junction + one outfall and set the start / end dates
+    on the model_builder property directly (no MCP tool wraps that today).
+    """
+    import datetime
+
+    from openswmm_mcp.tools.building import add_node
+
+    ctx = await _create_building_session(session_manager, session_id)
+    await add_node(ctx, session_id=session_id, node_id="J1", node_type="junction")
+    await add_node(ctx, session_id=session_id, node_id="O1", node_type="outfall")
+
+    session = await session_manager.get_session(session_id)
+    session.model_builder.start_datetime = datetime.datetime(2026, 1, 1)
+    session.model_builder.end_datetime = datetime.datetime(2026, 1, 2)
+    return ctx
+
+
 class TestValidateModel:
     async def test_validate_model(self, session_manager):
-        from openswmm_mcp.tools.building import add_node, validate_model
+        from openswmm_mcp.tools.building import validate_model
 
-        ctx = await _create_building_session(session_manager, "bld_val")
-
-        await add_node(ctx, session_id="bld_val", node_id="J1", node_type="junction")
+        ctx = await _build_minimal_valid_model(session_manager, "bld_val")
 
         result = await validate_model(ctx, session_id="bld_val")
 
@@ -397,12 +431,9 @@ class TestValidateModel:
 
 class TestWriteModel:
     async def test_write_model(self, session_manager, tmp_path):
-        from openswmm_mcp.tools.building import add_node, write_model
+        from openswmm_mcp.tools.building import write_model
 
-        ctx = await _create_building_session(session_manager, "bld_write")
-
-        await add_node(ctx, session_id="bld_write", node_id="J1", node_type="junction")
-        await add_node(ctx, session_id="bld_write", node_id="O1", node_type="outfall")
+        ctx = await _build_minimal_valid_model(session_manager, "bld_write")
 
         out_path = str(tmp_path / "output.inp")
         result = await write_model(ctx, session_id="bld_write", output_path=out_path)
@@ -419,11 +450,9 @@ class TestWriteModel:
             await write_model(ctx, session_id="bld_wempty", output_path="")
 
     async def test_write_model_transitions_state(self, session_manager, tmp_path):
-        from openswmm_mcp.tools.building import add_node, write_model
+        from openswmm_mcp.tools.building import write_model
 
-        ctx = await _create_building_session(session_manager, "bld_wstate")
-
-        await add_node(ctx, session_id="bld_wstate", node_id="J1", node_type="junction")
+        ctx = await _build_minimal_valid_model(session_manager, "bld_wstate")
 
         out_path = str(tmp_path / "finalized.inp")
         await write_model(ctx, session_id="bld_wstate", output_path=out_path)
