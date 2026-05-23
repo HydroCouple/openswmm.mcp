@@ -9,7 +9,7 @@ from pathlib import Path
 from fastmcp import Context, FastMCP
 
 from openswmm_mcp.dependencies import require_new_engine
-from openswmm_mcp.errors import ToolError
+from openswmm_mcp.errors import ErrorCode, ToolError
 from openswmm_mcp.models import HotStartResult
 
 hotstart_mcp = FastMCP("hotstart")
@@ -182,3 +182,122 @@ async def clone_session(
             f"Session '{target_id}' cloned from '{source_id}' with hot-start state applied."
         ),
     }
+
+
+# ===========================================================================
+# Multi-slot saves management (Phase 2 wave 2)
+#
+# The Phase 1 engine work added saves-list editor functions to HotStart;
+# these wrap them as MCP tools so callers can configure scheduled hotstart
+# saves in the model's [FILES] section without writing .inp text by hand.
+# ===========================================================================
+
+
+@hotstart_mcp.tool()
+async def saves_count(ctx: Context, session_id: str = "default") -> dict:
+    """Return the number of scheduled SAVE HOTSTART entries in [FILES]."""
+    from openswmm.engine import HotStart
+
+    sm = _get_session_manager(ctx)
+    session = await sm.get_session(session_id)
+    require_new_engine(session, "Hotstart saves management")
+    n = await asyncio.to_thread(HotStart.saves_count, session.solver)
+    return {"session_id": session_id, "count": n}
+
+
+@hotstart_mcp.tool()
+async def saves_get(
+    ctx: Context, session_id: str = "default", index: int = 0
+) -> dict:
+    """Return the path + datetime of the I{index}-th scheduled save."""
+    from openswmm.engine import HotStart
+
+    sm = _get_session_manager(ctx)
+    session = await sm.get_session(session_id)
+    require_new_engine(session, "Hotstart saves management")
+    path = await asyncio.to_thread(HotStart.saves_get_path, session.solver, index)
+    dt = await asyncio.to_thread(HotStart.saves_get_datetime, session.solver, index)
+    return {
+        "session_id": session_id, "index": index,
+        "path": path, "datetime_oadate": dt,
+    }
+
+
+@hotstart_mcp.tool()
+async def saves_add(
+    ctx: Context, session_id: str = "default",
+    path: str = "", datetime_oadate: float = 0.0,
+) -> dict:
+    """Append a new SAVE HOTSTART entry.
+
+    ``datetime_oadate`` is decimal days (OADate). Use ``0.0`` to schedule
+    a save at end of simulation.
+    """
+    if not path:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] path must not be empty.")
+    from openswmm.engine import HotStart
+
+    sm = _get_session_manager(ctx)
+    session = await sm.get_session(session_id)
+    require_new_engine(session, "Hotstart saves management")
+    await asyncio.to_thread(
+        HotStart.saves_add, session.solver, path, float(datetime_oadate)
+    )
+    n = await asyncio.to_thread(HotStart.saves_count, session.solver)
+    return {
+        "status": "ok", "session_id": session_id,
+        "index": n - 1, "path": path, "datetime_oadate": datetime_oadate,
+    }
+
+
+@hotstart_mcp.tool()
+async def saves_set(
+    ctx: Context, session_id: str = "default",
+    index: int = 0, path: str | None = None,
+    datetime_oadate: float | None = None,
+) -> dict:
+    """Update the path and/or datetime of the I{index}-th scheduled save.
+
+    Fields not supplied (None) are left unchanged.
+    """
+    from openswmm.engine import HotStart
+
+    sm = _get_session_manager(ctx)
+    session = await sm.get_session(session_id)
+    require_new_engine(session, "Hotstart saves management")
+    if path is not None:
+        await asyncio.to_thread(HotStart.saves_set_path, session.solver, index, path)
+    if datetime_oadate is not None:
+        await asyncio.to_thread(
+            HotStart.saves_set_datetime, session.solver, index, float(datetime_oadate)
+        )
+    return {
+        "status": "ok", "session_id": session_id, "index": index,
+        "path": path, "datetime_oadate": datetime_oadate,
+    }
+
+
+@hotstart_mcp.tool()
+async def saves_remove(
+    ctx: Context, session_id: str = "default", index: int = 0
+) -> dict:
+    """Remove the I{index}-th scheduled save. Trailing entries shift down."""
+    from openswmm.engine import HotStart
+
+    sm = _get_session_manager(ctx)
+    session = await sm.get_session(session_id)
+    require_new_engine(session, "Hotstart saves management")
+    await asyncio.to_thread(HotStart.saves_remove, session.solver, index)
+    return {"status": "ok", "session_id": session_id, "removed_index": index}
+
+
+@hotstart_mcp.tool()
+async def saves_clear(ctx: Context, session_id: str = "default") -> dict:
+    """Remove every scheduled save."""
+    from openswmm.engine import HotStart
+
+    sm = _get_session_manager(ctx)
+    session = await sm.get_session(session_id)
+    require_new_engine(session, "Hotstart saves management")
+    await asyncio.to_thread(HotStart.saves_clear, session.solver)
+    return {"status": "ok", "session_id": session_id, "remaining": 0}
