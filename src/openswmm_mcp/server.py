@@ -40,9 +40,11 @@ from openswmm_mcp.tools.hotstart import hotstart_mcp  # noqa: E402
 from openswmm_mcp.tools.inflows import inflows_mcp  # noqa: E402
 from openswmm_mcp.tools.infrastructure import infrastructure_mcp  # noqa: E402
 from openswmm_mcp.tools.lifecycle import lifecycle_mcp  # noqa: E402
+from openswmm_mcp.tools.links import links_mcp  # noqa: E402
 from openswmm_mcp.tools.nodes import nodes_mcp  # noqa: E402
 from openswmm_mcp.tools.query import query_mcp  # noqa: E402
 from openswmm_mcp.tools.spatial_quality import spatial_quality_mcp  # noqa: E402
+from openswmm_mcp.tools.subcatchments import subcatchments_mcp  # noqa: E402
 from openswmm_mcp.tools.tables import tables_mcp  # noqa: E402
 
 mcp.mount(lifecycle_mcp, namespace="lifecycle")
@@ -59,6 +61,8 @@ mcp.mount(inflows_mcp, namespace="inflows")
 mcp.mount(controls_mcp, namespace="controls")
 mcp.mount(infrastructure_mcp, namespace="infrastructure")
 mcp.mount(nodes_mcp, namespace="nodes")
+mcp.mount(links_mcp, namespace="links")
+mcp.mount(subcatchments_mcp, namespace="subcatchments")
 
 # ---------------------------------------------------------------------------
 # Resource and prompt sub-servers (no namespace -- keep URIs short)
