@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+pytest.importorskip("openswmm.engine")
+
 from openswmm_mcp.errors import ToolError
 from openswmm_mcp.models import HotStartResult
 from openswmm_mcp.tools.hotstart import clone_session, load_hotstart, save_hotstart

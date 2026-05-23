@@ -230,6 +230,99 @@ class TestSetLinkStatus:
 
 
 # ===========================================================================
+# DA-ENG-02 — get_id (rule-name extraction)
+# ===========================================================================
+
+
+class TestGetId:
+    """``get_id`` parses the canonical rule name from the stored text."""
+
+    async def test_canonical_name(self, session_manager, inp_path):
+        from openswmm_mcp.tools.controls import add_rule, get_id
+
+        ctx = await _opened_session(session_manager, inp_path, "ctl_id_canonical")
+        await add_rule(
+            ctx,
+            session_id="ctl_id_canonical",
+            rule_text=(
+                "RULE PumpOnHigh\n"
+                "IF NODE J1 DEPTH > 5\n"
+                "THEN PUMP P1 STATUS = ON"
+            ),
+        )
+        result = await get_id(ctx, session_id="ctl_id_canonical", rule_index=0)
+        assert result["name"] == "PumpOnHigh"
+        assert result["rule_index"] == 0
+
+    async def test_lowercase_and_mixed_case_keyword(
+        self, session_manager, inp_path
+    ):
+        from openswmm_mcp.tools.controls import add_rule, get_id
+
+        ctx = await _opened_session(session_manager, inp_path, "ctl_id_case")
+        await add_rule(
+            ctx, session_id="ctl_id_case",
+            rule_text="rule WeirBypass\nIF NODE J1 DEPTH < 1\nTHEN PUMP P1 STATUS = OFF",
+        )
+        await add_rule(
+            ctx, session_id="ctl_id_case",
+            rule_text="Rule TankFill\nIF NODE J1 DEPTH < 2\nTHEN PUMP P1 STATUS = ON",
+        )
+        a = await get_id(ctx, session_id="ctl_id_case", rule_index=0)
+        b = await get_id(ctx, session_id="ctl_id_case", rule_index=1)
+        assert a["name"] == "WeirBypass"
+        assert b["name"] == "TankFill"
+
+    async def test_malformed_rule_returns_none(
+        self, session_manager, inp_path
+    ):
+        """Rules with no parseable RULE keyword surface ``name=None``
+        so callers can render a sentinel display label."""
+        from openswmm_mcp.tools.controls import add_rule, get_id
+
+        ctx = await _opened_session(session_manager, inp_path, "ctl_id_bad")
+        # No RULE keyword at all — but engine still accepts the text.
+        await add_rule(
+            ctx, session_id="ctl_id_bad",
+            rule_text="IF NODE J1 DEPTH > 5\nTHEN PUMP P1 STATUS = ON",
+        )
+        result = await get_id(ctx, session_id="ctl_id_bad", rule_index=0)
+        assert result["name"] is None
+
+
+class TestListRulesWithNames:
+    """``list_rules`` now includes the parsed ``name`` per rule (DA.1)."""
+
+    async def test_list_includes_name_field(self, session_manager, inp_path):
+        from openswmm_mcp.tools.controls import add_rule, list_rules
+
+        ctx = await _opened_session(session_manager, inp_path, "ctl_list_named")
+        await add_rule(
+            ctx, session_id="ctl_list_named",
+            rule_text="RULE Pump_A\nIF NODE J1 DEPTH > 5\nTHEN PUMP P1 STATUS = ON",
+        )
+        await add_rule(
+            ctx, session_id="ctl_list_named",
+            rule_text="rule Weir_B\nIF NODE J1 DEPTH < 1\nTHEN PUMP P1 STATUS = OFF",
+        )
+        # Malformed rule — name should come back as None.
+        await add_rule(
+            ctx, session_id="ctl_list_named",
+            rule_text="IF NODE J2 DEPTH > 5\nTHEN PUMP P2 STATUS = ON",
+        )
+
+        result = await list_rules(ctx, session_id="ctl_list_named")
+        assert result["count"] == 3
+        assert result["rules"][0]["name"] == "Pump_A"
+        assert result["rules"][1]["name"] == "Weir_B"
+        assert result["rules"][2]["name"] is None
+        # The text field is still present alongside the name.
+        for row in result["rules"]:
+            assert "text" in row
+            assert "index" in row
+
+
+# ===========================================================================
 # Backend guard
 # ===========================================================================
 

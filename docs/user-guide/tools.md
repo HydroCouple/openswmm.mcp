@@ -1,723 +1,407 @@
 # Tools
 
-The OpenSWMM MCP Server provides over 45 tools organised into eight
-namespaced groups. Each tool name is prefixed with its namespace
-(e.g. `lifecycle_open_model`, `query_get_node_info`).
-
-## Lifecycle Tools (`lifecycle_*`)
-
-Tools for opening, running, stepping, and closing SWMM models.
-
-### `lifecycle_open_model`
-
-Open a SWMM model file and initialise the engine.
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `inp_path` | `str` | *required* | Path to the `.inp` file. |
-| `session_id` | `str` | `"default"` | Session identifier. |
-| `rpt_path` | `str` | `None` | Custom path for the `.rpt` report file. |
-| `out_path` | `str` | `None` | Custom path for the `.out` binary output file. |
-
-**Returns:** `ModelSummary` with element counts, flow units, routing model, and time range.
-
-### `lifecycle_run_simulation`
-
-Run the full simulation to completion. This is a background task that reports
-progress as a percentage.
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `session_id` | `str` | `"default"` | Session identifier. |
-
-**Returns:** `SimulationResult` with wall time, step count, and continuity errors.
-
-### `lifecycle_step_simulation`
-
-Advance the simulation by one or more timesteps.
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `session_id` | `str` | `"default"` | Session identifier. |
-| `num_steps` | `int` | `1` | Number of timesteps to advance. |
-
-**Returns:** `StepResult` with current simulation time and completion status.
-
-### `lifecycle_get_simulation_time`
-
-Return the current simulation timing information (start, end, current time,
-elapsed fraction, routing timestep).
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `session_id` | `str` | `"default"` | Session identifier. |
-
-### `lifecycle_get_simulation_state`
-
-Return the current session and solver state including model metadata.
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `session_id` | `str` | `"default"` | Session identifier. |
-
-### `lifecycle_close_model`
-
-Close and clean up a simulation session.
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `session_id` | `str` | `"default"` | Session identifier. |
-
-### `lifecycle_list_sessions`
-
-List all active simulation sessions.
-
----
-
-## Query Tools (`query_*`)
-
-Read-only tools for inspecting model elements and searching across the model.
-
-### `query_get_node_info`
-
-Return properties and state for one or all nodes.
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `session_id` | `str` | `"default"` | Session identifier. |
-| `node_id` | `str` | `None` | Node ID. Omit to get all nodes. |
-| `properties` | `list[str]` | `None` | Filter returned fields (reserved for future use). |
-
-**Returns:** `NodeInfo` or `list[NodeInfo]` with ID, type, invert elevation, max depth, and runtime state (depth, head, volume, lateral inflow, overflow).
-
-### `query_get_link_info`
-
-Return properties and state for one or all links.
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `session_id` | `str` | `"default"` | Session identifier. |
-| `link_id` | `str` | `None` | Link ID. Omit to get all links. |
-
-**Returns:** `LinkInfo` or `list[LinkInfo]` with ID, type, from/to nodes, length, roughness, and runtime state (flow, depth, velocity, capacity).
-
-### `query_get_subcatchment_info`
-
-Return properties and state for one or all subcatchments.
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `session_id` | `str` | `"default"` | Session identifier. |
-| `subcatch_id` | `str` | `None` | Subcatchment ID. Omit to get all. |
-
-**Returns:** `SubcatchmentInfo` or `list[SubcatchmentInfo]` with ID, area, imperviousness, slope, width, and runtime state (rainfall, runoff).
-
-### `query_get_gage_info`
-
-Return properties and state for one or all rain gages.
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `session_id` | `str` | `"default"` | Session identifier. |
-| `gage_id` | `str` | `None` | Gage ID. Omit to get all. |
-
-**Returns:** `GageInfo` or `list[GageInfo]` with ID, data source, rain type, and current rainfall.
-
-### `query_get_system_summary`
-
-Return a full system summary including counts, options, and timing.
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `session_id` | `str` | `"default"` | Session identifier. |
-
-**Returns:** `SystemSummary` with element counts, flow units, routing model, and current simulation time.
-
-### `query_find_elements`
-
-Search for model elements by ID pattern and/or type.
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `session_id` | `str` | `"default"` | Session identifier. |
-| `pattern` | `str` | `None` | Python regex matched against element IDs (case-insensitive). |
-| `element_type` | `str` | `None` | Filter by `"node"`, `"link"`, `"subcatchment"`, or `"gage"`. |
-
-**Returns:** `list[ElementSearchResult]` with element type, ID, and index.
-
----
-
-## Forcing Tools (`forcing_*`)
-
-Tools for applying runtime forcing overrides and manipulating control rules
-during a running simulation. All require the session to be in the `"running"`
-state.
-
-### `forcing_set_forcing`
-
-Apply a runtime forcing override to a model element.
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `session_id` | `str` | `"default"` | Session identifier. |
-| `target_type` | `str` | *required* | `"node"`, `"link"`, `"subcatchment"`, or `"gage"`. |
-| `element_id` | `str` | *required* | Element identifier. |
-| `variable` | `str` | *required* | Variable to override (see table below). |
-| `value` | `float` | `0.0` | Forcing value. |
-| `mode` | `str` | `"replace"` | `"replace"` or `"add"`. |
-| `persist` | `bool` | `False` | If `True`, override persists across timesteps. |
-
-**Valid variables by target type:**
-
-| Target Type | Variables |
-|---|---|
-| `node` | `lateral_inflow`, `head`, `quality` |
-| `link` | `flow`, `setting` |
-| `subcatchment` | `rainfall`, `evap` |
-| `gage` | `rainfall` |
-
-### `forcing_clear_forcing`
-
-Clear forcing overrides. Omit both parameters to clear all; provide both to
-clear a specific element.
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `session_id` | `str` | `"default"` | Session identifier. |
-| `target_type` | `str` | `None` | Element category. |
-| `element_id` | `str` | `None` | Element identifier. |
-
-### `forcing_set_link_control`
-
-Directly set the control setting on a link (e.g. pump speed, orifice
-opening fraction).
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `session_id` | `str` | `"default"` | Session identifier. |
-| `link_id` | `str` | *required* | Link identifier. |
-| `setting` | `float` | `0.0` | New control setting value. |
-
-### `forcing_add_control_rule`
-
-Add a new control rule in SWMM rule syntax that takes effect immediately.
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `session_id` | `str` | `"default"` | Session identifier. |
-| `rule_text` | `str` | *required* | SWMM rule syntax string. |
-
-**Example rule text:** `"RULE R1\nIF NODE J1 DEPTH > 5\nTHEN PUMP P1 STATUS = ON"`
-
-### `forcing_set_rainfall_override`
-
-Convenience shortcut to override rainfall on a rain gage with a persistent
-replacement value.
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `session_id` | `str` | `"default"` | Session identifier. |
-| `gage_id` | `str` | *required* | Rain gage identifier. |
-| `rainfall` | `float` | `0.0` | Rainfall intensity (model units). |
-
----
-
-## Analysis Tools (`analysis_*`)
-
-Post-simulation analysis tools for statistics, time series, flooding, and
-capacity summaries.
-
-### `analysis_get_statistics`
-
-Retrieve post-simulation statistics for a single model element.
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `session_id` | `str` | `"default"` | Session identifier. |
-| `element_type` | `str` | `"node"` | `"node"`, `"link"`, or `"subcatchment"`. |
-| `element_id` | `str` | *required* | Element identifier. |
-
-### `analysis_get_mass_balance`
-
-Retrieve mass-balance continuity errors and volumetric totals.
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `session_id` | `str` | `"default"` | Session identifier. |
-
-**Returns:** `MassBalanceResult` with runoff/routing/quality continuity errors and volume breakdowns.
-
-### `analysis_get_time_series`
-
-Retrieve a time series of output results from the `.out` binary file.
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `session_id` | `str` | `"default"` | Session identifier. |
-| `element_type` | `str` | `"node"` | `"node"`, `"link"`, `"subcatchment"`, or `"system"`. |
-| `element_id` | `str` | *required* | Element identifier (ignored for `"system"`). |
-| `variable` | `str` | `"depth"` | Output variable (e.g. `"depth"`, `"flow"`, `"runoff"`). |
-| `start_period` | `int` | `0` | First reporting period (0-indexed). |
-| `end_period` | `int` | `-1` | Last reporting period (`-1` = all). |
-| `downsample` | `int` | `1` | Take every N-th value. |
-
-**Returns:** `TimeSeries` with timestamps and values.
-
-### `analysis_get_flooding_summary`
-
-Summarise flooding across all nodes in the model.
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `session_id` | `str` | `"default"` | Session identifier. |
-| `min_flood_volume` | `float` | `0.0` | Minimum volume threshold. |
-
-**Returns:** `list[FloodingSummaryItem]` sorted by total flood volume (descending).
-
-### `analysis_get_capacity_summary`
-
-Summarise hydraulic capacity usage across all links.
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `session_id` | `str` | `"default"` | Session identifier. |
-| `max_filling_threshold` | `float` | `1.0` | Minimum filling ratio threshold. |
-
-**Returns:** `list[CapacitySummaryItem]` sorted by filling ratio (descending).
-
-### `analysis_compare_scenarios`
-
-Compare time-series output between two simulation sessions.
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `session_a` | `str` | *required* | Baseline session identifier. |
-| `session_b` | `str` | *required* | Comparison session identifier. |
-| `element_type` | `str` | `"node"` | `"node"`, `"link"`, or `"subcatchment"`. |
-| `variable` | `str` | `"depth"` | Output variable to compare. |
-
-### `analysis_export_results`
-
-Export node and link time-series results to CSV or JSON.
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `session_id` | `str` | `"default"` | Session identifier. |
-| `output_path` | `str` | *required* | Destination file path. |
-| `format` | `str` | `"csv"` | `"csv"` or `"json"`. |
-
-**Returns:** `ExportResult` with status, path, format, and record count.
-
----
-
-## Building Tools (`building_*`)
-
-Programmatic model construction tools for creating SWMM models from scratch.
-
-### `building_create_model`
-
-Create an empty SWMM model and start a building session.
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `session_id` | `str` | `"default"` | Session identifier for the new model. |
-
-### `building_add_node`
-
-Add a node to the model being built.
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `session_id` | `str` | `"default"` | Session identifier. |
-| `node_id` | `str` | *required* | Unique node identifier. |
-| `node_type` | `str` | `"junction"` | `"junction"`, `"outfall"`, `"storage"`, or `"divider"`. |
-| `invert_elev` | `float` | `0.0` | Invert elevation. |
-| `max_depth` | `float` | `0.0` | Maximum depth above invert. |
-| `x`, `y` | `float` | `None` | Optional coordinate position. |
-
-### `building_pop_last_node`
-
-Remove the most recently added node (undo of `building_add_node`). The supplied
-`node_id` must match the current tail of the node list. If any link still
-references the tail node, the engine refuses the pop — call
-`building_pop_last_link` for those links first.
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `session_id` | `str` | `"default"` | Session identifier. |
-| `node_id` | `str` | *required* | Expected tail node identifier. |
-
-**Returns:** `BuildingResult` with status and a confirmation message. Returns an
-error if `node_id` is not the current tail or if a link still references the
-node (`SWMM_ERR_BADINDEX`, code 8).
-
----
-
-### `building_add_link`
-
-Add a link (conduit, pump, orifice, weir, or outlet) to the model.
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `session_id` | `str` | `"default"` | Session identifier. |
-| `link_id` | `str` | *required* | Unique link identifier. |
-| `link_type` | `str` | `"conduit"` | `"conduit"`, `"pump"`, `"orifice"`, `"weir"`, or `"outlet"`. |
-| `from_node` | `str` | *required* | Upstream node ID. |
-| `to_node` | `str` | *required* | Downstream node ID. |
-| `length` | `float` | `100.0` | Conduit length. |
-| `roughness` | `float` | `0.013` | Manning's roughness coefficient. |
-| `xsect_shape` | `str` | `"circular"` | `"circular"`, `"rect_closed"`, `"rect_open"`, `"trapezoidal"`, `"triangular"`. |
-| `xsect_geom1` | `float` | `1.0` | Primary geometry parameter (e.g. diameter). |
-| `xsect_geom2`-`4` | `float` | `0.0` | Additional geometry parameters. |
-
-### `building_pop_last_link`
-
-Remove the most recently added link (undo of `building_add_link`). The supplied
-`link_id` must match the current tail of the link list.
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `session_id` | `str` | `"default"` | Session identifier. |
-| `link_id` | `str` | *required* | Expected tail link identifier. |
-
-**Returns:** `BuildingResult` with status and a confirmation message. Returns an
-error if `link_id` is not the current tail (`SWMM_ERR_BADINDEX`, code 8).
-
----
-
-### `building_add_subcatchment`
-
-Add a subcatchment to the model.
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `session_id` | `str` | `"default"` | Session identifier. |
-| `subcatch_id` | `str` | *required* | Unique subcatchment identifier. |
-| `area` | `float` | `1.0` | Subcatchment area. |
-| `imperv_pct` | `float` | `50.0` | Percent imperviousness (0--100). |
-| `slope` | `float` | `0.5` | Average surface slope (percent). |
-| `width` | `float` | `100.0` | Characteristic width. |
-| `outlet_node` | `str` | `""` | Receiving node ID. |
-
-### `building_add_gage`
-
-Add a rain gage to the model.
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `session_id` | `str` | `"default"` | Session identifier. |
-| `gage_id` | `str` | *required* | Unique gage identifier. |
-
-### `building_set_option`
-
-Set a simulation option on the model being built (e.g. `FLOW_UNITS`,
-`ROUTING_MODEL`, `REPORT_STEP`).
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `session_id` | `str` | `"default"` | Session identifier. |
-| `option` | `str` | *required* | Option name. |
-| `value` | `str` | *required* | Option value. |
-
-### `building_add_timeseries`
-
-Add a time series to the model.
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `session_id` | `str` | `"default"` | Session identifier. |
-| `name` | `str` | *required* | Time series name. |
-| `times` | `list[float]` | *required* | Time values (hours from simulation start). |
-| `values` | `list[float]` | *required* | Corresponding data values. |
-
-### `building_add_curve`
-
-Add a curve to the model.
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `session_id` | `str` | `"default"` | Session identifier. |
-| `name` | `str` | *required* | Curve name. |
-| `curve_type` | `str` | `"storage"` | `"storage"`, `"pump"`, `"rating"`, `"diversion"`, `"tidal"`, `"shape"`, `"weir"`, `"control"`. |
-| `x_values` | `list[float]` | *required* | X-axis values. |
-| `y_values` | `list[float]` | *required* | Y-axis values. |
-
-### `building_validate_model`
-
-Run the engine's built-in validation checks on the model being built.
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `session_id` | `str` | `"default"` | Session identifier. |
-
-### `building_write_model`
-
-Finalize and write the model to an `.inp` file.
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `session_id` | `str` | `"default"` | Session identifier. |
-| `output_path` | `str` | *required* | File path for the output `.inp`. |
-
----
-
-## Hot-Start Tools (`hotstart_*`)
-
-Tools for saving and restoring simulation state checkpoints.
-
-### `hotstart_save_hotstart`
-
-Save the current simulation state to a hot-start file.
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `session_id` | `str` | `"default"` | Session identifier. |
-| `path` | `str` | `""` | File path (auto-generated if empty). |
-
-**Returns:** `HotStartResult` with status and file path.
-
-### `hotstart_load_hotstart`
-
-Load a previously saved hot-start file into a session.
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `session_id` | `str` | `"default"` | Session identifier. |
-| `path` | `str` | *required* | Path to the `.hsf` file. |
-
-**Returns:** `HotStartResult` with status and file path.
-
-### `hotstart_clone_session`
-
-Clone an existing session by saving and re-applying its hot-start state.
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `source_id` | `str` | *required* | Session to clone. |
-| `target_id` | `str` | *required* | New session identifier. |
-
----
-
-## Spatial and Quality Tools (`spatial_*`)
-
-Tools for coordinates, water quality, treatment, and LID controls.
-
-### `spatial_get_coordinates`
-
-Retrieve the spatial coordinates for a model element.
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `session_id` | `str` | `"default"` | Session identifier. |
-| `element_type` | `str` | `"node"` | `"node"`, `"link"`, or `"subcatchment"`. |
-| `element_id` | `str` | *required* | Element identifier. |
-
-**Returns:** `SpatialResult` with x, y coordinates or vertex list.
-
-### `spatial_set_coordinates`
-
-Set the spatial coordinates for a model element.
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `session_id` | `str` | `"default"` | Session identifier. |
-| `element_type` | `str` | `"node"` | `"node"`, `"link"`, or `"subcatchment"`. |
-| `element_id` | `str` | *required* | Element identifier. |
-| `x` | `float` | `0.0` | X coordinate. |
-| `y` | `float` | `0.0` | Y coordinate. |
-
-### `spatial_get_quality`
-
-Retrieve water-quality concentrations for a model element.
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `session_id` | `str` | `"default"` | Session identifier. |
-| `element_type` | `str` | `"node"` | `"node"`, `"link"`, or `"subcatchment"`. |
-| `element_id` | `str` | *required* | Element identifier. |
-| `pollutant` | `str` | `None` | Specific pollutant name (omit for all). |
-
-### `spatial_set_treatment`
-
-Assign a treatment expression to a node for a given pollutant.
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `session_id` | `str` | `"default"` | Session identifier. |
-| `node_id` | `str` | *required* | Node identifier. |
-| `pollutant` | `str` | *required* | Pollutant name. |
-| `expression` | `str` | *required* | SWMM treatment expression (e.g. `"R = 0.5 * C"`). |
-
-### `spatial_add_lid`
-
-Add a Low Impact Development control to a subcatchment.
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `session_id` | `str` | `"default"` | Session identifier. |
-| `subcatch_id` | `str` | *required* | Subcatchment identifier. |
-| `lid_type` | `str` | *required* | LID type (`"BC"`, `"RG"`, `"PP"`, etc.). |
-| `area` | `float` | *required* | Surface area of the LID unit. |
-
----
-
-## Editing Tools (`editing_*`)
-
-Tools for deleting model objects and converting them to different types.
-These tools operate on sessions in the `building` (programmatic construction)
-or `opened` (after parsing a `.inp` file) state.
-
-### Cascade deletion policy
-
-When a node is deleted:
-
-- All **links** that reference the deleted node as an endpoint are
-  **cascade-deleted**.
-- Subcatchment `outlet_node`, inlet-usage `node_index`, and similar weak
-  references are **nullified** (set to `-1`).
-- All integer cross-references whose stored index exceeded the deleted index are
-  **decremented by 1** to keep indices consistent.
-
-The same cascade logic applies when deleting links, subcatchments, gages,
-tables, and transects (each has its own referencing set).
-
-Always call `editing_analyze_impact` first to preview exactly what will be
-affected before committing the deletion with `editing_delete_object`.
-
----
-
-### `editing_analyze_impact`
-
-Preview what would be affected if an object were deleted, **without deleting
-anything**. Equivalent to calling `editing_delete_object` with `dry_run=True`.
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `session_id` | `str` | `"default"` | Session identifier. |
-| `object_type` | `str` | `"node"` | Object category: `"node"`, `"link"`, `"subcatchment"`, `"gage"`, `"table"`, or `"transect"`. |
-| `object_id` | `str` | *required* | String identifier of the object, or a numeric index string for `"transect"`. |
-
-**Returns:** `ImpactReportModel` with:
-
-| Field | Type | Description |
-|---|---|---|
-| `session_id` | `str` | Session identifier. |
-| `object_type` | `str` | Type of the object analysed. |
-| `object_id` | `str` | Identifier of the object analysed. |
-| `dry_run` | `bool` | Always `True` for this tool. |
-| `node_count` | `int` | Current node count in the model. |
-| `link_count` | `int` | Current link count in the model. |
-| `impacts` | `list[ImpactEntryModel]` | List of affected objects (see below). |
-
-Each `ImpactEntryModel` has:
-
-| Field | Type | Description |
-|---|---|---|
-| `obj_type` | `int` | Engine enum value for the referencing object's type. |
-| `obj_type_name` | `str` | Human-readable type name. |
-| `obj_idx` | `int` | Zero-based index of the referencing object. |
-| `field` | `str` | Name of the field that would change. |
-| `cascaded` | `bool` | `True` if the referencing object would be deleted; `False` if only nullified. |
-
----
-
-### `editing_delete_object`
-
-Delete a model object and cascade-delete or nullify all objects that reference
-it. Supports a non-destructive `dry_run` mode that returns the same impact
-report without modifying the model.
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `session_id` | `str` | `"default"` | Session identifier. |
-| `object_type` | `str` | `"node"` | Object category: `"node"`, `"link"`, `"subcatchment"`, `"gage"`, `"table"`, or `"transect"`. |
-| `object_id` | `str` | *required* | String identifier of the object to delete, or a numeric index string for `"transect"`. |
-| `dry_run` | `bool` | `False` | When `True`, return the impact report without mutating the model. |
-
-**Returns:** `ImpactReportModel` (same schema as `editing_analyze_impact`).
-When `dry_run` is `False`, the `impacts` list reflects the objects that were
-actually deleted or nullified.
-
-**Example workflow:**
-
-```
-# 1. Preview the impact
-editing_analyze_impact(object_type="node", object_id="J5")
-# → impacts: [link C4 (cascaded=True), link C5 (cascaded=True), subcatch S1.outlet_node (cascaded=False)]
-
-# 2. Commit the deletion
-editing_delete_object(object_type="node", object_id="J5")
-# → J5 deleted; C4 and C5 cascade-deleted; S1.outlet_node nullified
+The OpenSWMM MCP server exposes **~317 tools** across **19 domain
+namespaces**.  Every tool is a FastMCP `@tool` decorated function in
+`src/openswmm_mcp/tools/<namespace>.py` that returns either a plain
+value or a Pydantic model from `openswmm_mcp.models`.
+
+Tools are namespaced: a function `open_model` in `tools/lifecycle.py`
+is mounted as the MCP tool `lifecycle_open_model`.  Every tool in the
+tables below follows that `<namespace>_<function>` convention.
+
+For full parameter signatures, return types, and docstrings see the
+auto-generated {doc}`/api/index` — every namespace has its own
+section there.
+
+## At a glance
+
+| Namespace | Tools | Purpose |
+|-----------|------:|---------|
+| `lifecycle_*` | 16 | Open / step / run / close models, list sessions, manage event windows, steady-state skip. |
+| `query_*` | 7 | Read-only "what does this model contain?" queries (nodes, links, subcatchments, gages, pollutants, system summary, free-form search). |
+| `model_*` | 24 | Project-level metadata: title, options + extension options, CRS, user flags, plugins, file-section paths. |
+| `building_*` | 13 | Programmatic model construction: nodes, links, subcatchments, gages, options, time series, curves, pollutants, validation + write. |
+| `editing_*` | 12 | In-place edits on a parsed model: cascade-delete, type conversion, property setters, renames. |
+| `nodes_*` | 34 | Per-node accessors: bulk arrays, storage curves, outfall configuration, dividers, exfiltration, quality. |
+| `links_*` | 40 | Per-link accessors: bulk arrays, control settings, pump / weir / orifice / culvert parameters, statistics. |
+| `subcatchments_*` | 23 | Per-subcatchment accessors: runoff state, infiltration, coverage, ponded quality, statistics. |
+| `inflows_*` | 18 | External / DWF / RDII inflows, unit hydrographs, exponential IA decay. |
+| `controls_*` | 8 | SWMM control rules: add, clear, set link setting / status. |
+| `forcing_*` | 5 | Per-step overrides (lateral inflow, rainfall, link control). |
+| `pollutants_*` | 21 | Pollutant identity + properties (decay, rain/GW/RDII concentrations, co-pollutant, snow-only, runtime injection). |
+| `quality_*` | 14 | Buildup / washoff / treatment kinetics; landuse and street-sweeping setup. |
+| `tables_*` | 14 | Time series, curves, patterns; lookup helpers. |
+| `infrastructure_*` | 17 | Transects, streets, inlets, LID controls and LID-usage. |
+| `hotstart_*` | 9 | Hot-start save / load, session cloning, scheduled-save registry. |
+| `analysis_*` | 20 | Post-run analytics: statistics, mass balance, flooding / capacity summaries, scenario compare, full output-reader breadth (snapshot + series + attribute). |
+| `spatial_*` | 15 | Coordinates, polylines, polygons, CRS, project-wide geometry export, LID placement. |
+| `geopackage_*` | 7 | GeoPackage I/O: open, list simulations, read result series / summaries, compare simulated vs observed. |
+
+----
+
+## Calling tools
+
+Every tool is invoked through MCP's standard `tools/call` request.  In
+Claude Code, Claude Desktop, or any MCP client this happens implicitly
+when the LLM decides to call a tool; if you are driving the server
+programmatically the JSON-RPC envelope looks like:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": {
+    "name": "lifecycle_open_model",
+    "arguments": {
+      "inp_path": "/abs/path/to/model.inp",
+      "session_id": "default"
+    }
+  }
+}
 ```
 
----
+All session-bound tools accept a `session_id` argument (default
+`"default"`) so multiple independent simulations can coexist in the
+same server process — see {doc}`/developer/architecture` for the
+session model.
 
-### `editing_convert_node`
+----
 
-Convert an existing node to a different type in place. Common properties
-(invert elevation, max depth, coordinates) are preserved. Type-specific
-properties for the old type are cleared and sensible defaults for the new type
-are applied. Non-fatal topology warnings are reported but do not prevent
-conversion.
+## Lifecycle (`lifecycle_*`)
 
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `session_id` | `str` | `"default"` | Session identifier. |
-| `node_id` | `str` | *required* | Node identifier or zero-based index. |
-| `new_type` | `str` | `"junction"` | Target type: `"junction"`, `"outfall"`, `"storage"`, or `"divider"`. |
+Opens a model and drives its state-machine: `OPENED → INITIALIZED →
+RUNNING → ENDED → CLOSED`.  Also manages event windows and the
+steady-state skip optimisation.
 
-**Returns:** `ConversionResultModel` with:
+Tools: `open_model`, `run_simulation`, `step_simulation`,
+`get_simulation_time`, `get_simulation_state`, `close_model`,
+`list_sessions`, `events_count`, `events_get`, `events_add`,
+`events_set`, `events_remove`, `events_clear`, `is_between_events`,
+`get_steady_state_skip`, `set_steady_state_skip`.
 
-| Field | Type | Description |
-|---|---|---|
-| `session_id` | `str` | Session identifier. |
-| `object_type` | `str` | Always `"node"`. |
-| `object_id` | `str` | Identifier of the converted node. |
-| `new_type` | `str` | The type the node was converted to. |
-| `cleared_fields` | `list[str]` | Type-specific fields from the old type that were cleared. |
-| `warnings` | `list[str]` | Non-fatal topology or data warnings. |
+Worked example — open and run to completion:
 
-**Preserved properties:** invert elevation, max depth, coordinates.
+```python
+lifecycle_open_model(
+    inp_path="/models/site_drainage.inp",
+    session_id="run1",
+    rpt_path="/out/site_drainage.rpt",
+    out_path="/out/site_drainage.out",
+    engine="openswmm",
+)
+lifecycle_run_simulation(session_id="run1")
+lifecycle_close_model(session_id="run1")
+```
 
-**Cleared on conversion (examples):**
+----
 
-| From type | To type | Cleared fields |
-|---|---|---|
-| `storage` | `junction` | `storage_curve`, `seepage_rate`, `evap_factor` |
-| `junction` | `outfall` | *(none — outfall defaults applied)* |
-| `divider` | `storage` | `divider_link`, `divider_type`, `divider_curve` |
+## Query (`query_*`)
 
----
+Read-only structural queries on the parsed model — useful when the
+LLM needs to learn what the model contains before acting on it.
 
-### `editing_convert_link`
+Tools: `get_node_info`, `get_link_info`, `get_subcatchment_info`,
+`get_gage_info`, `get_pollutant_info`, `get_system_summary`,
+`find_elements`.
 
-Convert an existing link to a different type in place. Common properties
-(endpoint nodes, offsets, initial flow) are preserved. Type-specific properties
-are cleared and new-type defaults are applied.
+Worked example — locate every outfall node:
 
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `session_id` | `str` | `"default"` | Session identifier. |
-| `link_id` | `str` | *required* | Link identifier or zero-based index. |
-| `new_type` | `str` | `"conduit"` | Target type: `"conduit"`, `"pump"`, `"orifice"`, `"weir"`, or `"outlet"`. |
+```python
+query_find_elements(
+    session_id="run1",
+    element_type="node",
+    filter={"type": "OUTFALL"},
+)
+```
 
-**Returns:** `ConversionResultModel` with:
+----
 
-| Field | Type | Description |
-|---|---|---|
-| `session_id` | `str` | Session identifier. |
-| `object_type` | `str` | Always `"link"`. |
-| `object_id` | `str` | Identifier of the converted link. |
-| `new_type` | `str` | The type the link was converted to. |
-| `cleared_fields` | `list[str]` | Type-specific fields from the old type that were cleared. |
-| `warnings` | `list[str]` | Non-fatal topology or data warnings. |
+## Model (`model_*`)
 
-**Preserved properties:** from/to nodes, inlet and outlet offsets, initial flow.
+Project-level metadata that lives outside any element table: input
+title, simulation options (`[OPTIONS]` and extension options), CRS,
+user flags (free-form scratch slots), plugins, file-section paths.
 
-**Cleared on conversion (examples):**
+Tools: `get_title_count`, `get_title_line`, `get_title`,
+`add_title_line`, `set_title`, `clear_title`, `get_option`,
+`set_option`, `get_option_ext`, `set_option_ext`, `get_crs`,
+`get_userflag_bool` / `set_userflag_bool`, `get_userflag_int` /
+`set_userflag_int`, `get_userflag_real` / `set_userflag_real`,
+`plugins_count`, `plugin_get`, `plugin_set`, `plugin_remove`,
+`files_get`, `files_set`, `write_with_plugin`.
 
-| From type | To type | Cleared fields |
-|---|---|---|
-| `conduit` | `pump` | `xsect_shape`, `roughness`, `length` |
-| `orifice` | `weir` | `orifice_type`, `orifice_coeff`, `flap_gate` |
-| `pump` | `conduit` | `pump_curve` |
+----
+
+## Building (`building_*`)
+
+Build a model in memory before (or instead of) loading a `.inp` file.
+
+Tools: `create_model`, `add_node`, `pop_last_node`, `add_link`,
+`pop_last_link`, `add_subcatchment`, `add_gage`, `add_pollutant`,
+`set_option`, `add_timeseries`, `add_curve`, `validate_model`,
+`write_model`.
+
+Worked example — a two-node, one-conduit model:
+
+```python
+building_create_model(session_id="new1")
+building_add_node(session_id="new1", id="J1",   type="JUNCTION")
+building_add_node(session_id="new1", id="OUT1", type="OUTFALL")
+building_add_link(
+    session_id="new1", id="C1", type="CONDUIT",
+    from_node="J1", to_node="OUT1",
+)
+building_validate_model(session_id="new1")
+building_write_model(session_id="new1", path="/out/new1.inp")
+```
+
+----
+
+## Editing (`editing_*`)
+
+In-place mutation of an already-parsed model.  Deletions cascade
+through dependent objects (links removed when a node is deleted,
+inflows removed with their node, etc.) — see
+{doc}`/developer/architecture` for the cascade policy.
+
+Tools: `analyze_impact`, `delete_object`, `convert_node`,
+`convert_link`, `set_node_properties`, `set_link_properties`,
+`set_subcatchment_properties`, `configure_gage`, `rename_node`,
+`rename_link`, `rename_subcatchment`, `rename_gage`.
+
+Worked example — preview a delete, then commit:
+
+```python
+preview = editing_analyze_impact(
+    session_id="run1", kind="node", id_or_index="J5",
+)
+# inspect preview.affected …
+editing_delete_object(session_id="run1", kind="node", id_or_index="J5")
+```
+
+----
+
+## Nodes (`nodes_*`)
+
+Fine-grained per-node accessors.  Bulk arrays let you pull every
+node's depth / head / inflow / overflow / quality in one call.
+
+Tools: bulk getters (`get_depths_bulk`, `get_heads_bulk`,
+`get_inflows_bulk`, `get_overflows_bulk`, `get_quality_bulk`,
+`set_depths_bulk`, `set_lat_inflows_bulk`); storage parameters
+(`get_storage_curve` / `set_storage_curve`,
+`get_storage_functional` / `set_storage_functional`,
+`get_storage_seep_rate` / `set_storage_seep_rate`,
+`get_exfil_params` / `set_exfil_params`); outfall configuration
+(`get_outfall_type`, `set_outfall_type`, `get_outfall_param`,
+`set_outfall_stage`, `set_outfall_tidal`, `set_outfall_timeseries`,
+`get_outfall_flap_gate` / `set_outfall_flap_gate`,
+`get_outfall_route_to` / `set_outfall_route_to`); dividers
+(`get_divider_type` / `set_divider_type`); quality
+(`get_quality`, `set_quality_mass_flux`); statistics
+(`stat_max_depth`, `stat_max_overflow`, `stat_vol_flooded`,
+`stat_time_flooded`); helper (`depth_from_volume`).
+
+----
+
+## Links (`links_*`)
+
+Fine-grained per-link accessors plus link-statistic accumulators.
+
+Tools: bulk arrays (`get_flows_bulk`, `get_depths_bulk`,
+`get_quality_bulk`, `set_flows_bulk`); control settings
+(`get_control_setting` / `set_control_setting`,
+`get_target_setting` / `set_target_setting`,
+`get_closed` / `set_closed`); pumps
+(`get_pump_curve` / `set_pump_curve`,
+`get_pump_init_state` / `set_pump_init_state`); culverts and barrels
+(`get_barrels` / `set_barrels`,
+`get_culvert_code` / `set_culvert_code`); losses + flap gates
+(`get_loss_coeff` / `set_loss_coeff`,
+`get_seep_rate` / `set_seep_rate`,
+`get_flap_gate` / `set_flap_gate`); weir / orifice
+(`get_crest_height` / `set_crest_height`,
+`get_discharge_coeff` / `set_discharge_coeff`,
+`get_end_contractions` / `set_end_contractions`); quality
+(`get_quality`); power (`hyd_power`); statistics
+(`stat_max_flow`, `stat_max_velocity`, `stat_max_filling`,
+`stat_vol_flow`, `stat_surcharge_time`, `stat_pump_cycles`,
+`stat_pump_on_time`, `stat_pump_volume`).
+
+----
+
+## Subcatchments (`subcatchments_*`)
+
+Per-subcatchment hydrology + quality.
+
+Tools: bulk arrays (`get_runoff_bulk`, `get_quality_bulk`); state
+(`get_runoff`, `get_rainfall`, `get_evap`, `get_groundwater`,
+`get_snow_depth`, `get_infil`); coverage
+(`get_coverage`, `set_coverage`); infiltration
+(`get_infil_model`, `get_infil_horton` / `set_infil_horton`,
+`get_infil_green_ampt` / `set_infil_green_ampt`,
+`get_infil_curve_number` / `set_infil_curve_number`); quality
+(`get_quality`, `get_ponded_quality`, `set_ponded_quality`);
+statistics (`stat_precip`, `stat_runoff_vol`, `stat_max_runoff`).
+
+----
+
+## Inflows (`inflows_*`)
+
+External time-series inflows, dry-weather flow (DWF), RDII, unit
+hydrographs (`[HYDROGRAPHS]`), and exponential initial-abstraction
+decay (`[RDII_DECAY]`).
+
+Tools: external (`add_external`, `ext_inflow_count`); DWF
+(`add_dwf`, `dwf_count`); RDII (`add_rdii`, `get_rdii`,
+`rdii_count`); unit hydrographs (`add_hydrograph`,
+`get_hydrograph`, `hydrograph_count`, `add_hydrograph_gage`,
+`get_hydrograph_gage`, `hydrograph_gage_count`,
+`hydrograph_group_count`, `list_hydrograph_groups`); IA decay
+(`add_rdii_decay`, `get_rdii_decay`, `rdii_decay_count`).
+
+----
+
+## Controls (`controls_*`)
+
+SWMM control rules (`[CONTROLS]`).
+
+Tools: `count`, `get_rule`, `get_id`, `list_rules`, `add_rule`,
+`clear_rules`, `set_link_setting`, `set_link_status`.
+
+----
+
+## Forcing (`forcing_*`)
+
+Per-step overrides — useful for closed-loop or interactive control.
+
+Tools: `set_forcing`, `clear_forcing`, `set_link_control`,
+`add_control_rule`, `set_rainfall_override`.
+
+----
+
+## Pollutants (`pollutants_*`)
+
+Identity and properties of the modeled pollutants, plus runtime
+injection.
+
+Tools: identity (`count`, `add`); properties
+(`get_units`,
+`get_kdecay` / `set_kdecay`,
+`get_rain_conc` / `set_rain_conc`,
+`get_gw_conc` / `set_gw_conc`,
+`get_rdii_conc` / `set_rdii_conc`,
+`get_init_conc` / `set_init_conc`,
+`get_mwt` / `set_mwt`,
+`get_snow_only` / `set_snow_only`,
+`get_co_pollutant` / `set_co_pollutant`); runtime injection
+(`set_node_quality`, `set_link_quality`).
+
+----
+
+## Quality (`quality_*`)
+
+Buildup / washoff / treatment kinetics, landuse identity, sweeping.
+
+Tools: landuse (`landuse_count`, `landuse_add`, `landuse_id`,
+`landuse_index`); sweeping (`get_sweep_interval` /
+`set_sweep_interval`, `get_sweep_removal` / `set_sweep_removal`);
+buildup (`buildup_get`, `buildup_set`); washoff (`washoff_get`,
+`washoff_set`); treatment (`treatment_get`, `treatment_clear`).
+
+----
+
+## Tables (`tables_*`)
+
+Time series, curves, and patterns — the shared "table" abstraction in
+SWMM.
+
+Tools: identity (`count`, `get_id`, `get_index`); add
+(`add_timeseries`, `add_curve`); points (`add_point`, `get_point`,
+`get_point_count`, `get_points`, `clear_points`, `lookup`); patterns
+(`pattern_count`, `pattern_add`, `pattern_set_factors`).
+
+----
+
+## Infrastructure (`infrastructure_*`)
+
+Transects, streets, inlets, LID controls.
+
+Tools: transects (`transect_count`, `add_transect`,
+`set_transect_roughness`, `add_transect_station`); streets
+(`street_count`, `add_street`, `set_street_params`); inlets
+(`inlet_count`, `add_inlet`, `set_inlet_params`); LIDs
+(`lid_count`, `add_lid`, `set_lid_surface`, `set_lid_soil`,
+`set_lid_storage`, `set_lid_drain`, `add_lid_usage`).
+
+----
+
+## Hot-start (`hotstart_*`)
+
+Hot-start file save / load, session cloning, and the engine-side
+scheduled-save registry (`[SAVE HOTSTART]`).
+
+Tools: `save_hotstart`, `load_hotstart`, `clone_session`,
+`saves_count`, `saves_get`, `saves_add`, `saves_set`, `saves_remove`,
+`saves_clear`.
+
+----
+
+## Analysis (`analysis_*`)
+
+Post-run analytics built on the binary `.out` file plus engine
+statistics.
+
+Tools: high-level (`get_statistics`, `get_mass_balance`,
+`get_time_series`, `get_flooding_summary`, `get_capacity_summary`,
+`get_pump_summary`, `get_report_snapshot`, `compare_scenarios`,
+`export_results`); output-reader breadth (`output_metadata`,
+`output_period_count`, `output_pollutant_count`,
+`output_period_time`, `output_node_attribute`, `output_link_attribute`,
+`output_subcatch_attribute`, `output_system_result`,
+`output_node_results`, `output_link_results`,
+`output_subcatch_results`).
+
+Worked example — peak flooded volume per node:
+
+```python
+analysis_get_flooding_summary(session_id="run1")
+```
+
+----
+
+## Spatial (`spatial_*`)
+
+Coordinates, polylines, polygons, and the project-wide CRS.
+
+Tools: per-element (`get_coordinates`, `set_coordinates`,
+`get_vertices`, `set_vertices`, `get_polygon`, `set_polygon`,
+`get_quality`, `set_treatment`, `add_lid`); project-wide
+(`get_all_coordinates`, `get_crs`, `set_crs`, `get_all_vertices`,
+`get_all_polygons`, `get_model_geometry`).
+
+----
+
+## GeoPackage (`geopackage_*`)
+
+GeoPackage I/O — bind a `.gpkg` "data warehouse" for both simulated
+and observed time series.
+
+Tools: `open_geopackage`, `list_simulations`,
+`get_result_timeseries`, `get_result_summary`,
+`import_observed_data`, `compare_sim_vs_observed`,
+`close_geopackage`.
+
+----
+
+## See also
+
+* {doc}`/api/index` — full auto-generated signatures and docstrings
+  for every tool.
+* {doc}`/user-guide/resources` — `swmm://` resource URIs that
+  complement these tools.
+* {doc}`/user-guide/prompts` — guided-workflow prompts that compose
+  tools end-to-end.
+* {doc}`/user-guide/examples` — full transcripts illustrating common
+  tool sequences.

@@ -291,6 +291,109 @@ class TestRDIIDecay:
 
 
 # ===========================================================================
+# [HYDROGRAPHS] group enumeration (DA-ENG-01)
+# ===========================================================================
+
+
+class TestHydrographGroupEnumeration:
+    """``hydrograph_group_count`` + ``list_hydrograph_groups``.
+
+    These tools de-duplicate the raw per-(group, month, response) entries
+    so a GUI Object Browser shows one row per group rather than N rows of
+    mostly-empty placeholders.
+    """
+
+    async def test_empty_model_has_zero_groups(self, session_manager, inp_path):
+        from openswmm_mcp.tools.inflows import hydrograph_group_count
+
+        ctx = await _opened_session(session_manager, inp_path, "inf_uhg_empty")
+        result = await hydrograph_group_count(ctx, session_id="inf_uhg_empty")
+        assert result["count"] == 0
+
+    async def test_twelve_monthly_rows_count_as_one_group(
+        self, session_manager, inp_path
+    ):
+        from openswmm_mcp.tools.inflows import (
+            add_hydrograph,
+            hydrograph_count,
+            hydrograph_group_count,
+        )
+
+        ctx = await _opened_session(session_manager, inp_path, "inf_uhg_one")
+        for m in ("jan", "feb", "mar", "apr", "may", "jun",
+                  "jul", "aug", "sep", "oct", "nov", "dec"):
+            await add_hydrograph(
+                ctx,
+                session_id="inf_uhg_one",
+                uh_name="SanSewer",
+                month=m,
+                response="short",
+                r=0.05,
+                t=1.0,
+                k=2.0,
+            )
+        entries = await hydrograph_count(ctx, session_id="inf_uhg_one")
+        assert entries["count"] == 12
+        groups = await hydrograph_group_count(ctx, session_id="inf_uhg_one")
+        assert groups["count"] == 1
+
+    async def test_list_groups_first_occurrence_order(
+        self, session_manager, inp_path
+    ):
+        from openswmm_mcp.tools.inflows import add_hydrograph, list_hydrograph_groups
+
+        ctx = await _opened_session(session_manager, inp_path, "inf_uhg_list")
+        for uh, month in [
+            ("Combined", "jan"),
+            ("Sanitary", "jan"),
+            ("Combined", "feb"),
+            ("Storm",    "jan"),
+            ("Sanitary", "feb"),
+        ]:
+            await add_hydrograph(
+                ctx,
+                session_id="inf_uhg_list",
+                uh_name=uh,
+                month=month,
+                response="short",
+                r=0.1, t=1.0, k=2.0,
+            )
+
+        result = await list_hydrograph_groups(ctx, session_id="inf_uhg_list")
+        assert result["count"] == 3
+        names = [g["name"] for g in result["groups"]]
+        assert names == ["Combined", "Sanitary", "Storm"]
+        indices = [g["index"] for g in result["groups"]]
+        assert indices == [0, 1, 2]
+
+    async def test_gage_only_groups_appear_in_list(
+        self, session_manager, inp_path
+    ):
+        from openswmm_mcp.tools.inflows import (
+            add_hydrograph,
+            add_hydrograph_gage,
+            list_hydrograph_groups,
+        )
+
+        ctx = await _opened_session(session_manager, inp_path, "inf_uhg_mix")
+        # Gage-only group (no parameter rows yet) must still surface.
+        await add_hydrograph_gage(
+            ctx, session_id="inf_uhg_mix",
+            uh_name="GageOnly", gage_name="RainGage",
+        )
+        await add_hydrograph(
+            ctx, session_id="inf_uhg_mix",
+            uh_name="Params", month="all", response="short",
+            r=0.1, t=1.0, k=2.0,
+        )
+        result = await list_hydrograph_groups(ctx, session_id="inf_uhg_mix")
+        assert result["count"] == 2
+        names = [g["name"] for g in result["groups"]]
+        # Parameter-entry groups come before gage-only groups.
+        assert names == ["Params", "GageOnly"]
+
+
+# ===========================================================================
 # Backend guard: legacy engine is unsupported
 # ===========================================================================
 

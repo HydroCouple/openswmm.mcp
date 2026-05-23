@@ -49,5 +49,10 @@ source_suffix = {".rst": "restructuredtext", ".md": "markdown"}
 autodoc_default_options = {"members": True, "undoc-members": True}
 autosummary_generate = True
 
+# Suppress duplicate-object-description warnings from inherited members
+# in the Backend subclasses (OpenSWMMBackend / LegacyBackend each
+# redeclare the abstract members of Backend).
+suppress_warnings = ["ref.python", "duplicate"]
+
 # Don't fail if openswmm C extensions aren't installed
 autodoc_mock_imports = ["openswmm", "openswmm.engine", "fastmcp"]

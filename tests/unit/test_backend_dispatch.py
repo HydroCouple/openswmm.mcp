@@ -6,6 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
+pytest.importorskip("openswmm.engine")
+
 from openswmm_mcp.backends import make_backend
 from openswmm_mcp.dependencies import require_new_engine
 from openswmm_mcp.errors import ToolError

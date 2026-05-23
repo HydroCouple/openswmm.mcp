@@ -14,17 +14,47 @@ Root FastMCP ("OpenSWMM MCP Server")
   |
   |-- lifespan  -->  ServerSettings + SessionManager
   |
-  |-- mount("lifecycle", lifecycle_mcp, namespace="lifecycle")
-  |-- mount("query",     query_mcp,     namespace="query")
-  |-- mount("forcing",   forcing_mcp,   namespace="forcing")
-  |-- mount("analysis",  analysis_mcp,  namespace="analysis")
-  |-- mount("building",  building_mcp,  namespace="building")
-  |-- mount("hotstart",  hotstart_mcp,  namespace="hotstart")
-  |-- mount("spatial",   spatial_quality_mcp, namespace="spatial")
+  |   # Lifecycle, query, and forcing
+  |-- mount(lifecycle_mcp,       namespace="lifecycle")
+  |-- mount(query_mcp,           namespace="query")
+  |-- mount(forcing_mcp,         namespace="forcing")
   |
-  |-- mount("resources", resources_mcp)   # no namespace
-  |-- mount("prompts",   prompts_mcp)     # no namespace
+  |   # Analysis + post-processing
+  |-- mount(analysis_mcp,        namespace="analysis")
+  |
+  |   # Model construction + editing
+  |-- mount(building_mcp,        namespace="building")
+  |-- mount(editing_mcp,         namespace="editing")
+  |-- mount(model_mcp,           namespace="model")
+  |
+  |   # Fine-grained element accessors
+  |-- mount(nodes_mcp,           namespace="nodes")
+  |-- mount(links_mcp,           namespace="links")
+  |-- mount(subcatchments_mcp,   namespace="subcatchments")
+  |
+  |   # Forcing / control inputs
+  |-- mount(inflows_mcp,         namespace="inflows")
+  |-- mount(controls_mcp,        namespace="controls")
+  |
+  |   # Water quality + hydrology configuration
+  |-- mount(pollutants_mcp,      namespace="pollutants")
+  |-- mount(quality_mcp,         namespace="quality")
+  |-- mount(tables_mcp,          namespace="tables")
+  |-- mount(infrastructure_mcp,  namespace="infrastructure")
+  |
+  |   # State / IO
+  |-- mount(hotstart_mcp,        namespace="hotstart")
+  |-- mount(spatial_quality_mcp, namespace="spatial")
+  |-- mount(geopackage_mcp,      namespace="geopackage")
+  |
+  |-- mount(resources_mcp)       # no namespace
+  |-- mount(prompts_mcp)         # no namespace
 ```
+
+Nineteen tool sub-servers are mounted in total — each declared in its
+own `openswmm_mcp/tools/<name>.py` module as a `FastMCP("<name>")`
+instance.  The full list (and mount order) is in
+`openswmm_mcp/server.py`.
 
 ## Server Composition via `mount()`
 
@@ -78,16 +108,42 @@ building ----> (finalized via write_model) ---------+
 
 The `SimSession` dataclass holds:
 
-- `solver`: The `openswmm.engine.Solver` instance.
+- `backend`: A `Backend` subclass (`OpenSWMMBackend` or
+  `LegacyBackend`) that wraps either the refactored
+  `openswmm.engine.Solver` or the SWMM 5 solver.  This is the engine-
+  abstraction seam — see *Backends* below.
 - `state`: Current lifecycle state string.
 - `working_dir`: Path for session-specific files.
-- Lazy properties for all 16 domain accessor objects (`Nodes`, `Links`,
-  `Subcatchments`, `Gages`, `Forcing`, `MassBalance`, `Pollutants`,
-  `Statistics`, `Spatial`, `Tables`, `Controls`, `Inflows`, `Infrastructure`,
-  `Quality`, `HotStart`, `OutputReader`).
+- `inp_path` / `rpt_path` / `out_path`: Resolved file paths.
+- `model_builder`: A `ModelBuilder` instance while the session is in
+  the `building` state (before a `.inp` is parsed).
 
-Domain accessors are created on first access and cached for the lifetime of
-the session.
+`SimSession.__getattr__` delegates unknown attributes (`nodes`,
+`links`, `subcatchments`, `gages`, `forcing`, `mass_balance`,
+`pollutants`, `statistics`, `spatial`, `tables`, `controls`,
+`inflows`, `infrastructure`, `quality`, `hotstart`, `model`,
+`editor`, …) to the active backend, so tools call
+`session.nodes.get_depth(...)` regardless of which engine is in use.
+The backend itself owns the domain accessor objects and caches them
+on first access.
+
+### Backends
+
+The `backends/` subpackage holds the engine-abstraction layer:
+
+- `backends.base.Backend` — abstract base class declaring the
+  domain-accessor surface (`nodes`, `links`, …), lifecycle
+  delegation (`open`, `initialize`, `start`, `step`, `end`,
+  `report`, `close`), and `engine_kind`.
+- `backends.openswmm.OpenSWMMBackend` — wraps
+  `openswmm.engine.Solver` and exposes the v6.0 domain classes.
+- `backends.legacy.LegacyBackend` — wraps the SWMM 5 solver via
+  `openswmm.legacy.engine`.
+
+When a tool calls `lifecycle_open_model(engine="openswmm")` the
+matching `Backend` subclass is instantiated and attached to the
+session; switching to `engine="legacy"` swaps in `LegacyBackend`
+without any tool needing to know which solver is underneath.
 
 ## Threading Model
 
@@ -147,7 +203,10 @@ Claude Code), authentication is bypassed entirely.
 | `errors.py` | Error codes and `ToolError` helpers |
 | `dependencies.py` | Lifespan context manager and dependency functions |
 | `auth.py` | OAuth/JWT authentication providers |
-| `tools/*.py` | Seven tool sub-servers |
+| `tools/*.py` | Nineteen tool sub-servers (one FastMCP per namespace) |
+| `backends/base.py` | `Backend` abstract base — engine-agnostic interface |
+| `backends/openswmm.py` | OpenSWMM v6.0 backend (refactored engine) |
+| `backends/legacy.py` | Legacy SWMM 5 backend |
 | `resources/model.py` | `swmm://` URI resource handlers |
 | `prompts/workflows.py` | Seven guided-workflow prompt templates |
 | `_util/formatting.py` | numpy-to-list, time formatting utilities |

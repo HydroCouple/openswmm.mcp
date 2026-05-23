@@ -10,68 +10,55 @@ The OpenSWMM MCP Server uses [pytest](https://docs.pytest.org/) with
 ```
 tests/
   __init__.py
-  conftest.py              # Shared fixtures, mock patching, MCP client
-  mocks/
-    __init__.py
-    engine.py              # Mock Solver, Nodes, Links, etc.
+  conftest.py                       # Shared fixtures, mock patching, MCP client
+  data/                             # Sample .inp files
   unit/
     __init__.py
-    test_session.py        # SessionManager create/get/close/list
-    test_lifecycle.py      # open_model, run_simulation, step, close
-    test_query.py          # get_node/link/subcatch/gage_info, find_elements
-    test_forcing.py        # set_forcing, clear_forcing, state guards
-    test_analysis.py       # statistics, mass_balance, time_series
-    test_building.py       # create_model, add_node/link/subcatch, validate
-    test_hotstart.py       # save/load hotstart, clone_session
-    test_spatial_quality.py  # coordinates, quality, treatment
-    test_resources.py      # All 9 swmm:// resources
-    test_prompts.py        # All 7 prompts
-    test_auth.py           # OAuth, JWT, MultiAuth, stdio bypass
+    conftest.py                     # Unit-level fixtures
+    data/                           # Unit-test fixtures
+    test_session.py                 # SessionManager create/get/close/list
+    test_lifecycle.py               # open_model, run_simulation, step, close
+    test_query.py                   # get_node/link/subcatch/gage_info, find_elements
+    test_forcing.py                 # set_forcing, clear_forcing, state guards
+    test_controls.py                # control rules
+    test_analysis.py                # statistics, mass balance, time series
+    test_analysis_output_reader.py  # output-reader breadth (snapshot/series/attr)
+    test_building.py                # create_model, add_node/link/subcatch, validate
+    test_editing.py                 # cascade-delete, type conversion, renames
+    test_nodes.py                   # nodes_* fine-grained accessors
+    test_links.py                   # links_* fine-grained accessors
+    test_subcatchments.py           # subcatchments_* fine-grained accessors
+    test_inflows.py                 # external / DWF / RDII / hydrographs
+    test_infrastructure.py          # transects / streets / inlets / LIDs
+    test_tables.py                  # time series / curves / patterns
+    test_hotstart.py                # save/load hotstart, clone, saves_*
+    test_spatial_quality.py         # coordinates, quality, treatment, geometry
+    test_geopackage_tools.py        # geopackage_* tools
+    test_backend_dispatch.py        # openswmm vs legacy backend selection
+    test_phase2_wave2.py            # Phase-2 wave-2 regression set
+    test_resources.py               # All 9 swmm:// resources
+    test_prompts.py                 # All 7 prompts
+    test_auth.py                    # OAuth, JWT, MultiAuth, stdio bypass
   integration/
     __init__.py
-    conftest.py            # Real engine fixtures
-    test_end_to_end.py     # Full open -> run -> query -> close
+    conftest.py                     # Real engine fixtures, --run-integration gate
+    test_end_to_end.py              # Full open -> run -> query -> close
 ```
 
-## Mock Engine Pattern
+## Mock Backend Pattern
 
-Unit tests avoid depending on the compiled `openswmm` C extensions by using
-mock classes that replicate the engine API surface.
+Unit tests avoid depending on the compiled `openswmm` C extensions by
+swapping the engine-agnostic `Backend` for an in-memory fake.  The
+shared fixtures live in `tests/conftest.py` and the unit-level
+`tests/unit/conftest.py`; together they hand each test an MCP `Client`
+wired to a server whose backend is a controllable state machine
+returning deterministic data for a small synthetic network.
 
-### How Mocks Work
-
-The `tests/mocks/engine.py` module provides mock classes:
-
-- **`MockSolver`**: A controllable lifecycle state machine. Supports
-  `open()`, `initialize()`, `start()`, `step()`, `end()`, and `close()`.
-  Returns configurable step counts and timing.
-
-- **`MockNodes`**, **`MockLinks`**, **`MockSubcatchments`**, **`MockGages`**:
-  Return deterministic test data for a 12-element test network.
-
-- **`MockMassBalance`**, **`MockStatistics`**, **`MockForcing`**,
-  **`MockControls`**: Simulate post-simulation statistics and runtime forcing.
-
-- **`MockOutputReader`**, **`MockModelBuilder`**, **`MockHotStart`**,
-  **`MockSpatial`**, **`MockQuality`**: Cover analysis, building, and
-  spatial/quality tool APIs.
-
-### Patching Strategy
-
-The `tests/conftest.py` file provides fixtures that monkeypatch the engine
-imports in `openswmm_mcp.session`:
-
-```python
-@pytest.fixture
-def mock_engine(monkeypatch):
-    """Patch all openswmm.engine imports used by the session module."""
-    monkeypatch.setattr("openswmm_mcp.session.Solver", MockSolver)
-    monkeypatch.setattr("openswmm_mcp.session.Nodes", MockNodes)
-    # ... etc.
-```
-
-This means unit tests never import or instantiate the real C extension
-modules.
+Tests should depend on the **backend abstraction** rather than on
+specific engine classes (`Solver`, `Nodes`, …) — that way they
+exercise the same code path for both the OpenSWMM v6 and legacy
+backends.  See `test_backend_dispatch.py` for the dual-backend
+coverage pattern.
 
 ## In-Memory MCP Client
 
@@ -116,20 +103,28 @@ pytest tests/unit/test_lifecycle.py::test_open_model_success -v
 
 ## Running Integration Tests
 
-Integration tests require a working `openswmm` engine installation and are
-skipped by default. Enable them with:
+Integration tests require a working `openswmm` engine installation and
+are **skipped by default**.  The integration suite has its own
+`tests/integration/conftest.py` that gates collection on either a
+CLI flag or an environment variable — whichever is more convenient.
+
+CLI flag:
+
+```bash
+pytest --run-integration tests/integration/ -v
+```
+
+Environment variable (any truthy value):
 
 ```bash
 OPENSWMM_RUN_INTEGRATION=1 pytest tests/integration/ -v
 ```
 
-Or using the pytest marker:
+Without either of these, the integration tests are collected as
+*skipped* with a clear message: *"Pass --run-integration or set
+OPENSWMM_RUN_INTEGRATION=1 to enable."*
 
-```bash
-pytest -m integration -v
-```
-
-Integration tests use the `site_drainage_example.inp` file and exercise the
+Integration tests use the bundled SWMM example inputs and exercise the
 real engine through a full open-step-query-run-close cycle.
 
 ## Test Configuration
@@ -140,18 +135,10 @@ The `pyproject.toml` configures pytest:
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-v --tb=short"
-asyncio_mode = "auto"
-markers = [
-    "integration: tests requiring compiled openswmm engine",
-]
 ```
 
-Key settings:
-
-- `asyncio_mode = "auto"`: All `async def test_*` functions are
-  automatically treated as async tests.
-- `testpaths = ["tests"]`: pytest discovers tests in the `tests/` directory.
-- The `integration` marker allows selective execution of integration tests.
+`asyncio_mode = "auto"` is set in the project's `pytest-asyncio`
+configuration; `pytest-asyncio` is a hard `[dev]` dependency.
 
 ## Writing New Tests
 

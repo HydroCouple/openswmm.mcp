@@ -25,13 +25,15 @@ classifiers = [
 ]
 dependencies = [
     "fastmcp[auth]>=3.0",
-    "openswmm",
     "pydantic>=2.0",
     "pydantic-settings>=2.0",
     "numpy>=1.21",
 ]
 
 [project.optional-dependencies]
+engine = [
+    "openswmm",
+]
 dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21",

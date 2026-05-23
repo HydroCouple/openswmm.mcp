@@ -133,17 +133,47 @@ async def get_rule(
 
 
 @controls_mcp.tool()
-async def list_rules(ctx: Context, session_id: str = "default") -> dict:
-    """Return all control rules as a list of ``{index, text}`` dicts.
+async def get_id(
+    ctx: Context, session_id: str = "default", rule_index: int = 0
+) -> dict:
+    """Return the canonical rule name parsed from the I{rule_index}-th
+    control rule's text (the first token after the ``RULE`` keyword,
+    case-insensitive).
 
-    Convenience wrapper that batches ``count`` + N x ``get_rule`` so an
-    LLM can audit the full rule set in one call.
+    When the rule text is malformed (no parseable ``RULE`` keyword
+    token), ``name`` is ``None`` so callers can render a sentinel
+    display label like ``Rule N [unnamed]`` without catching exceptions.
+    """
+    _, controls, _ = await _get_controls_accessor(ctx, session_id)
+    name = await asyncio.to_thread(controls.get_id, rule_index)
+    return {
+        "session_id": session_id,
+        "rule_index": rule_index,
+        "name": name,
+    }
+
+
+@controls_mcp.tool()
+async def list_rules(ctx: Context, session_id: str = "default") -> dict:
+    """Return all control rules as a list of ``{index, name, text}`` dicts.
+
+    Convenience wrapper that batches ``count`` + N x ``(get_id, get_rule)``
+    so an LLM (or GUI Object Browser) can audit the full rule set in one
+    call. ``name`` is the parsed rule identifier (``None`` for malformed
+    rules); ``text`` is the full rule body.
     """
     _, controls, _ = await _get_controls_accessor(ctx, session_id)
 
     def _read_all() -> list[dict[str, Any]]:
         n = controls.count()
-        return [{"index": i, "text": controls.get_rule(i)} for i in range(n)]
+        return [
+            {
+                "index": i,
+                "name": controls.get_id(i),
+                "text": controls.get_rule(i),
+            }
+            for i in range(n)
+        ]
 
     rules = await asyncio.to_thread(_read_all)
     return {"session_id": session_id, "count": len(rules), "rules": rules}

@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import pytest
 
+pytest.importorskip("openswmm.engine")
+
 from openswmm_mcp.errors import ToolError
 from openswmm_mcp.models import (
     CapacitySummaryItem,

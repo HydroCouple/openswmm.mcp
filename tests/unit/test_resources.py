@@ -6,6 +6,8 @@ import json
 
 import pytest
 
+pytest.importorskip("openswmm.engine")
+
 from openswmm_mcp.errors import ToolError
 from openswmm_mcp.resources.model import (
     list_links,

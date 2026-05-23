@@ -12,7 +12,8 @@ Domain covered (Python ``Inflows`` surface):
 * ``[RDII]`` — :func:`add_rdii`, :func:`get_rdii`, :func:`rdii_count`
 * ``[HYDROGRAPHS]`` — :func:`add_hydrograph`, :func:`get_hydrograph`,
   :func:`hydrograph_count`, :func:`add_hydrograph_gage`,
-  :func:`get_hydrograph_gage`, :func:`hydrograph_gage_count`
+  :func:`get_hydrograph_gage`, :func:`hydrograph_gage_count`,
+  :func:`hydrograph_group_count`, :func:`list_hydrograph_groups`
 * ``[RDII_DECAY]`` — :func:`add_rdii_decay`, :func:`get_rdii_decay`,
   :func:`rdii_decay_count`
 
@@ -459,6 +460,46 @@ async def hydrograph_gage_count(ctx: Context, session_id: str = "default") -> di
     _, inflows, _ = await _get_inflows_accessor(ctx, session_id)
     n = await asyncio.to_thread(inflows.hydrograph_gage_count)
     return {"session_id": session_id, "count": n}
+
+
+@inflows_mcp.tool()
+async def hydrograph_group_count(ctx: Context, session_id: str = "default") -> dict:
+    """Return the number of *unique* unit-hydrograph group names.
+
+    A UH "group" is identified by name; the engine stores one row per
+    ``(group, month, response)``. This count is the number of distinct
+    group names across parameter entries and gage assignments — the
+    figure a GUI Object Browser needs for the Unit Hydrographs section.
+    """
+    _, inflows, _ = await _get_inflows_accessor(ctx, session_id)
+    n = await asyncio.to_thread(inflows.hydrograph_group_count)
+    return {"session_id": session_id, "count": n}
+
+
+@inflows_mcp.tool()
+async def list_hydrograph_groups(
+    ctx: Context, session_id: str = "default"
+) -> dict:
+    """Return the unit-hydrograph groups as a list of ``{index, name}`` dicts.
+
+    Groups are enumerated in first-occurrence order across the parameter
+    entry list (matches the order in which they appear in the
+    ``[HYDROGRAPHS]`` section of the input file). Convenience wrapper
+    that batches ``hydrograph_group_count`` + N x
+    ``get_hydrograph_group_id`` so an LLM (or GUI Object Browser) can
+    populate the Unit Hydrographs node in a single call.
+    """
+    _, inflows, _ = await _get_inflows_accessor(ctx, session_id)
+
+    def _read_all() -> list[dict[str, Any]]:
+        n = inflows.hydrograph_group_count()
+        return [
+            {"index": i, "name": inflows.get_hydrograph_group_id(i)}
+            for i in range(n)
+        ]
+
+    groups = await asyncio.to_thread(_read_all)
+    return {"session_id": session_id, "count": len(groups), "groups": groups}
 
 
 # ===========================================================================

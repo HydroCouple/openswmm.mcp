@@ -5,7 +5,7 @@
 The simplest way to install the OpenSWMM MCP Server is via pip:
 
 ```bash
-pip install openswmm-mcp
+pip install openswmm.mcp
 ```
 
 This installs the server and all required runtime dependencies (`fastmcp`,
@@ -30,7 +30,7 @@ If you use [uv](https://github.com/astral-sh/uv) for fast Python package
 management:
 
 ```bash
-uv pip install openswmm-mcp
+uv pip install openswmm.mcp
 ```
 
 Or for development:
@@ -49,7 +49,7 @@ server. Add the following to your `.claude/settings.json`:
 {
   "mcpServers": {
     "openswmm": {
-      "command": "openswmm-mcp",
+      "command": "openswmm.mcp",
       "args": [],
       "env": {
         "OPENSWMM_MCP_WORKING_DIR": "/path/to/your/models"
@@ -66,7 +66,7 @@ Alternatively, if you installed with `uv` and want to use the `uvx` runner:
   "mcpServers": {
     "openswmm": {
       "command": "uvx",
-      "args": ["openswmm-mcp"],
+      "args": ["openswmm.mcp"],
       "env": {
         "OPENSWMM_MCP_WORKING_DIR": "/path/to/your/models"
       }
