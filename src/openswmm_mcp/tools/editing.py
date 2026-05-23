@@ -14,7 +14,7 @@ import logging
 from fastmcp import Context, FastMCP
 from openswmm.engine import ModelEditor
 
-from openswmm_mcp.dependencies import get_session_manager, require_new_engine, require_state
+from openswmm_mcp.dependencies import get_session_manager, require_new_engine
 from openswmm_mcp.errors import ErrorCode, ToolError
 from openswmm_mcp.models import (
     ConversionResultModel,
@@ -684,9 +684,7 @@ async def set_subcatchment_properties(
 
     sc_idx = await asyncio.to_thread(subcatchments.get_index, subcatch_id)
     if sc_idx < 0:
-        raise ToolError(
-            f"[{ErrorCode.ELEMENT_NOT_FOUND}] Subcatchment '{subcatch_id}' not found."
-        )
+        raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Subcatchment '{subcatch_id}' not found.")
 
     updated: dict[str, float | int | str] = {}
     try:
@@ -727,9 +725,7 @@ async def set_subcatchment_properties(
             gages = session.gages
             gage_idx = await asyncio.to_thread(gages.get_index, gage_id)
             if gage_idx < 0:
-                raise ToolError(
-                    f"[{ErrorCode.ELEMENT_NOT_FOUND}] Gage '{gage_id}' not found."
-                )
+                raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Gage '{gage_id}' not found.")
             await asyncio.to_thread(subcatchments.set_gage, sc_idx, gage_idx)
             updated["gage_id"] = gage_id
     except ToolError:
@@ -739,7 +735,9 @@ async def set_subcatchment_properties(
 
     logger.info(
         "Session '%s': subcatchment '%s' properties updated: %s.",
-        session_id, subcatch_id, updated,
+        session_id,
+        subcatch_id,
+        updated,
     )
     return PropertyUpdateResult(
         session_id=session_id,
@@ -850,9 +848,7 @@ async def configure_gage(
 # ===========================================================================
 
 
-async def _resolve_for_rename(
-    session, accessor_name: str, current_id: str
-) -> tuple[object, int]:
+async def _resolve_for_rename(session, accessor_name: str, current_id: str) -> tuple[object, int]:
     """Resolve a current id string to (accessor, idx) for the rename helpers."""
     if not current_id:
         raise ToolError(
@@ -888,8 +884,12 @@ async def rename_node(
     accessor, idx = await _resolve_for_rename(session, "nodes", node_id)
     await asyncio.to_thread(accessor.rename, idx, new_id)
     return {
-        "status": "ok", "session_id": session_id,
-        "element_type": "node", "old_id": node_id, "new_id": new_id, "index": idx,
+        "status": "ok",
+        "session_id": session_id,
+        "element_type": "node",
+        "old_id": node_id,
+        "new_id": new_id,
+        "index": idx,
     }
 
 
@@ -909,8 +909,12 @@ async def rename_link(
     accessor, idx = await _resolve_for_rename(session, "links", link_id)
     await asyncio.to_thread(accessor.rename, idx, new_id)
     return {
-        "status": "ok", "session_id": session_id,
-        "element_type": "link", "old_id": link_id, "new_id": new_id, "index": idx,
+        "status": "ok",
+        "session_id": session_id,
+        "element_type": "link",
+        "old_id": link_id,
+        "new_id": new_id,
+        "index": idx,
     }
 
 
@@ -930,9 +934,12 @@ async def rename_subcatchment(
     accessor, idx = await _resolve_for_rename(session, "subcatchments", subcatch_id)
     await asyncio.to_thread(accessor.rename, idx, new_id)
     return {
-        "status": "ok", "session_id": session_id,
+        "status": "ok",
+        "session_id": session_id,
         "element_type": "subcatchment",
-        "old_id": subcatch_id, "new_id": new_id, "index": idx,
+        "old_id": subcatch_id,
+        "new_id": new_id,
+        "index": idx,
     }
 
 
@@ -952,6 +959,10 @@ async def rename_gage(
     accessor, idx = await _resolve_for_rename(session, "gages", gage_id)
     await asyncio.to_thread(accessor.rename, idx, new_id)
     return {
-        "status": "ok", "session_id": session_id,
-        "element_type": "gage", "old_id": gage_id, "new_id": new_id, "index": idx,
+        "status": "ok",
+        "session_id": session_id,
+        "element_type": "gage",
+        "old_id": gage_id,
+        "new_id": new_id,
+        "index": idx,
     }

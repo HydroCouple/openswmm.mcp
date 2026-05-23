@@ -88,7 +88,9 @@ class TestNodeStats:
         ctx = await _ended(session_manager, inp_path, "n_stats_bad")
         with pytest.raises(ToolError, match="ELEMENT_NOT_FOUND|not found"):
             await stat_max_depth(
-                ctx, session_id="n_stats_bad", node_id="NOPE",
+                ctx,
+                session_id="n_stats_bad",
+                node_id="NOPE",
             )
 
 
@@ -98,9 +100,7 @@ class TestNodeStats:
 
 
 class TestBulkReaders:
-    async def test_depths_bulk_returns_per_node_records(
-        self, session_manager, inp_path
-    ):
+    async def test_depths_bulk_returns_per_node_records(self, session_manager, inp_path):
         from openswmm_mcp.tools.nodes import get_depths_bulk
 
         ctx = await _opened(session_manager, inp_path, "n_bd")
@@ -145,7 +145,9 @@ class TestBulkWriters:
         ctx = await _running(session_manager, inp_path, "n_sd")
         target = [0.5] * 12
         result = await set_depths_bulk(
-            ctx, session_id="n_sd", depths=target,
+            ctx,
+            session_id="n_sd",
+            depths=target,
         )
         assert result["status"] == "ok"
         # Read back to verify the engine accepted the values.
@@ -153,20 +155,18 @@ class TestBulkWriters:
         for r in back["results"]:
             assert r["value"] == pytest.approx(0.5)
 
-    async def test_set_depths_bulk_wrong_length_rejected(
-        self, session_manager, inp_path
-    ):
+    async def test_set_depths_bulk_wrong_length_rejected(self, session_manager, inp_path):
         from openswmm_mcp.tools.nodes import set_depths_bulk
 
         ctx = await _running(session_manager, inp_path, "n_sd_bad")
         with pytest.raises(ToolError, match="length .* != node count"):
             await set_depths_bulk(
-                ctx, session_id="n_sd_bad", depths=[0.5] * 5,
+                ctx,
+                session_id="n_sd_bad",
+                depths=[0.5] * 5,
             )
 
-    async def test_set_depths_bulk_empty_rejected(
-        self, session_manager, inp_path
-    ):
+    async def test_set_depths_bulk_empty_rejected(self, session_manager, inp_path):
         from openswmm_mcp.tools.nodes import set_depths_bulk
 
         ctx = await _running(session_manager, inp_path, "n_sd_e")
@@ -193,7 +193,11 @@ class TestOutfallType:
             pytest.skip(f"Outfall O1 not present in fixture: {e}")
         assert 0 <= r["outfall_type_code"] <= 4
         assert r["outfall_type"] in (
-            "free", "normal", "fixed", "tidal", "timeseries",
+            "free",
+            "normal",
+            "fixed",
+            "tidal",
+            "timeseries",
         )
 
     async def test_set_outfall_type_by_name(self, session_manager, inp_path):
@@ -208,7 +212,10 @@ class TestOutfallType:
         ctx = await _opened(session_manager, inp_path, "n_ots")
         try:
             await set_outfall_type(
-                ctx, session_id="n_ots", node_id="O1", outfall_type="free",
+                ctx,
+                session_id="n_ots",
+                node_id="O1",
+                outfall_type="free",
             )
         except (ToolError, RuntimeError) as e:
             pytest.skip(f"Outfall set rejected by engine lifecycle: {e}")
@@ -221,7 +228,10 @@ class TestOutfallType:
         ctx = await _opened(session_manager, inp_path, "n_ot_bad")
         with pytest.raises(ToolError, match="Unknown outfall_type"):
             await set_outfall_type(
-                ctx, session_id="n_ot_bad", node_id="O1", outfall_type="bogus",
+                ctx,
+                session_id="n_ot_bad",
+                node_id="O1",
+                outfall_type="bogus",
             )
 
 
@@ -237,7 +247,10 @@ class TestDividerTypeValidation:
         ctx = await _opened(session_manager, inp_path, "n_dt_bad")
         with pytest.raises(ToolError, match="Unknown divider_type"):
             await set_divider_type(
-                ctx, session_id="n_dt_bad", node_id="J1", divider_type="bogus",
+                ctx,
+                session_id="n_dt_bad",
+                node_id="J1",
+                divider_type="bogus",
             )
 
 
@@ -255,7 +268,10 @@ class TestQualityGet:
         ctx = await _opened(session_manager, inp_path, "n_q")
         try:
             r = await get_quality(
-                ctx, session_id="n_q", node_id="J1", pollutant_index=0,
+                ctx,
+                session_id="n_q",
+                node_id="J1",
+                pollutant_index=0,
             )
         except Exception:
             pytest.skip("Reference model has no pollutants tracked.")

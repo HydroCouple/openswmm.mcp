@@ -16,7 +16,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - run: pip install ruff
+      - run: pip install ruff==0.15.14
 
       - run: ruff check src/ tests/
 

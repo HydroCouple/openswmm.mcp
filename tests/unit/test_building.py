@@ -159,6 +159,7 @@ class TestAddNode:
 class TestPopLastNode:
     async def test_pop_last_node_undoes_add(self, session_manager):
         from openswmm.engine import Nodes
+
         from openswmm_mcp.tools.building import add_node, pop_last_node
 
         ctx = await _create_building_session(session_manager, "bld_pln_ok")
@@ -181,6 +182,7 @@ class TestPopLastNode:
 
     async def test_pop_last_node_wrong_tail_raises(self, session_manager):
         from openswmm.engine import Nodes
+
         from openswmm_mcp.tools.building import add_node, pop_last_node
 
         ctx = await _create_building_session(session_manager, "bld_pln_wt")
@@ -288,6 +290,7 @@ class TestAddLink:
 class TestPopLastLink:
     async def test_pop_last_link_undoes_add(self, session_manager):
         from openswmm.engine import Links
+
         from openswmm_mcp.tools.building import add_link, add_node, pop_last_link
 
         ctx = await _create_building_session(session_manager, "bld_pll_ok")

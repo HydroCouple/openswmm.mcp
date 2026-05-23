@@ -52,9 +52,7 @@ def _validate_spatial_type_with_gage(element_type: str) -> str:
     normalised = element_type.strip().lower()
     if normalised not in _VALID_SPATIAL_TYPES_WITH_GAGE:
         sorted_types = ", ".join(f"'{t}'" for t in sorted(_VALID_SPATIAL_TYPES_WITH_GAGE))
-        raise ToolError(
-            f"Unknown element type '{element_type}'. Valid types are: {sorted_types}."
-        )
+        raise ToolError(f"Unknown element type '{element_type}'. Valid types are: {sorted_types}.")
     return normalised
 
 
@@ -253,9 +251,7 @@ async def set_vertices(
 
     for i, pt in enumerate(vertices):
         if len(pt) != 2:
-            raise ToolError(
-                f"vertices[{i}] must be a two-element [x, y] list, got {pt!r}."
-            )
+            raise ToolError(f"vertices[{i}] must be a two-element [x, y] list, got {pt!r}.")
 
     sm = _get_session_manager(ctx)
     session = await sm.get_session(session_id)
@@ -267,6 +263,7 @@ async def set_vertices(
         raise ToolError(f"Link '{link_id}' not found.")
 
     import numpy as np
+
     x_arr = np.array([pt[0] for pt in vertices], dtype=np.float64)
     y_arr = np.array([pt[1] for pt in vertices], dtype=np.float64)
     await asyncio.to_thread(spatial.set_link_vertices, idx, x_arr, y_arr)
@@ -356,9 +353,7 @@ async def set_polygon(
 
     for i, pt in enumerate(polygon):
         if len(pt) != 2:
-            raise ToolError(
-                f"polygon[{i}] must be a two-element [x, y] list, got {pt!r}."
-            )
+            raise ToolError(f"polygon[{i}] must be a two-element [x, y] list, got {pt!r}.")
 
     sm = _get_session_manager(ctx)
     session = await sm.get_session(session_id)
@@ -370,6 +365,7 @@ async def set_polygon(
         raise ToolError(f"Subcatchment '{subcatch_id}' not found.")
 
     import numpy as np
+
     x_arr = np.array([pt[0] for pt in polygon], dtype=np.float64)
     y_arr = np.array([pt[1] for pt in polygon], dtype=np.float64)
     await asyncio.to_thread(spatial.set_subcatch_polygon, idx, x_arr, y_arr)
@@ -555,10 +551,7 @@ async def get_all_coordinates(
         # Single bulk C call for node coordinates (numpy memcpy)
         x_arr, y_arr = await asyncio.to_thread(spatial.get_node_coords_bulk)
         ids = await asyncio.to_thread(lambda: [nodes.get_id(i) for i in range(count)])
-        coords = [
-            {"id": ids[i], "x": float(x_arr[i]), "y": float(y_arr[i])}
-            for i in range(count)
-        ]
+        coords = [{"id": ids[i], "x": float(x_arr[i]), "y": float(y_arr[i])} for i in range(count)]
 
     elif etype == "link":
         links = session.links
@@ -568,11 +561,14 @@ async def get_all_coordinates(
 
         def _fetch_all_link_coords():
             return [
-                {"id": links.get_id(i),
-                 "x": float(spatial.get_link_coord(i)[0]),
-                 "y": float(spatial.get_link_coord(i)[1])}
+                {
+                    "id": links.get_id(i),
+                    "x": float(spatial.get_link_coord(i)[0]),
+                    "y": float(spatial.get_link_coord(i)[1]),
+                }
                 for i in range(count)
             ]
+
         coords = await asyncio.to_thread(_fetch_all_link_coords)
 
     elif etype == "subcatchment":
@@ -583,11 +579,14 @@ async def get_all_coordinates(
 
         def _fetch_all_subcatch_coords():
             return [
-                {"id": subcatchments.get_id(i),
-                 "x": float(spatial.get_subcatch_coord(i)[0]),
-                 "y": float(spatial.get_subcatch_coord(i)[1])}
+                {
+                    "id": subcatchments.get_id(i),
+                    "x": float(spatial.get_subcatch_coord(i)[0]),
+                    "y": float(spatial.get_subcatch_coord(i)[1]),
+                }
                 for i in range(count)
             ]
+
         coords = await asyncio.to_thread(_fetch_all_subcatch_coords)
 
     else:  # gage
@@ -598,11 +597,14 @@ async def get_all_coordinates(
 
         def _fetch_all_gage_coords():
             return [
-                {"id": gages.get_id(i),
-                 "x": float(spatial.get_gage_coord(i)[0]),
-                 "y": float(spatial.get_gage_coord(i)[1])}
+                {
+                    "id": gages.get_id(i),
+                    "x": float(spatial.get_gage_coord(i)[0]),
+                    "y": float(spatial.get_gage_coord(i)[1]),
+                }
                 for i in range(count)
             ]
+
         coords = await asyncio.to_thread(_fetch_all_gage_coords)
 
     return {
@@ -751,12 +753,14 @@ async def get_all_polygons(
                 poly = [[float(x_arr[j]), float(y_arr[j])] for j in range(len(x_arr))]
             else:
                 poly = []
-            result.append({
-                "id": sid,
-                "centroid": [float(cx), float(cy)],
-                "vertex_count": len(poly),
-                "polygon": poly,
-            })
+            result.append(
+                {
+                    "id": sid,
+                    "centroid": [float(cx), float(cy)],
+                    "vertex_count": len(poly),
+                    "polygon": poly,
+                }
+            )
         return result
 
     sc_data = await asyncio.to_thread(_fetch_all)
@@ -832,14 +836,15 @@ async def get_model_geometry(
         def _fetch_node_props():
             return [
                 {
-                    "id":        nodes_acc.get_id(i),
-                    "type":      nodes_acc.get_type(i),
+                    "id": nodes_acc.get_id(i),
+                    "type": nodes_acc.get_type(i),
                     "type_name": _NODE_TYPE_NAMES.get(nodes_acc.get_type(i), "UNKNOWN"),
-                    "x":         float(node_x[i]),
-                    "y":         float(node_y[i]),
+                    "x": float(node_x[i]),
+                    "y": float(node_y[i]),
                 }
                 for i in range(node_count)
             ]
+
         nodes_data = await asyncio.to_thread(_fetch_node_props)
     else:
         node_x = node_y = np.array([])
@@ -849,6 +854,7 @@ async def get_model_geometry(
     link_count = await asyncio.to_thread(links_acc.count)
 
     if link_count > 0:
+
         def _fetch_links():
             result = []
             for i in range(link_count):
@@ -861,15 +867,18 @@ async def get_model_geometry(
                     verts = [[float(xv[j]), float(yv[j])] for j in range(len(xv))]
                 else:
                     verts = []
-                result.append({
-                    "id":        links_acc.get_id(i),
-                    "type":      ltype,
-                    "type_name": _LINK_TYPE_NAMES.get(ltype, "UNKNOWN"),
-                    "from_node": nodes_acc.get_id(fn_idx),
-                    "to_node":   nodes_acc.get_id(tn_idx),
-                    "vertices":  verts,
-                })
+                result.append(
+                    {
+                        "id": links_acc.get_id(i),
+                        "type": ltype,
+                        "type_name": _LINK_TYPE_NAMES.get(ltype, "UNKNOWN"),
+                        "from_node": nodes_acc.get_id(fn_idx),
+                        "to_node": nodes_acc.get_id(tn_idx),
+                        "vertices": verts,
+                    }
+                )
             return result
+
         links_data = await asyncio.to_thread(_fetch_links)
     else:
         links_data = []
@@ -878,6 +887,7 @@ async def get_model_geometry(
     sc_count = await asyncio.to_thread(subcatch_acc.count)
 
     if sc_count > 0:
+
         def _fetch_subcatchments():
             result = []
             for i in range(sc_count):
@@ -888,13 +898,16 @@ async def get_model_geometry(
                     poly = [[float(px[j]), float(py[j])] for j in range(len(px))]
                 else:
                     poly = []
-                result.append({
-                    "id":              subcatch_acc.get_id(i),
-                    "centroid":        [float(cx), float(cy)],
-                    "polygon":         poly,
-                    "outlet_node_idx": subcatch_acc.get_outlet(i),
-                })
+                result.append(
+                    {
+                        "id": subcatch_acc.get_id(i),
+                        "centroid": [float(cx), float(cy)],
+                        "polygon": poly,
+                        "outlet_node_idx": subcatch_acc.get_outlet(i),
+                    }
+                )
             return result
+
         sc_data = await asyncio.to_thread(_fetch_subcatchments)
     else:
         sc_data = []
@@ -903,15 +916,17 @@ async def get_model_geometry(
     gage_count = await asyncio.to_thread(gages_acc.count)
 
     if gage_count > 0:
+
         def _fetch_gages():
             return [
                 {
                     "id": gages_acc.get_id(i),
-                    "x":  float(spatial.get_gage_coord(i)[0]),
-                    "y":  float(spatial.get_gage_coord(i)[1]),
+                    "x": float(spatial.get_gage_coord(i)[0]),
+                    "y": float(spatial.get_gage_coord(i)[1]),
                 }
                 for i in range(gage_count)
             ]
+
         gages_data = await asyncio.to_thread(_fetch_gages)
     else:
         gages_data = []
@@ -930,17 +945,17 @@ async def get_model_geometry(
             }
 
     return {
-        "session_id":         session_id,
-        "crs":                crs,
-        "bounds":             bounds,
-        "node_count":         node_count,
-        "link_count":         link_count,
+        "session_id": session_id,
+        "crs": crs,
+        "bounds": bounds,
+        "node_count": node_count,
+        "link_count": link_count,
         "subcatchment_count": sc_count,
-        "gage_count":         gage_count,
-        "nodes":              nodes_data,
-        "links":              links_data,
-        "subcatchments":      sc_data,
-        "gages":              gages_data,
+        "gage_count": gage_count,
+        "nodes": nodes_data,
+        "links": links_data,
+        "subcatchments": sc_data,
+        "gages": gages_data,
     }
 
 

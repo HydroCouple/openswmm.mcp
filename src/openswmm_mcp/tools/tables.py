@@ -67,8 +67,7 @@ def _resolve_curve_type(name: str | int) -> int:
     if key not in _CURVE_TYPES:
         valid = ", ".join(sorted(_CURVE_TYPES))
         raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] Unknown curve_type '{name}'. "
-            f"Valid types: {valid}."
+            f"[{ErrorCode.VALIDATION_ERROR}] Unknown curve_type '{name}'. Valid types: {valid}."
         )
     return _CURVE_TYPES[key]
 
@@ -81,8 +80,7 @@ def _resolve_pattern_type(name: str | int) -> int:
     if key not in _PATTERN_TYPES:
         valid = ", ".join(sorted(_PATTERN_TYPES))
         raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] Unknown pattern_type '{name}'. "
-            f"Valid types: {valid}."
+            f"[{ErrorCode.VALIDATION_ERROR}] Unknown pattern_type '{name}'. Valid types: {valid}."
         )
     return _PATTERN_TYPES[key]
 
@@ -157,9 +155,7 @@ async def count(ctx: Context, session_id: str = "default") -> dict:
 
 
 @tables_mcp.tool()
-async def get_id(
-    ctx: Context, session_id: str = "default", index: int = 0
-) -> dict:
+async def get_id(ctx: Context, session_id: str = "default", index: int = 0) -> dict:
     """Return the string ID of a table by zero-based index."""
     _, tables = await _get_tables_accessor(ctx, session_id)
     table_id = await asyncio.to_thread(tables.get_id, index)
@@ -167,9 +163,7 @@ async def get_id(
 
 
 @tables_mcp.tool()
-async def get_index(
-    ctx: Context, session_id: str = "default", table_id: str = ""
-) -> dict:
+async def get_index(ctx: Context, session_id: str = "default", table_id: str = "") -> dict:
     """Return the zero-based index of a table by string ID.
 
     Returns ``-1`` if no table with that ID exists.
@@ -207,8 +201,7 @@ async def add_timeseries(
         )
     if len(times) != len(values):
         raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] len(times)={len(times)} != "
-            f"len(values)={len(values)}."
+            f"[{ErrorCode.VALIDATION_ERROR}] len(times)={len(times)} != len(values)={len(values)}."
         )
 
     _, tables = await _get_tables_accessor(ctx, session_id, require_building=True)
@@ -248,8 +241,7 @@ async def add_curve(
         raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] curve_id must not be empty.")
     if not x_values or not y_values:
         raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] 'x_values' and 'y_values' must both "
-            f"be non-empty."
+            f"[{ErrorCode.VALIDATION_ERROR}] 'x_values' and 'y_values' must both be non-empty."
         )
     if len(x_values) != len(y_values):
         raise ToolError(

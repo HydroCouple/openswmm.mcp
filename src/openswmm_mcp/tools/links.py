@@ -58,15 +58,11 @@ async def _resolve_link(session: SimSession, link_id: str | int) -> int:
         raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] link_id must not be empty.")
     idx = await asyncio.to_thread(session.links.get_index, link_id)
     if idx < 0:
-        raise ToolError(
-            f"[{ErrorCode.ELEMENT_NOT_FOUND}] Link '{link_id}' not found."
-        )
+        raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Link '{link_id}' not found.")
     return idx
 
 
-def _zip_link_results(
-    session: SimSession, values: list[float]
-) -> list[dict[str, Any]]:
+def _zip_link_results(session: SimSession, values: list[float]) -> list[dict[str, Any]]:
     """Build [{id, index, value}, ...] from a bulk array."""
     n = session.links.count()
     return [
@@ -88,15 +84,15 @@ async def _stat_lookup(
     idx = await _resolve_link(session, link_id)
     value = await asyncio.to_thread(getattr(session.links, attr), idx)
     return {
-        "session_id": session_id, "link_id": link_id,
-        "link_index": idx, output_key: value,
+        "session_id": session_id,
+        "link_id": link_id,
+        "link_index": idx,
+        output_key: value,
     }
 
 
 @links_mcp.tool()
-async def stat_max_flow(
-    ctx: Context, session_id: str = "default", link_id: str | int = ""
-) -> dict:
+async def stat_max_flow(ctx: Context, session_id: str = "default", link_id: str | int = "") -> dict:
     """Return the peak flow recorded for a link over the simulation."""
     return await _stat_lookup(ctx, session_id, link_id, "get_stat_max_flow", "max_flow")
 
@@ -106,9 +102,7 @@ async def stat_max_velocity(
     ctx: Context, session_id: str = "default", link_id: str | int = ""
 ) -> dict:
     """Return the peak velocity for a link."""
-    return await _stat_lookup(
-        ctx, session_id, link_id, "get_stat_max_velocity", "max_velocity"
-    )
+    return await _stat_lookup(ctx, session_id, link_id, "get_stat_max_velocity", "max_velocity")
 
 
 @links_mcp.tool()
@@ -116,19 +110,13 @@ async def stat_max_filling(
     ctx: Context, session_id: str = "default", link_id: str | int = ""
 ) -> dict:
     """Return the peak depth/full-depth ratio (0..1+) for a conduit."""
-    return await _stat_lookup(
-        ctx, session_id, link_id, "get_stat_max_filling", "max_filling"
-    )
+    return await _stat_lookup(ctx, session_id, link_id, "get_stat_max_filling", "max_filling")
 
 
 @links_mcp.tool()
-async def stat_vol_flow(
-    ctx: Context, session_id: str = "default", link_id: str | int = ""
-) -> dict:
+async def stat_vol_flow(ctx: Context, session_id: str = "default", link_id: str | int = "") -> dict:
     """Return the total volume conveyed through a link."""
-    return await _stat_lookup(
-        ctx, session_id, link_id, "get_stat_vol_flow", "vol_flow"
-    )
+    return await _stat_lookup(ctx, session_id, link_id, "get_stat_vol_flow", "vol_flow")
 
 
 @links_mcp.tool()
@@ -137,8 +125,11 @@ async def stat_surcharge_time(
 ) -> dict:
     """Return total surcharge duration (hours) for a link."""
     return await _stat_lookup(
-        ctx, session_id, link_id,
-        "get_stat_surcharge_time", "surcharge_time_hours",
+        ctx,
+        session_id,
+        link_id,
+        "get_stat_surcharge_time",
+        "surcharge_time_hours",
     )
 
 
@@ -147,9 +138,7 @@ async def stat_pump_cycles(
     ctx: Context, session_id: str = "default", link_id: str | int = ""
 ) -> dict:
     """Return the on/off cycle count for a pump link."""
-    return await _stat_lookup(
-        ctx, session_id, link_id, "get_stat_pump_cycles", "pump_cycles"
-    )
+    return await _stat_lookup(ctx, session_id, link_id, "get_stat_pump_cycles", "pump_cycles")
 
 
 @links_mcp.tool()
@@ -158,8 +147,11 @@ async def stat_pump_on_time(
 ) -> dict:
     """Return total on-time (seconds) for a pump link."""
     return await _stat_lookup(
-        ctx, session_id, link_id,
-        "get_stat_pump_on_time", "pump_on_time_seconds",
+        ctx,
+        session_id,
+        link_id,
+        "get_stat_pump_on_time",
+        "pump_on_time_seconds",
     )
 
 
@@ -168,19 +160,13 @@ async def stat_pump_volume(
     ctx: Context, session_id: str = "default", link_id: str | int = ""
 ) -> dict:
     """Return total volume pumped by a pump link."""
-    return await _stat_lookup(
-        ctx, session_id, link_id, "get_stat_pump_volume", "pump_volume"
-    )
+    return await _stat_lookup(ctx, session_id, link_id, "get_stat_pump_volume", "pump_volume")
 
 
 @links_mcp.tool()
-async def hyd_power(
-    ctx: Context, session_id: str = "default", link_id: str | int = ""
-) -> dict:
+async def hyd_power(ctx: Context, session_id: str = "default", link_id: str | int = "") -> dict:
     """Return the current hydraulic power dissipated in a link."""
-    return await _stat_lookup(
-        ctx, session_id, link_id, "get_hyd_power", "hydraulic_power"
-    )
+    return await _stat_lookup(ctx, session_id, link_id, "get_hyd_power", "hydraulic_power")
 
 
 # ===========================================================================
@@ -214,9 +200,7 @@ async def get_quality_bulk(
 ) -> dict:
     """Return pollutant concentrations across all links for one pollutant."""
     session = await _get_session(ctx, session_id)
-    arr = await asyncio.to_thread(
-        session.links.get_quality_bulk, pollutant_index
-    )
+    arr = await asyncio.to_thread(session.links.get_quality_bulk, pollutant_index)
     values = ndarray_to_list(arr)
     records = await asyncio.to_thread(_zip_link_results, session, values)
     return {
@@ -240,8 +224,7 @@ async def set_flows_bulk(
     n = await asyncio.to_thread(session.links.count)
     if len(flows) != n:
         raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] flows length {len(flows)} != "
-            f"link count {n}."
+            f"[{ErrorCode.VALIDATION_ERROR}] flows length {len(flows)} != link count {n}."
         )
     import numpy as np
 
@@ -264,8 +247,10 @@ async def get_control_setting(
     idx = await _resolve_link(session, link_id)
     value = await asyncio.to_thread(session.links.get_control_setting, idx)
     return {
-        "session_id": session_id, "link_id": link_id,
-        "link_index": idx, "setting": value,
+        "session_id": session_id,
+        "link_id": link_id,
+        "link_index": idx,
+        "setting": value,
     }
 
 
@@ -285,12 +270,13 @@ async def set_control_setting(
     session = await _get_session(ctx, session_id)
     require_state(session, "running")
     idx = await _resolve_link(session, link_id)
-    await asyncio.to_thread(
-        session.links.set_control_setting, idx, float(setting)
-    )
+    await asyncio.to_thread(session.links.set_control_setting, idx, float(setting))
     return {
-        "status": "ok", "session_id": session_id, "link_id": link_id,
-        "link_index": idx, "setting": setting,
+        "status": "ok",
+        "session_id": session_id,
+        "link_id": link_id,
+        "link_index": idx,
+        "setting": setting,
     }
 
 
@@ -303,8 +289,10 @@ async def get_target_setting(
     idx = await _resolve_link(session, link_id)
     value = await asyncio.to_thread(session.links.get_target_setting, idx)
     return {
-        "session_id": session_id, "link_id": link_id,
-        "link_index": idx, "target_setting": value,
+        "session_id": session_id,
+        "link_id": link_id,
+        "link_index": idx,
+        "target_setting": value,
     }
 
 
@@ -319,26 +307,27 @@ async def set_target_setting(
     session = await _get_session(ctx, session_id)
     require_state(session, "running")
     idx = await _resolve_link(session, link_id)
-    await asyncio.to_thread(
-        session.links.set_target_setting, idx, float(target)
-    )
+    await asyncio.to_thread(session.links.set_target_setting, idx, float(target))
     return {
-        "status": "ok", "session_id": session_id, "link_id": link_id,
-        "link_index": idx, "target_setting": target,
+        "status": "ok",
+        "session_id": session_id,
+        "link_id": link_id,
+        "link_index": idx,
+        "target_setting": target,
     }
 
 
 @links_mcp.tool()
-async def get_closed(
-    ctx: Context, session_id: str = "default", link_id: str | int = ""
-) -> dict:
+async def get_closed(ctx: Context, session_id: str = "default", link_id: str | int = "") -> dict:
     """Return whether a link is currently closed (no flow)."""
     session = await _get_session(ctx, session_id)
     idx = await _resolve_link(session, link_id)
     closed = await asyncio.to_thread(session.links.get_closed, idx)
     return {
-        "session_id": session_id, "link_id": link_id,
-        "link_index": idx, "closed": bool(closed),
+        "session_id": session_id,
+        "link_id": link_id,
+        "link_index": idx,
+        "closed": bool(closed),
     }
 
 
@@ -355,8 +344,11 @@ async def set_closed(
     idx = await _resolve_link(session, link_id)
     await asyncio.to_thread(session.links.set_closed, idx, closed)
     return {
-        "status": "ok", "session_id": session_id, "link_id": link_id,
-        "link_index": idx, "closed": closed,
+        "status": "ok",
+        "session_id": session_id,
+        "link_id": link_id,
+        "link_index": idx,
+        "closed": closed,
     }
 
 
@@ -374,8 +366,10 @@ async def get_pump_curve(
     idx = await _resolve_link(session, link_id)
     curve_idx = await asyncio.to_thread(session.links.get_pump_curve, idx)
     return {
-        "session_id": session_id, "link_id": link_id,
-        "link_index": idx, "curve_index": curve_idx,
+        "session_id": session_id,
+        "link_id": link_id,
+        "link_index": idx,
+        "curve_index": curve_idx,
     }
 
 
@@ -391,8 +385,11 @@ async def set_pump_curve(
     idx = await _resolve_link(session, link_id)
     await asyncio.to_thread(session.links.set_pump_curve, idx, curve_index)
     return {
-        "status": "ok", "session_id": session_id, "link_id": link_id,
-        "link_index": idx, "curve_index": curve_index,
+        "status": "ok",
+        "session_id": session_id,
+        "link_id": link_id,
+        "link_index": idx,
+        "curve_index": curve_index,
     }
 
 
@@ -405,8 +402,10 @@ async def get_pump_init_state(
     idx = await _resolve_link(session, link_id)
     state = await asyncio.to_thread(session.links.get_pump_init_state, idx)
     return {
-        "session_id": session_id, "link_id": link_id,
-        "link_index": idx, "init_state": int(state),
+        "session_id": session_id,
+        "link_id": link_id,
+        "link_index": idx,
+        "init_state": int(state),
     }
 
 
@@ -420,12 +419,13 @@ async def set_pump_init_state(
     """Set the initial ON/OFF state of a pump."""
     session = await _get_session(ctx, session_id)
     idx = await _resolve_link(session, link_id)
-    await asyncio.to_thread(
-        session.links.set_pump_init_state, idx, 1 if init_on else 0
-    )
+    await asyncio.to_thread(session.links.set_pump_init_state, idx, 1 if init_on else 0)
     return {
-        "status": "ok", "session_id": session_id, "link_id": link_id,
-        "link_index": idx, "init_on": init_on,
+        "status": "ok",
+        "session_id": session_id,
+        "link_id": link_id,
+        "link_index": idx,
+        "init_on": init_on,
     }
 
 
@@ -435,58 +435,64 @@ async def set_pump_init_state(
 
 
 async def _scalar_get(
-    ctx: Context, session_id: str, link_id: str | int, getter: str,
-    value_key: str, value_type: type,
+    ctx: Context,
+    session_id: str,
+    link_id: str | int,
+    getter: str,
+    value_key: str,
+    value_type: type,
 ) -> dict:
     """Shared body for the conduit-detail scalar getters."""
     session = await _get_session(ctx, session_id)
     idx = await _resolve_link(session, link_id)
     v = await asyncio.to_thread(getattr(session.links, getter), idx)
     return {
-        "session_id": session_id, "link_id": link_id,
-        "link_index": idx, value_key: value_type(v),
+        "session_id": session_id,
+        "link_id": link_id,
+        "link_index": idx,
+        value_key: value_type(v),
     }
 
 
 async def _scalar_set(
-    ctx: Context, session_id: str, link_id: str | int, setter: str,
-    value, value_key: str, value_type: type,
+    ctx: Context,
+    session_id: str,
+    link_id: str | int,
+    setter: str,
+    value,
+    value_key: str,
+    value_type: type,
 ) -> dict:
     """Shared body for the conduit-detail scalar setters."""
     if value is None:
-        raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] {value_key} is required."
-        )
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] {value_key} is required.")
     session = await _get_session(ctx, session_id)
     idx = await _resolve_link(session, link_id)
-    await asyncio.to_thread(
-        getattr(session.links, setter), idx, value_type(value)
-    )
+    await asyncio.to_thread(getattr(session.links, setter), idx, value_type(value))
     return {
-        "status": "ok", "session_id": session_id, "link_id": link_id,
-        "link_index": idx, value_key: value_type(value),
+        "status": "ok",
+        "session_id": session_id,
+        "link_id": link_id,
+        "link_index": idx,
+        value_key: value_type(value),
     }
 
 
 @links_mcp.tool()
-async def get_barrels(
-    ctx: Context, session_id: str = "default", link_id: str | int = ""
-) -> dict:
+async def get_barrels(ctx: Context, session_id: str = "default", link_id: str | int = "") -> dict:
     """Return the number of parallel barrels for a conduit."""
-    return await _scalar_get(
-        ctx, session_id, link_id, "get_barrels", "barrels", int
-    )
+    return await _scalar_get(ctx, session_id, link_id, "get_barrels", "barrels", int)
 
 
 @links_mcp.tool()
 async def set_barrels(
-    ctx: Context, session_id: str = "default",
-    link_id: str | int = "", barrels: int = 1,
+    ctx: Context,
+    session_id: str = "default",
+    link_id: str | int = "",
+    barrels: int = 1,
 ) -> dict:
     """Set the number of parallel barrels for a conduit."""
-    return await _scalar_set(
-        ctx, session_id, link_id, "set_barrels", barrels, "barrels", int
-    )
+    return await _scalar_set(ctx, session_id, link_id, "set_barrels", barrels, "barrels", int)
 
 
 @links_mcp.tool()
@@ -494,20 +500,25 @@ async def get_culvert_code(
     ctx: Context, session_id: str = "default", link_id: str | int = ""
 ) -> dict:
     """Return the FHWA HDS-5 culvert inlet code (0 = not a culvert)."""
-    return await _scalar_get(
-        ctx, session_id, link_id, "get_culvert_code", "culvert_code", int
-    )
+    return await _scalar_get(ctx, session_id, link_id, "get_culvert_code", "culvert_code", int)
 
 
 @links_mcp.tool()
 async def set_culvert_code(
-    ctx: Context, session_id: str = "default",
-    link_id: str | int = "", culvert_code: int = 0,
+    ctx: Context,
+    session_id: str = "default",
+    link_id: str | int = "",
+    culvert_code: int = 0,
 ) -> dict:
     """Set the FHWA HDS-5 culvert inlet code."""
     return await _scalar_set(
-        ctx, session_id, link_id, "set_culvert_code", culvert_code,
-        "culvert_code", int,
+        ctx,
+        session_id,
+        link_id,
+        "set_culvert_code",
+        culvert_code,
+        "culvert_code",
+        int,
     )
 
 
@@ -520,71 +531,92 @@ async def get_loss_coeff(
     idx = await _resolve_link(session, link_id)
     inlet, outlet, avg = await asyncio.to_thread(session.links.get_loss_coeff, idx)
     return {
-        "session_id": session_id, "link_id": link_id, "link_index": idx,
-        "inlet": inlet, "outlet": outlet, "avg": avg,
+        "session_id": session_id,
+        "link_id": link_id,
+        "link_index": idx,
+        "inlet": inlet,
+        "outlet": outlet,
+        "avg": avg,
     }
 
 
 @links_mcp.tool()
 async def set_loss_coeff(
-    ctx: Context, session_id: str = "default",
+    ctx: Context,
+    session_id: str = "default",
     link_id: str | int = "",
-    inlet: float = 0.0, outlet: float = 0.0, avg: float = 0.0,
+    inlet: float = 0.0,
+    outlet: float = 0.0,
+    avg: float = 0.0,
 ) -> dict:
     """Set the conduit head-loss coefficients (entrance, exit, average)."""
     session = await _get_session(ctx, session_id)
     idx = await _resolve_link(session, link_id)
     await asyncio.to_thread(
-        session.links.set_loss_coeff, idx,
-        float(inlet), float(outlet), float(avg),
+        session.links.set_loss_coeff,
+        idx,
+        float(inlet),
+        float(outlet),
+        float(avg),
     )
     return {
-        "status": "ok", "session_id": session_id, "link_id": link_id,
-        "link_index": idx, "inlet": inlet, "outlet": outlet, "avg": avg,
+        "status": "ok",
+        "session_id": session_id,
+        "link_id": link_id,
+        "link_index": idx,
+        "inlet": inlet,
+        "outlet": outlet,
+        "avg": avg,
     }
 
 
 @links_mcp.tool()
-async def get_seep_rate(
-    ctx: Context, session_id: str = "default", link_id: str | int = ""
-) -> dict:
+async def get_seep_rate(ctx: Context, session_id: str = "default", link_id: str | int = "") -> dict:
     """Return the conduit seepage rate (depth/time)."""
-    return await _scalar_get(
-        ctx, session_id, link_id, "get_seep_rate", "seep_rate", float
-    )
+    return await _scalar_get(ctx, session_id, link_id, "get_seep_rate", "seep_rate", float)
 
 
 @links_mcp.tool()
 async def set_seep_rate(
-    ctx: Context, session_id: str = "default",
-    link_id: str | int = "", seep_rate: float = 0.0,
+    ctx: Context,
+    session_id: str = "default",
+    link_id: str | int = "",
+    seep_rate: float = 0.0,
 ) -> dict:
     """Set the conduit seepage rate."""
     return await _scalar_set(
-        ctx, session_id, link_id, "set_seep_rate", seep_rate,
-        "seep_rate", float,
+        ctx,
+        session_id,
+        link_id,
+        "set_seep_rate",
+        seep_rate,
+        "seep_rate",
+        float,
     )
 
 
 @links_mcp.tool()
-async def get_flap_gate(
-    ctx: Context, session_id: str = "default", link_id: str | int = ""
-) -> dict:
+async def get_flap_gate(ctx: Context, session_id: str = "default", link_id: str | int = "") -> dict:
     """Return whether a conduit / orifice has a flap gate."""
-    return await _scalar_get(
-        ctx, session_id, link_id, "get_flap_gate", "has_flap_gate", bool
-    )
+    return await _scalar_get(ctx, session_id, link_id, "get_flap_gate", "has_flap_gate", bool)
 
 
 @links_mcp.tool()
 async def set_flap_gate(
-    ctx: Context, session_id: str = "default",
-    link_id: str | int = "", has_flap_gate: bool = False,
+    ctx: Context,
+    session_id: str = "default",
+    link_id: str | int = "",
+    has_flap_gate: bool = False,
 ) -> dict:
     """Set the flap-gate flag (prevents backflow)."""
     return await _scalar_set(
-        ctx, session_id, link_id, "set_flap_gate", has_flap_gate,
-        "has_flap_gate", bool,
+        ctx,
+        session_id,
+        link_id,
+        "set_flap_gate",
+        has_flap_gate,
+        "has_flap_gate",
+        bool,
     )
 
 
@@ -593,20 +625,25 @@ async def get_crest_height(
     ctx: Context, session_id: str = "default", link_id: str | int = ""
 ) -> dict:
     """Return the crest height for a weir link."""
-    return await _scalar_get(
-        ctx, session_id, link_id, "get_crest_height", "crest_height", float
-    )
+    return await _scalar_get(ctx, session_id, link_id, "get_crest_height", "crest_height", float)
 
 
 @links_mcp.tool()
 async def set_crest_height(
-    ctx: Context, session_id: str = "default",
-    link_id: str | int = "", crest_height: float = 0.0,
+    ctx: Context,
+    session_id: str = "default",
+    link_id: str | int = "",
+    crest_height: float = 0.0,
 ) -> dict:
     """Set the weir crest height."""
     return await _scalar_set(
-        ctx, session_id, link_id, "set_crest_height", crest_height,
-        "crest_height", float,
+        ctx,
+        session_id,
+        link_id,
+        "set_crest_height",
+        crest_height,
+        "crest_height",
+        float,
     )
 
 
@@ -622,13 +659,20 @@ async def get_discharge_coeff(
 
 @links_mcp.tool()
 async def set_discharge_coeff(
-    ctx: Context, session_id: str = "default",
-    link_id: str | int = "", discharge_coeff: float = 0.0,
+    ctx: Context,
+    session_id: str = "default",
+    link_id: str | int = "",
+    discharge_coeff: float = 0.0,
 ) -> dict:
     """Set the discharge coefficient (Cd)."""
     return await _scalar_set(
-        ctx, session_id, link_id, "set_discharge_coeff", discharge_coeff,
-        "discharge_coeff", float,
+        ctx,
+        session_id,
+        link_id,
+        "set_discharge_coeff",
+        discharge_coeff,
+        "discharge_coeff",
+        float,
     )
 
 
@@ -638,20 +682,31 @@ async def get_end_contractions(
 ) -> dict:
     """Return the number of end contractions on a weir (0 / 1 / 2)."""
     return await _scalar_get(
-        ctx, session_id, link_id,
-        "get_end_contractions", "end_contractions", int,
+        ctx,
+        session_id,
+        link_id,
+        "get_end_contractions",
+        "end_contractions",
+        int,
     )
 
 
 @links_mcp.tool()
 async def set_end_contractions(
-    ctx: Context, session_id: str = "default",
-    link_id: str | int = "", end_contractions: int = 0,
+    ctx: Context,
+    session_id: str = "default",
+    link_id: str | int = "",
+    end_contractions: int = 0,
 ) -> dict:
     """Set the number of end contractions on a weir."""
     return await _scalar_set(
-        ctx, session_id, link_id, "set_end_contractions", end_contractions,
-        "end_contractions", int,
+        ctx,
+        session_id,
+        link_id,
+        "set_end_contractions",
+        end_contractions,
+        "end_contractions",
+        int,
     )
 
 
@@ -670,10 +725,11 @@ async def get_quality(
     """Return the current concentration of a pollutant in a link."""
     session = await _get_session(ctx, session_id)
     idx = await _resolve_link(session, link_id)
-    conc = await asyncio.to_thread(
-        session.links.get_quality, idx, pollutant_index
-    )
+    conc = await asyncio.to_thread(session.links.get_quality, idx, pollutant_index)
     return {
-        "session_id": session_id, "link_id": link_id, "link_index": idx,
-        "pollutant_index": pollutant_index, "concentration": conc,
+        "session_id": session_id,
+        "link_id": link_id,
+        "link_index": idx,
+        "pollutant_index": pollutant_index,
+        "concentration": conc,
     }

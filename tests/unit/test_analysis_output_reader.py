@@ -77,9 +77,7 @@ class TestOutputPeriodCount:
 
 
 class TestOutputPollutantCount:
-    async def test_pollutant_count_matches_reference(
-        self, session_manager, inp_path
-    ):
+    async def test_pollutant_count_matches_reference(self, session_manager, inp_path):
         """The unit-test reference (``site_drainage_model.inp``) has 1
         pollutant (TSS); the top-level conftest fixture
         (``site_drainage_example.inp``) has 0. Both share this test path
@@ -112,9 +110,7 @@ class TestOutputPeriodTime:
         r1 = await output_period_time(ctx, session_id="om_pt", period=1)
         assert r0["elapsed_time"] < r1["elapsed_time"]
 
-    async def test_period_time_out_of_range_rejected(
-        self, session_manager, inp_path
-    ):
+    async def test_period_time_out_of_range_rejected(self, session_manager, inp_path):
         from openswmm_mcp.tools.analysis import output_period_count, output_period_time
 
         ctx = await _run_to_ended(session_manager, inp_path, "om_pt_bad")
@@ -131,52 +127,56 @@ class TestOutputPeriodTime:
 
 
 class TestNodeAttribute:
-    async def test_node_attribute_returns_base_variables(
-        self, session_manager, inp_path
-    ):
+    async def test_node_attribute_returns_base_variables(self, session_manager, inp_path):
         from openswmm_mcp.tools.analysis import output_node_attribute
 
         ctx = await _run_to_ended(session_manager, inp_path, "om_na")
         result = await output_node_attribute(
-            ctx, session_id="om_na", node_id="J1", period=0,
+            ctx,
+            session_id="om_na",
+            node_id="J1",
+            period=0,
         )
         attrs = result["attributes"]
         for k in ("depth", "head", "volume", "lateral_inflow", "total_inflow", "overflow"):
             assert k in attrs
             assert isinstance(attrs[k], float)
 
-    async def test_node_attribute_unknown_node_raises(
-        self, session_manager, inp_path
-    ):
+    async def test_node_attribute_unknown_node_raises(self, session_manager, inp_path):
         from openswmm_mcp.tools.analysis import output_node_attribute
 
         ctx = await _run_to_ended(session_manager, inp_path, "om_na_bad")
         with pytest.raises(ToolError, match="ELEMENT_NOT_FOUND|not found"):
             await output_node_attribute(
-                ctx, session_id="om_na_bad", node_id="NOPE", period=0,
+                ctx,
+                session_id="om_na_bad",
+                node_id="NOPE",
+                period=0,
             )
 
-    async def test_node_attribute_empty_id_rejected(
-        self, session_manager, inp_path
-    ):
+    async def test_node_attribute_empty_id_rejected(self, session_manager, inp_path):
         from openswmm_mcp.tools.analysis import output_node_attribute
 
         ctx = await _run_to_ended(session_manager, inp_path, "om_na_e")
         with pytest.raises(ToolError, match="node_id must not be empty"):
             await output_node_attribute(
-                ctx, session_id="om_na_e", node_id="", period=0,
+                ctx,
+                session_id="om_na_e",
+                node_id="",
+                period=0,
             )
 
 
 class TestLinkAttribute:
-    async def test_link_attribute_returns_base_variables(
-        self, session_manager, inp_path
-    ):
+    async def test_link_attribute_returns_base_variables(self, session_manager, inp_path):
         from openswmm_mcp.tools.analysis import output_link_attribute
 
         ctx = await _run_to_ended(session_manager, inp_path, "om_la")
         result = await output_link_attribute(
-            ctx, session_id="om_la", link_id="C1", period=0,
+            ctx,
+            session_id="om_la",
+            link_id="C1",
+            period=0,
         )
         attrs = result["attributes"]
         for k in ("flow", "depth", "velocity", "volume", "capacity"):
@@ -185,19 +185,26 @@ class TestLinkAttribute:
 
 
 class TestSubcatchAttribute:
-    async def test_subcatch_attribute_returns_base_variables(
-        self, session_manager, inp_path
-    ):
+    async def test_subcatch_attribute_returns_base_variables(self, session_manager, inp_path):
         from openswmm_mcp.tools.analysis import output_subcatch_attribute
 
         ctx = await _run_to_ended(session_manager, inp_path, "om_sa")
         result = await output_subcatch_attribute(
-            ctx, session_id="om_sa", subcatch_id="S1", period=0,
+            ctx,
+            session_id="om_sa",
+            subcatch_id="S1",
+            period=0,
         )
         attrs = result["attributes"]
         for k in (
-            "rainfall", "snow_depth", "evap", "infil", "runoff",
-            "gw_flow", "gw_elev", "soil_moist",
+            "rainfall",
+            "snow_depth",
+            "evap",
+            "infil",
+            "runoff",
+            "gw_flow",
+            "gw_elev",
+            "soil_moist",
         ):
             assert k in attrs
 
@@ -213,7 +220,10 @@ class TestOutputSystemResult:
 
         ctx = await _run_to_ended(session_manager, inp_path, "om_sr")
         result = await output_system_result(
-            ctx, session_id="om_sr", variable="rainfall", period=0,
+            ctx,
+            session_id="om_sr",
+            variable="rainfall",
+            period=0,
         )
         assert "value" in result
         assert isinstance(result["value"], float)
@@ -224,7 +234,10 @@ class TestOutputSystemResult:
         ctx = await _run_to_ended(session_manager, inp_path, "om_sr_bad")
         with pytest.raises(ToolError, match="Unknown system variable"):
             await output_system_result(
-                ctx, session_id="om_sr_bad", variable="bogus", period=0,
+                ctx,
+                session_id="om_sr_bad",
+                variable="bogus",
+                period=0,
             )
 
 
@@ -257,7 +270,10 @@ class TestOutputNodeResults:
 
         ctx = await _run_to_ended(session_manager, inp_path, "om_nr")
         result = await output_node_results(
-            ctx, session_id="om_nr", variable="depth", period=0,
+            ctx,
+            session_id="om_nr",
+            variable="depth",
+            period=0,
         )
         # Reference model has 12 nodes.
         assert result["count"] == 12
@@ -272,7 +288,10 @@ class TestOutputNodeResults:
         ctx = await _run_to_ended(session_manager, inp_path, "om_nr_bad")
         with pytest.raises(ToolError, match="Unknown node variable"):
             await output_node_results(
-                ctx, session_id="om_nr_bad", variable="bogus", period=0,
+                ctx,
+                session_id="om_nr_bad",
+                variable="bogus",
+                period=0,
             )
 
     async def test_period_out_of_range_rejected(self, session_manager, inp_path):
@@ -285,7 +304,10 @@ class TestOutputNodeResults:
         n = (await output_period_count(ctx, session_id="om_nr_p"))["period_count"]
         with pytest.raises(ToolError, match="period must be in"):
             await output_node_results(
-                ctx, session_id="om_nr_p", variable="depth", period=n,
+                ctx,
+                session_id="om_nr_p",
+                variable="depth",
+                period=n,
             )
 
 
@@ -295,7 +317,10 @@ class TestOutputLinkResults:
 
         ctx = await _run_to_ended(session_manager, inp_path, "om_lr")
         result = await output_link_results(
-            ctx, session_id="om_lr", variable="flow", period=0,
+            ctx,
+            session_id="om_lr",
+            variable="flow",
+            period=0,
         )
         assert result["count"] == 11
         ids = [r["id"] for r in result["results"]]
@@ -303,14 +328,15 @@ class TestOutputLinkResults:
 
 
 class TestOutputSubcatchResults:
-    async def test_subcatch_results_returns_all_subcatchments(
-        self, session_manager, inp_path
-    ):
+    async def test_subcatch_results_returns_all_subcatchments(self, session_manager, inp_path):
         from openswmm_mcp.tools.analysis import output_subcatch_results
 
         ctx = await _run_to_ended(session_manager, inp_path, "om_sr_all")
         result = await output_subcatch_results(
-            ctx, session_id="om_sr_all", variable="runoff", period=0,
+            ctx,
+            session_id="om_sr_all",
+            variable="runoff",
+            period=0,
         )
         assert result["count"] == 7
         ids = [r["id"] for r in result["results"]]

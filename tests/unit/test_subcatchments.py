@@ -128,8 +128,11 @@ class TestCoverage:
         ctx = await _opened(session_manager, inp_path, "sc_cv_bad")
         with pytest.raises(ToolError, match=r"fraction must be in \[0, 1\]"):
             await set_coverage(
-                ctx, session_id="sc_cv_bad", subcatch_id="S1",
-                landuse_index=0, fraction=1.5,
+                ctx,
+                session_id="sc_cv_bad",
+                subcatch_id="S1",
+                landuse_index=0,
+                fraction=1.5,
             )
 
     async def test_get_coverage_zero_default(self, session_manager, inp_path):
@@ -140,7 +143,10 @@ class TestCoverage:
         # either return 0.0 or error cleanly. Skip if engine rejects.
         try:
             r = await get_coverage(
-                ctx, session_id="sc_gcv", subcatch_id="S1", landuse_index=0,
+                ctx,
+                session_id="sc_gcv",
+                subcatch_id="S1",
+                landuse_index=0,
             )
         except (ToolError, RuntimeError) as e:
             pytest.skip(f"get_coverage requires defined landuse: {e}")
@@ -153,17 +159,19 @@ class TestCoverage:
 
 
 class TestInfilModel:
-    async def test_get_infil_model_returns_valid_code(
-        self, session_manager, inp_path
-    ):
+    async def test_get_infil_model_returns_valid_code(self, session_manager, inp_path):
         from openswmm_mcp.tools.subcatchments import get_infil_model
 
         ctx = await _opened(session_manager, inp_path, "sc_im")
         r = await get_infil_model(ctx, session_id="sc_im", subcatch_id="S1")
         assert 0 <= r["model_code"] <= 4
         assert r["model"] in (
-            "horton", "mod_horton", "green_ampt", "mod_green_ampt",
-            "curve_number", "unknown",
+            "horton",
+            "mod_horton",
+            "green_ampt",
+            "mod_green_ampt",
+            "curve_number",
+            "unknown",
         )
 
     async def test_set_get_horton_round_trip(self, session_manager, inp_path):
@@ -175,8 +183,13 @@ class TestInfilModel:
         ctx = await _opened(session_manager, inp_path, "sc_h")
         try:
             await set_infil_horton(
-                ctx, session_id="sc_h", subcatch_id="S1",
-                f0=3.0, fmin=0.5, decay=4.0, dry_time=7.0,
+                ctx,
+                session_id="sc_h",
+                subcatch_id="S1",
+                f0=3.0,
+                fmin=0.5,
+                decay=4.0,
+                dry_time=7.0,
             )
         except (ToolError, RuntimeError) as e:
             pytest.skip(f"set_infil_horton rejected in this state: {e}")
@@ -195,13 +208,14 @@ class TestInfilModel:
         ctx = await _opened(session_manager, inp_path, "sc_cn")
         try:
             await set_infil_curve_number(
-                ctx, session_id="sc_cn", subcatch_id="S1", curve_number=85.0,
+                ctx,
+                session_id="sc_cn",
+                subcatch_id="S1",
+                curve_number=85.0,
             )
         except (ToolError, RuntimeError) as e:
             pytest.skip(f"set_infil_curve_number rejected: {e}")
-        r = await get_infil_curve_number(
-            ctx, session_id="sc_cn", subcatch_id="S1"
-        )
+        r = await get_infil_curve_number(ctx, session_id="sc_cn", subcatch_id="S1")
         assert r["curve_number"] == pytest.approx(85.0)
 
 
@@ -217,7 +231,10 @@ class TestQuality:
         ctx = await _opened(session_manager, inp_path, "sc_q")
         try:
             r = await get_quality(
-                ctx, session_id="sc_q", subcatch_id="S1", pollutant_index=0,
+                ctx,
+                session_id="sc_q",
+                subcatch_id="S1",
+                pollutant_index=0,
             )
         except Exception:
             pytest.skip("Reference model has no pollutants tracked.")

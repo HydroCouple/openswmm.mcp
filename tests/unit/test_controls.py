@@ -50,11 +50,7 @@ async def _step_to_running(ctx, session_manager, session_id: str):
 # Sample rule used across several tests. Targets J1 and pumps don't exist
 # in site_drainage_example.inp, but the engine accepts the rule text as
 # long as it parses — the rule simply never fires.
-SAMPLE_RULE = (
-    "RULE TEST_R1\n"
-    "IF NODE J1 DEPTH > 5.0\n"
-    "THEN PUMP P1 STATUS = ON"
-)
+SAMPLE_RULE = "RULE TEST_R1\nIF NODE J1 DEPTH > 5.0\nTHEN PUMP P1 STATUS = ON"
 
 
 # ===========================================================================
@@ -122,11 +118,7 @@ class TestListRules:
         await add_rule(
             ctx,
             session_id="ctl_list",
-            rule_text=(
-                "RULE TEST_R2\n"
-                "IF NODE J1 DEPTH < 1.0\n"
-                "THEN PUMP P1 STATUS = OFF"
-            ),
+            rule_text=("RULE TEST_R2\nIF NODE J1 DEPTH < 1.0\nTHEN PUMP P1 STATUS = OFF"),
         )
         result = await list_rules(ctx, session_id="ctl_list")
         assert result["count"] == 2
@@ -163,33 +155,38 @@ class TestSetLinkSetting:
         await _step_to_running(ctx, session_manager, "ctl_setting_run")
 
         result = await set_link_setting(
-            ctx, session_id="ctl_setting_run", link_id="C1", setting=0.5,
+            ctx,
+            session_id="ctl_setting_run",
+            link_id="C1",
+            setting=0.5,
         )
         assert result["status"] == "ok"
         assert result["setting"] == 0.5
         assert result["link_index"] >= 0
 
-    async def test_set_link_setting_rejected_outside_running(
-        self, session_manager, inp_path
-    ):
+    async def test_set_link_setting_rejected_outside_running(self, session_manager, inp_path):
         from openswmm_mcp.tools.controls import set_link_setting
 
         ctx = await _opened_session(session_manager, inp_path, "ctl_setting_op")
         with pytest.raises(ToolError, match="state.*running|requires.*running"):
             await set_link_setting(
-                ctx, session_id="ctl_setting_op", link_id="C1", setting=0.5,
+                ctx,
+                session_id="ctl_setting_op",
+                link_id="C1",
+                setting=0.5,
             )
 
-    async def test_set_link_setting_unknown_link_raises(
-        self, session_manager, inp_path
-    ):
+    async def test_set_link_setting_unknown_link_raises(self, session_manager, inp_path):
         from openswmm_mcp.tools.controls import set_link_setting
 
         ctx = await _opened_session(session_manager, inp_path, "ctl_setting_bad")
         await _step_to_running(ctx, session_manager, "ctl_setting_bad")
         with pytest.raises(ToolError, match="ELEMENT_NOT_FOUND|not found"):
             await set_link_setting(
-                ctx, session_id="ctl_setting_bad", link_id="NOPE", setting=0.5,
+                ctx,
+                session_id="ctl_setting_bad",
+                link_id="NOPE",
+                setting=0.5,
             )
 
 
@@ -201,7 +198,10 @@ class TestSetLinkStatus:
         await _step_to_running(ctx, session_manager, "ctl_status_open")
 
         result = await set_link_status(
-            ctx, session_id="ctl_status_open", link_id="C1", open=True,
+            ctx,
+            session_id="ctl_status_open",
+            link_id="C1",
+            open=True,
         )
         assert result["status"] == "ok"
         assert result["open"] is True
@@ -213,19 +213,23 @@ class TestSetLinkStatus:
         await _step_to_running(ctx, session_manager, "ctl_status_close")
 
         result = await set_link_status(
-            ctx, session_id="ctl_status_close", link_id="C1", open=False,
+            ctx,
+            session_id="ctl_status_close",
+            link_id="C1",
+            open=False,
         )
         assert result["open"] is False
 
-    async def test_set_link_status_rejected_outside_running(
-        self, session_manager, inp_path
-    ):
+    async def test_set_link_status_rejected_outside_running(self, session_manager, inp_path):
         from openswmm_mcp.tools.controls import set_link_status
 
         ctx = await _opened_session(session_manager, inp_path, "ctl_status_op")
         with pytest.raises(ToolError, match="state.*running|requires.*running"):
             await set_link_status(
-                ctx, session_id="ctl_status_op", link_id="C1", open=True,
+                ctx,
+                session_id="ctl_status_op",
+                link_id="C1",
+                open=True,
             )
 
 
@@ -244,28 +248,24 @@ class TestGetId:
         await add_rule(
             ctx,
             session_id="ctl_id_canonical",
-            rule_text=(
-                "RULE PumpOnHigh\n"
-                "IF NODE J1 DEPTH > 5\n"
-                "THEN PUMP P1 STATUS = ON"
-            ),
+            rule_text=("RULE PumpOnHigh\nIF NODE J1 DEPTH > 5\nTHEN PUMP P1 STATUS = ON"),
         )
         result = await get_id(ctx, session_id="ctl_id_canonical", rule_index=0)
         assert result["name"] == "PumpOnHigh"
         assert result["rule_index"] == 0
 
-    async def test_lowercase_and_mixed_case_keyword(
-        self, session_manager, inp_path
-    ):
+    async def test_lowercase_and_mixed_case_keyword(self, session_manager, inp_path):
         from openswmm_mcp.tools.controls import add_rule, get_id
 
         ctx = await _opened_session(session_manager, inp_path, "ctl_id_case")
         await add_rule(
-            ctx, session_id="ctl_id_case",
+            ctx,
+            session_id="ctl_id_case",
             rule_text="rule WeirBypass\nIF NODE J1 DEPTH < 1\nTHEN PUMP P1 STATUS = OFF",
         )
         await add_rule(
-            ctx, session_id="ctl_id_case",
+            ctx,
+            session_id="ctl_id_case",
             rule_text="Rule TankFill\nIF NODE J1 DEPTH < 2\nTHEN PUMP P1 STATUS = ON",
         )
         a = await get_id(ctx, session_id="ctl_id_case", rule_index=0)
@@ -273,9 +273,7 @@ class TestGetId:
         assert a["name"] == "WeirBypass"
         assert b["name"] == "TankFill"
 
-    async def test_malformed_rule_returns_none(
-        self, session_manager, inp_path
-    ):
+    async def test_malformed_rule_returns_none(self, session_manager, inp_path):
         """Rules with no parseable RULE keyword surface ``name=None``
         so callers can render a sentinel display label."""
         from openswmm_mcp.tools.controls import add_rule, get_id
@@ -283,7 +281,8 @@ class TestGetId:
         ctx = await _opened_session(session_manager, inp_path, "ctl_id_bad")
         # No RULE keyword at all — but engine still accepts the text.
         await add_rule(
-            ctx, session_id="ctl_id_bad",
+            ctx,
+            session_id="ctl_id_bad",
             rule_text="IF NODE J1 DEPTH > 5\nTHEN PUMP P1 STATUS = ON",
         )
         result = await get_id(ctx, session_id="ctl_id_bad", rule_index=0)
@@ -298,16 +297,19 @@ class TestListRulesWithNames:
 
         ctx = await _opened_session(session_manager, inp_path, "ctl_list_named")
         await add_rule(
-            ctx, session_id="ctl_list_named",
+            ctx,
+            session_id="ctl_list_named",
             rule_text="RULE Pump_A\nIF NODE J1 DEPTH > 5\nTHEN PUMP P1 STATUS = ON",
         )
         await add_rule(
-            ctx, session_id="ctl_list_named",
+            ctx,
+            session_id="ctl_list_named",
             rule_text="rule Weir_B\nIF NODE J1 DEPTH < 1\nTHEN PUMP P1 STATUS = OFF",
         )
         # Malformed rule — name should come back as None.
         await add_rule(
-            ctx, session_id="ctl_list_named",
+            ctx,
+            session_id="ctl_list_named",
             rule_text="IF NODE J2 DEPTH > 5\nTHEN PUMP P2 STATUS = ON",
         )
 

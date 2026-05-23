@@ -22,16 +22,9 @@ from openswmm_mcp.models import (
     CapacitySummaryItem,
     ExportResult,
     FloodingSummaryItem,
-    LinkFlowEntryModel,
     MassBalanceResult,
-    NodeFloodingEntryModel,
     PumpEntryModel,
-    QualityContinuityModel,
     ReportSnapshotModel,
-    RoutingContinuityModel,
-    RoutingDiagnosticsModel,
-    RunoffContinuityModel,
-    SubcatchmentEntryModel,
     TimeSeries,
 )
 
@@ -593,13 +586,15 @@ async def get_flooding_summary(
             if vol <= min_flood_volume:
                 continue
             try:
-                result.append(FloodingSummaryItem(
-                    node_id=nodes.get_id(i),
-                    max_overflow_rate=stats.node_max_overflow(i),
-                    total_flood_volume=vol,
-                    time_flooded=stats.node_time_flooded(i),
-                    max_depth=stats.node_max_depth(i),
-                ))
+                result.append(
+                    FloodingSummaryItem(
+                        node_id=nodes.get_id(i),
+                        max_overflow_rate=stats.node_max_overflow(i),
+                        total_flood_volume=vol,
+                        time_flooded=stats.node_time_flooded(i),
+                        max_depth=stats.node_max_depth(i),
+                    )
+                )
             except Exception:
                 continue
         result.sort(key=lambda x: x.total_flood_volume, reverse=True)
@@ -646,14 +641,16 @@ async def get_capacity_summary(
             if filling <= max_filling_threshold:
                 continue
             try:
-                result.append(CapacitySummaryItem(
-                    link_id=links.get_id(i),
-                    max_filling=filling,
-                    max_flow=stats.link_max_flow(i),
-                    max_velocity=stats.link_max_velocity(i),
-                    time_above_threshold=stats.link_surcharge_time(i),
-                    vol_flow=stats.link_vol_flow(i),
-                ))
+                result.append(
+                    CapacitySummaryItem(
+                        link_id=links.get_id(i),
+                        max_filling=filling,
+                        max_flow=stats.link_max_flow(i),
+                        max_velocity=stats.link_max_velocity(i),
+                        time_above_threshold=stats.link_surcharge_time(i),
+                        vol_flow=stats.link_vol_flow(i),
+                    )
+                )
             except Exception:
                 continue
         result.sort(key=lambda x: x.max_filling, reverse=True)
@@ -698,6 +695,7 @@ async def get_report_snapshot(
         Identifier of the session.  Defaults to ``"default"``.
     """
     from dataclasses import asdict
+
     from openswmm.engine import get_report_snapshot as _engine_snapshot
 
     sm = get_session_manager(ctx)
@@ -1181,8 +1179,14 @@ def _link_attribute_keys(n_pollutants: int) -> list[str]:
 
 def _subcatch_attribute_keys(n_pollutants: int) -> list[str]:
     base = [
-        "rainfall", "snow_depth", "evap", "infil", "runoff",
-        "gw_flow", "gw_elev", "soil_moist",
+        "rainfall",
+        "snow_depth",
+        "evap",
+        "infil",
+        "runoff",
+        "gw_flow",
+        "gw_elev",
+        "soil_moist",
     ]
     return base + [f"pollutant_{i}" for i in range(n_pollutants)]
 
@@ -1200,20 +1204,29 @@ async def output_metadata(ctx: Context, session_id: str = "default") -> dict:
     require_new_engine(session, "Output reader metadata")
 
     reader = await _ensure_output_reader(session)
-    version, units, n_sub, n_node, n_link, n_poll, n_periods, start, step, err = (
-        await asyncio.to_thread(
-            lambda: (
-                reader.get_version(),
-                reader.get_flow_units(),
-                reader.get_subcatch_count(),
-                reader.get_node_count(),
-                reader.get_link_count(),
-                reader.get_pollut_count(),
-                reader.get_period_count(),
-                reader.get_start_date(),
-                reader.get_report_step(),
-                reader.get_error_code(),
-            )
+    (
+        version,
+        units,
+        n_sub,
+        n_node,
+        n_link,
+        n_poll,
+        n_periods,
+        start,
+        step,
+        err,
+    ) = await asyncio.to_thread(
+        lambda: (
+            reader.get_version(),
+            reader.get_flow_units(),
+            reader.get_subcatch_count(),
+            reader.get_node_count(),
+            reader.get_link_count(),
+            reader.get_pollut_count(),
+            reader.get_period_count(),
+            reader.get_start_date(),
+            reader.get_report_step(),
+            reader.get_error_code(),
         )
     )
     return {
@@ -1258,9 +1271,7 @@ async def output_pollutant_count(ctx: Context, session_id: str = "default") -> d
 
 
 @analysis_mcp.tool()
-async def output_period_time(
-    ctx: Context, session_id: str = "default", period: int = 0
-) -> dict:
+async def output_period_time(ctx: Context, session_id: str = "default", period: int = 0) -> dict:
     """Return the elapsed time (project time units) for a reporting period.
 
     The value combines with ``start_date`` (from :func:`output_metadata`)
@@ -1275,8 +1286,7 @@ async def output_period_time(
     n_periods = await asyncio.to_thread(reader.get_period_count)
     if not 0 <= period < n_periods:
         raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] period must be in [0, {n_periods}); "
-            f"got {period}."
+            f"[{ErrorCode.VALIDATION_ERROR}] period must be in [0, {n_periods}); got {period}."
         )
     elapsed = await asyncio.to_thread(reader.get_period_time, period)
     return {
@@ -1314,15 +1324,12 @@ async def output_node_attribute(
     n_periods = await asyncio.to_thread(reader.get_period_count)
     if not 0 <= period < n_periods:
         raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] period must be in [0, {n_periods}); "
-            f"got {period}."
+            f"[{ErrorCode.VALIDATION_ERROR}] period must be in [0, {n_periods}); got {period}."
         )
 
     node_idx = await asyncio.to_thread(session.nodes.get_index, node_id)
     if node_idx < 0:
-        raise ToolError(
-            f"[{ErrorCode.ELEMENT_NOT_FOUND}] Node '{node_id}' not found."
-        )
+        raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Node '{node_id}' not found.")
 
     n_poll = await asyncio.to_thread(reader.get_pollut_count)
     arr = await asyncio.to_thread(reader.get_node_attribute, node_idx, period)
@@ -1361,15 +1368,12 @@ async def output_link_attribute(
     n_periods = await asyncio.to_thread(reader.get_period_count)
     if not 0 <= period < n_periods:
         raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] period must be in [0, {n_periods}); "
-            f"got {period}."
+            f"[{ErrorCode.VALIDATION_ERROR}] period must be in [0, {n_periods}); got {period}."
         )
 
     link_idx = await asyncio.to_thread(session.links.get_index, link_id)
     if link_idx < 0:
-        raise ToolError(
-            f"[{ErrorCode.ELEMENT_NOT_FOUND}] Link '{link_id}' not found."
-        )
+        raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Link '{link_id}' not found.")
 
     n_poll = await asyncio.to_thread(reader.get_pollut_count)
     arr = await asyncio.to_thread(reader.get_link_attribute, link_idx, period)
@@ -1408,15 +1412,12 @@ async def output_subcatch_attribute(
     n_periods = await asyncio.to_thread(reader.get_period_count)
     if not 0 <= period < n_periods:
         raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] period must be in [0, {n_periods}); "
-            f"got {period}."
+            f"[{ErrorCode.VALIDATION_ERROR}] period must be in [0, {n_periods}); got {period}."
         )
 
     sc_idx = await asyncio.to_thread(session.subcatchments.get_index, subcatch_id)
     if sc_idx < 0:
-        raise ToolError(
-            f"[{ErrorCode.ELEMENT_NOT_FOUND}] Subcatchment '{subcatch_id}' not found."
-        )
+        raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Subcatchment '{subcatch_id}' not found.")
 
     n_poll = await asyncio.to_thread(reader.get_pollut_count)
     arr = await asyncio.to_thread(reader.get_subcatch_attribute, sc_idx, period)
@@ -1455,8 +1456,7 @@ async def output_system_result(
     n_periods = await asyncio.to_thread(reader.get_period_count)
     if not 0 <= period < n_periods:
         raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] period must be in [0, {n_periods}); "
-            f"got {period}."
+            f"[{ErrorCode.VALIDATION_ERROR}] period must be in [0, {n_periods}); got {period}."
         )
 
     var_enum = _resolve_system_var(variable)
@@ -1506,8 +1506,7 @@ async def output_node_results(
     n_periods = await asyncio.to_thread(reader.get_period_count)
     if not 0 <= period < n_periods:
         raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] period must be in [0, {n_periods}); "
-            f"got {period}."
+            f"[{ErrorCode.VALIDATION_ERROR}] period must be in [0, {n_periods}); got {period}."
         )
 
     var_enum = _resolve_node_var(variable)
@@ -1520,8 +1519,7 @@ async def output_node_results(
 
     ids = await asyncio.to_thread(_ids)
     records = [
-        {"id": ids[i], "index": i, "value": values[i]}
-        for i in range(min(n_nodes, len(values)))
+        {"id": ids[i], "index": i, "value": values[i]} for i in range(min(n_nodes, len(values)))
     ]
     return {
         "session_id": session_id,
@@ -1555,8 +1553,7 @@ async def output_link_results(
     n_periods = await asyncio.to_thread(reader.get_period_count)
     if not 0 <= period < n_periods:
         raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] period must be in [0, {n_periods}); "
-            f"got {period}."
+            f"[{ErrorCode.VALIDATION_ERROR}] period must be in [0, {n_periods}); got {period}."
         )
 
     var_enum = _resolve_link_var(variable)
@@ -1569,8 +1566,7 @@ async def output_link_results(
 
     ids = await asyncio.to_thread(_ids)
     records = [
-        {"id": ids[i], "index": i, "value": values[i]}
-        for i in range(min(n_links, len(values)))
+        {"id": ids[i], "index": i, "value": values[i]} for i in range(min(n_links, len(values)))
     ]
     return {
         "session_id": session_id,
@@ -1604,8 +1600,7 @@ async def output_subcatch_results(
     n_periods = await asyncio.to_thread(reader.get_period_count)
     if not 0 <= period < n_periods:
         raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] period must be in [0, {n_periods}); "
-            f"got {period}."
+            f"[{ErrorCode.VALIDATION_ERROR}] period must be in [0, {n_periods}); got {period}."
         )
 
     var_enum = _resolve_subcatch_var(variable)
@@ -1618,8 +1613,7 @@ async def output_subcatch_results(
 
     ids = await asyncio.to_thread(_ids)
     records = [
-        {"id": ids[i], "index": i, "value": values[i]}
-        for i in range(min(n_sub, len(values)))
+        {"id": ids[i], "index": i, "value": values[i]} for i in range(min(n_sub, len(values)))
     ]
     return {
         "session_id": session_id,

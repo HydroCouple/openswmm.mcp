@@ -14,7 +14,6 @@ pytest.importorskip("openswmm.engine")
 
 from openswmm_mcp.errors import ToolError
 
-
 # ---------------------------------------------------------------------------
 # Mock MCP Context (mirrors test_tables / test_building)
 # ---------------------------------------------------------------------------
@@ -161,7 +160,9 @@ class TestHydrographsAndRDII:
             uh_name="UH1",
             month="all",
             response="short",
-            r=0.1, t=2.0, k=2.0,
+            r=0.1,
+            t=2.0,
+            k=2.0,
         )
         h = await hydrograph_count(ctx, session_id="inf_uh")
         assert h["count"] == 1
@@ -188,8 +189,14 @@ class TestHydrographsAndRDII:
         ctx = await _opened_session(session_manager, inp_path, "inf_uh_bad")
         with pytest.raises(ToolError, match="Unknown month"):
             await add_hydrograph(
-                ctx, session_id="inf_uh_bad", uh_name="U", month="bogus",
-                response="short", r=0.1, t=2.0, k=2.0,
+                ctx,
+                session_id="inf_uh_bad",
+                uh_name="U",
+                month="bogus",
+                response="short",
+                r=0.1,
+                t=2.0,
+                k=2.0,
             )
 
     async def test_invalid_response_rejected(self, session_manager, inp_path):
@@ -198,8 +205,14 @@ class TestHydrographsAndRDII:
         ctx = await _opened_session(session_manager, inp_path, "inf_uh_rbad")
         with pytest.raises(ToolError, match="Unknown response"):
             await add_hydrograph(
-                ctx, session_id="inf_uh_rbad", uh_name="U", month="all",
-                response="forever", r=0.1, t=2.0, k=2.0,
+                ctx,
+                session_id="inf_uh_rbad",
+                uh_name="U",
+                month="all",
+                response="forever",
+                r=0.1,
+                t=2.0,
+                k=2.0,
             )
 
     async def test_k_below_one_rejected(self, session_manager, inp_path):
@@ -208,8 +221,14 @@ class TestHydrographsAndRDII:
         ctx = await _opened_session(session_manager, inp_path, "inf_uh_kbad")
         with pytest.raises(ToolError, match=r"k.*>= 1\.0"):
             await add_hydrograph(
-                ctx, session_id="inf_uh_kbad", uh_name="U", month="all",
-                response="short", r=0.1, t=2.0, k=0.5,
+                ctx,
+                session_id="inf_uh_kbad",
+                uh_name="U",
+                month="all",
+                response="short",
+                r=0.1,
+                t=2.0,
+                k=0.5,
             )
 
     async def test_empty_uh_name_rejected(self, session_manager, inp_path):
@@ -218,7 +237,11 @@ class TestHydrographsAndRDII:
         ctx = await _opened_session(session_manager, inp_path, "inf_rdii_empty")
         with pytest.raises(ToolError, match="uh_name must not be empty"):
             await add_rdii(
-                ctx, session_id="inf_rdii_empty", node_id="J1", uh_name="", area=1.0,
+                ctx,
+                session_id="inf_rdii_empty",
+                node_id="J1",
+                uh_name="",
+                area=1.0,
             )
 
 
@@ -238,11 +261,20 @@ class TestHydrographGage:
 
         ctx = await _opened_session(session_manager, inp_path, "inf_gage")
         await add_hydrograph(
-            ctx, session_id="inf_gage", uh_name="UH_G", month="all",
-            response="short", r=0.1, t=2.0, k=2.0,
+            ctx,
+            session_id="inf_gage",
+            uh_name="UH_G",
+            month="all",
+            response="short",
+            r=0.1,
+            t=2.0,
+            k=2.0,
         )
         await add_hydrograph_gage(
-            ctx, session_id="inf_gage", uh_name="UH_G", gage_name="RainGage",
+            ctx,
+            session_id="inf_gage",
+            uh_name="UH_G",
+            gage_name="RainGage",
         )
         c = await hydrograph_gage_count(ctx, session_id="inf_gage")
         assert c["count"] == 1
@@ -268,8 +300,14 @@ class TestRDIIDecay:
         ctx = await _opened_session(session_manager, inp_path, "inf_decay")
         # The hydrograph row for (UH_D, SHORT) must exist before the decay row.
         await add_hydrograph(
-            ctx, session_id="inf_decay", uh_name="UH_D", month="all",
-            response="short", r=0.1, t=2.0, k=2.0,
+            ctx,
+            session_id="inf_decay",
+            uh_name="UH_D",
+            month="all",
+            response="short",
+            r=0.1,
+            t=2.0,
+            k=2.0,
         )
         await add_rdii_decay(
             ctx,
@@ -310,9 +348,7 @@ class TestHydrographGroupEnumeration:
         result = await hydrograph_group_count(ctx, session_id="inf_uhg_empty")
         assert result["count"] == 0
 
-    async def test_twelve_monthly_rows_count_as_one_group(
-        self, session_manager, inp_path
-    ):
+    async def test_twelve_monthly_rows_count_as_one_group(self, session_manager, inp_path):
         from openswmm_mcp.tools.inflows import (
             add_hydrograph,
             hydrograph_count,
@@ -320,8 +356,20 @@ class TestHydrographGroupEnumeration:
         )
 
         ctx = await _opened_session(session_manager, inp_path, "inf_uhg_one")
-        for m in ("jan", "feb", "mar", "apr", "may", "jun",
-                  "jul", "aug", "sep", "oct", "nov", "dec"):
+        for m in (
+            "jan",
+            "feb",
+            "mar",
+            "apr",
+            "may",
+            "jun",
+            "jul",
+            "aug",
+            "sep",
+            "oct",
+            "nov",
+            "dec",
+        ):
             await add_hydrograph(
                 ctx,
                 session_id="inf_uhg_one",
@@ -337,9 +385,7 @@ class TestHydrographGroupEnumeration:
         groups = await hydrograph_group_count(ctx, session_id="inf_uhg_one")
         assert groups["count"] == 1
 
-    async def test_list_groups_first_occurrence_order(
-        self, session_manager, inp_path
-    ):
+    async def test_list_groups_first_occurrence_order(self, session_manager, inp_path):
         from openswmm_mcp.tools.inflows import add_hydrograph, list_hydrograph_groups
 
         ctx = await _opened_session(session_manager, inp_path, "inf_uhg_list")
@@ -347,7 +393,7 @@ class TestHydrographGroupEnumeration:
             ("Combined", "jan"),
             ("Sanitary", "jan"),
             ("Combined", "feb"),
-            ("Storm",    "jan"),
+            ("Storm", "jan"),
             ("Sanitary", "feb"),
         ]:
             await add_hydrograph(
@@ -356,7 +402,9 @@ class TestHydrographGroupEnumeration:
                 uh_name=uh,
                 month=month,
                 response="short",
-                r=0.1, t=1.0, k=2.0,
+                r=0.1,
+                t=1.0,
+                k=2.0,
             )
 
         result = await list_hydrograph_groups(ctx, session_id="inf_uhg_list")
@@ -366,9 +414,7 @@ class TestHydrographGroupEnumeration:
         indices = [g["index"] for g in result["groups"]]
         assert indices == [0, 1, 2]
 
-    async def test_gage_only_groups_appear_in_list(
-        self, session_manager, inp_path
-    ):
+    async def test_gage_only_groups_appear_in_list(self, session_manager, inp_path):
         from openswmm_mcp.tools.inflows import (
             add_hydrograph,
             add_hydrograph_gage,
@@ -378,13 +424,20 @@ class TestHydrographGroupEnumeration:
         ctx = await _opened_session(session_manager, inp_path, "inf_uhg_mix")
         # Gage-only group (no parameter rows yet) must still surface.
         await add_hydrograph_gage(
-            ctx, session_id="inf_uhg_mix",
-            uh_name="GageOnly", gage_name="RainGage",
+            ctx,
+            session_id="inf_uhg_mix",
+            uh_name="GageOnly",
+            gage_name="RainGage",
         )
         await add_hydrograph(
-            ctx, session_id="inf_uhg_mix",
-            uh_name="Params", month="all", response="short",
-            r=0.1, t=1.0, k=2.0,
+            ctx,
+            session_id="inf_uhg_mix",
+            uh_name="Params",
+            month="all",
+            response="short",
+            r=0.1,
+            t=1.0,
+            k=2.0,
         )
         result = await list_hydrograph_groups(ctx, session_id="inf_uhg_mix")
         assert result["count"] == 2

@@ -54,9 +54,7 @@ async def _get_session(ctx: Context, session_id: str) -> SimSession:
     return session
 
 
-async def _get_controls_accessor(
-    ctx: Context, session_id: str
-) -> tuple[SimSession, Any, Any]:
+async def _get_controls_accessor(ctx: Context, session_id: str) -> tuple[SimSession, Any, Any]:
     """Return ``(session, controls, links)`` for any non-closed state.
 
     For ``building`` sessions, ``controls`` is constructed against the
@@ -81,6 +79,7 @@ async def _get_controls_accessor(
                 f"'building' state but has no ModelBuilder attached."
             )
         from openswmm.engine import Links
+
         return session, Controls(builder), Links(builder)
 
     return session, session.controls, session.links
@@ -95,8 +94,7 @@ async def _resolve_link_idx(links: Any, link_id: str | int) -> int:
     idx = await asyncio.to_thread(links.get_index, link_id)
     if idx < 0:
         raise ToolError(
-            f"[{ErrorCode.ELEMENT_NOT_FOUND}] Link '{link_id}' not found in "
-            f"this session."
+            f"[{ErrorCode.ELEMENT_NOT_FOUND}] Link '{link_id}' not found in this session."
         )
     return idx
 
@@ -115,9 +113,7 @@ async def count(ctx: Context, session_id: str = "default") -> dict:
 
 
 @controls_mcp.tool()
-async def get_rule(
-    ctx: Context, session_id: str = "default", rule_index: int = 0
-) -> dict:
+async def get_rule(ctx: Context, session_id: str = "default", rule_index: int = 0) -> dict:
     """Return the full text of the I{rule_index}-th control rule.
 
     The rule text is multi-line: a ``RULE <id>`` header followed by ``IF``
@@ -133,9 +129,7 @@ async def get_rule(
 
 
 @controls_mcp.tool()
-async def get_id(
-    ctx: Context, session_id: str = "default", rule_index: int = 0
-) -> dict:
+async def get_id(ctx: Context, session_id: str = "default", rule_index: int = 0) -> dict:
     """Return the canonical rule name parsed from the I{rule_index}-th
     control rule's text (the first token after the ``RULE`` keyword,
     case-insensitive).
@@ -180,9 +174,7 @@ async def list_rules(ctx: Context, session_id: str = "default") -> dict:
 
 
 @controls_mcp.tool()
-async def add_rule(
-    ctx: Context, session_id: str = "default", rule_text: str = ""
-) -> dict:
+async def add_rule(ctx: Context, session_id: str = "default", rule_text: str = "") -> dict:
     """Add a control rule to the model (lifecycle-spanning).
 
     Accepts the full SWMM rule text including the ``RULE <id>`` header,

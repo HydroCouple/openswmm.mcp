@@ -50,7 +50,10 @@ class TestRenames:
         ctx = await _opened(session_manager, inp_path, "ph2_rn")
         try:
             r = await rename_node(
-                ctx, session_id="ph2_rn", node_id="J1", new_id="J1_NEW",
+                ctx,
+                session_id="ph2_rn",
+                node_id="J1",
+                new_id="J1_NEW",
             )
         except (ToolError, RuntimeError) as e:
             pytest.skip(f"rename_node not allowed in this state: {e}")
@@ -63,7 +66,10 @@ class TestRenames:
         ctx = await _opened(session_manager, inp_path, "ph2_rn_bad")
         with pytest.raises(ToolError, match="ELEMENT_NOT_FOUND|not found"):
             await rename_node(
-                ctx, session_id="ph2_rn_bad", node_id="NOPE", new_id="X",
+                ctx,
+                session_id="ph2_rn_bad",
+                node_id="NOPE",
+                new_id="X",
             )
 
     async def test_rename_link_empty_new_id_rejected(self, session_manager, inp_path):
@@ -72,7 +78,10 @@ class TestRenames:
         ctx = await _opened(session_manager, inp_path, "ph2_rl_e")
         with pytest.raises(ToolError, match="new_id must not be empty"):
             await rename_link(
-                ctx, session_id="ph2_rl_e", link_id="C1", new_id="",
+                ctx,
+                session_id="ph2_rl_e",
+                link_id="C1",
+                new_id="",
             )
 
 
@@ -95,8 +104,10 @@ class TestEvents:
         ctx = await _opened(session_manager, inp_path, "ph2_ea")
         with pytest.raises(ToolError, match="end_oadate must be"):
             await events_add(
-                ctx, session_id="ph2_ea",
-                start_oadate=100.0, end_oadate=100.0,
+                ctx,
+                session_id="ph2_ea",
+                start_oadate=100.0,
+                end_oadate=100.0,
             )
 
     async def test_is_between_events(self, session_manager, inp_path):
@@ -119,7 +130,9 @@ class TestSteadyState:
         original = (await get_steady_state_skip(ctx, session_id="ph2_ss"))["enabled"]
         try:
             await set_steady_state_skip(
-                ctx, session_id="ph2_ss", enabled=not original,
+                ctx,
+                session_id="ph2_ss",
+                enabled=not original,
             )
         except (ToolError, RuntimeError) as e:
             pytest.skip(f"set_steady_state_skip rejected: {e}")
@@ -184,20 +197,23 @@ class TestModel:
 
         ctx = await _building(session_manager, "ph2_uf")
         r = await set_userflag_int(
-            ctx, session_id="ph2_uf", name="my_flag", value=42,
+            ctx,
+            session_id="ph2_uf",
+            name="my_flag",
+            value=42,
         )
         assert r["status"] == "ok"
         assert r["value"] == 42
 
-    async def test_userflag_rejected_outside_building(
-        self, session_manager, inp_path
-    ):
+    async def test_userflag_rejected_outside_building(self, session_manager, inp_path):
         from openswmm_mcp.tools.model import get_userflag_int
 
         ctx = await _opened(session_manager, inp_path, "ph2_uf_op")
         with pytest.raises(ToolError, match="requires 'building'"):
             await get_userflag_int(
-                ctx, session_id="ph2_uf_op", name="x",
+                ctx,
+                session_id="ph2_uf_op",
+                name="x",
             )
 
     async def test_plugins_count_in_building(self, session_manager):
@@ -233,7 +249,8 @@ class TestHotstartSaves:
         initial = (await saves_count(ctx, session_id="ph2_hsa"))["count"]
         try:
             r = await saves_add(
-                ctx, session_id="ph2_hsa",
+                ctx,
+                session_id="ph2_hsa",
                 path=str(tmp_path / "test.hsf"),
                 datetime_oadate=0.0,
             )
@@ -267,8 +284,11 @@ class TestQualityTool:
         ctx = await _opened(session_manager, inp_path, "ph2_bb")
         with pytest.raises(ToolError, match="Unknown buildup func"):
             await buildup_set(
-                ctx, session_id="ph2_bb",
-                landuse_id="L1", pollutant_id=0, function="bogus",
+                ctx,
+                session_id="ph2_bb",
+                landuse_id="L1",
+                pollutant_id=0,
+                function="bogus",
             )
 
     async def test_invalid_washoff_func_rejected(self, session_manager, inp_path):
@@ -277,8 +297,11 @@ class TestQualityTool:
         ctx = await _opened(session_manager, inp_path, "ph2_ww")
         with pytest.raises(ToolError, match="Unknown washoff func"):
             await washoff_set(
-                ctx, session_id="ph2_ww",
-                landuse_id="L1", pollutant_id=0, function="bogus",
+                ctx,
+                session_id="ph2_ww",
+                landuse_id="L1",
+                pollutant_id=0,
+                function="bogus",
             )
 
     async def test_invalid_sweep_fraction_rejected(self, session_manager, inp_path):
@@ -287,5 +310,8 @@ class TestQualityTool:
         ctx = await _opened(session_manager, inp_path, "ph2_sr")
         with pytest.raises(ToolError, match=r"fraction must be in \[0, 1\]"):
             await set_sweep_removal(
-                ctx, session_id="ph2_sr", landuse_id=0, fraction=2.0,
+                ctx,
+                session_id="ph2_sr",
+                landuse_id=0,
+                fraction=2.0,
             )

@@ -54,9 +54,7 @@ async def _ended(session_manager, inp_path, session_id="l_end"):
 
 
 class TestLinkStats:
-    async def test_max_flow_max_velocity_max_filling(
-        self, session_manager, inp_path
-    ):
+    async def test_max_flow_max_velocity_max_filling(self, session_manager, inp_path):
         from openswmm_mcp.tools.links import (
             stat_max_filling,
             stat_max_flow,
@@ -117,9 +115,7 @@ class TestBulkReaders:
 
 
 class TestBulkWriters:
-    async def test_set_flows_bulk_wrong_length_rejected(
-        self, session_manager, inp_path
-    ):
+    async def test_set_flows_bulk_wrong_length_rejected(self, session_manager, inp_path):
         from openswmm_mcp.tools.links import set_flows_bulk
 
         ctx = await _running(session_manager, inp_path, "l_sf_bad")
@@ -145,20 +141,24 @@ class TestControlState:
 
         ctx = await _running(session_manager, inp_path, "l_cs")
         result = await set_control_setting(
-            ctx, session_id="l_cs", link_id="C1", setting=0.5,
+            ctx,
+            session_id="l_cs",
+            link_id="C1",
+            setting=0.5,
         )
         assert result["status"] == "ok"
         assert result["setting"] == 0.5
 
-    async def test_set_control_setting_rejected_outside_running(
-        self, session_manager, inp_path
-    ):
+    async def test_set_control_setting_rejected_outside_running(self, session_manager, inp_path):
         from openswmm_mcp.tools.links import set_control_setting
 
         ctx = await _opened(session_manager, inp_path, "l_cs_op")
         with pytest.raises(ToolError, match="state.*running|requires.*running"):
             await set_control_setting(
-                ctx, session_id="l_cs_op", link_id="C1", setting=0.5,
+                ctx,
+                session_id="l_cs_op",
+                link_id="C1",
+                setting=0.5,
             )
 
     async def test_get_closed_returns_bool(self, session_manager, inp_path):
@@ -202,9 +202,7 @@ class TestConduitDetail:
         r = await get_barrels(ctx, session_id="l_bs", link_id="C1")
         assert r["barrels"] == 2
 
-    async def test_get_loss_coeff_returns_triple(
-        self, session_manager, inp_path
-    ):
+    async def test_get_loss_coeff_returns_triple(self, session_manager, inp_path):
         from openswmm_mcp.tools.links import get_loss_coeff
 
         ctx = await _opened(session_manager, inp_path, "l_lc")

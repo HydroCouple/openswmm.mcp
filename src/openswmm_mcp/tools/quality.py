@@ -17,7 +17,6 @@ landuse uses ``landuse_id`` strings.
 from __future__ import annotations
 
 import asyncio
-from typing import Any
 
 from fastmcp import Context, FastMCP
 
@@ -97,14 +96,10 @@ async def _resolve_landuse(session: SimSession, landuse_id: str | int) -> int:
     if isinstance(landuse_id, int):
         return landuse_id
     if not landuse_id:
-        raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] landuse_id must not be empty."
-        )
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] landuse_id must not be empty.")
     idx = await asyncio.to_thread(session.quality.landuse_index, landuse_id)
     if idx < 0:
-        raise ToolError(
-            f"[{ErrorCode.ELEMENT_NOT_FOUND}] Landuse '{landuse_id}' not found."
-        )
+        raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Landuse '{landuse_id}' not found.")
     return idx
 
 
@@ -112,14 +107,10 @@ async def _resolve_pollutant(session: SimSession, pollutant_id: str | int) -> in
     if isinstance(pollutant_id, int):
         return pollutant_id
     if not pollutant_id:
-        raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] pollutant_id must not be empty."
-        )
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] pollutant_id must not be empty.")
     idx = await asyncio.to_thread(session.pollutants.get_index, pollutant_id)
     if idx < 0:
-        raise ToolError(
-            f"[{ErrorCode.ELEMENT_NOT_FOUND}] Pollutant '{pollutant_id}' not found."
-        )
+        raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Pollutant '{pollutant_id}' not found.")
     return idx
 
 
@@ -137,27 +128,23 @@ async def landuse_count(ctx: Context, session_id: str = "default") -> dict:
 
 
 @quality_mcp.tool()
-async def landuse_add(
-    ctx: Context, session_id: str = "default", landuse_id: str = ""
-) -> dict:
+async def landuse_add(ctx: Context, session_id: str = "default", landuse_id: str = "") -> dict:
     """Add a new landuse to the model (BUILDING state)."""
     if not landuse_id:
-        raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] landuse_id must not be empty."
-        )
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] landuse_id must not be empty.")
     session = await _get_session(ctx, session_id)
     await asyncio.to_thread(session.quality.landuse_add, landuse_id)
     idx = await asyncio.to_thread(session.quality.landuse_index, landuse_id)
     return {
-        "status": "ok", "session_id": session_id,
-        "id": landuse_id, "index": idx,
+        "status": "ok",
+        "session_id": session_id,
+        "id": landuse_id,
+        "index": idx,
     }
 
 
 @quality_mcp.tool()
-async def landuse_id(
-    ctx: Context, session_id: str = "default", index: int = 0
-) -> dict:
+async def landuse_id(ctx: Context, session_id: str = "default", index: int = 0) -> dict:
     """Return the string id of the I{index}-th landuse."""
     session = await _get_session(ctx, session_id)
     s = await asyncio.to_thread(session.quality.landuse_id, index)
@@ -165,9 +152,7 @@ async def landuse_id(
 
 
 @quality_mcp.tool()
-async def landuse_index(
-    ctx: Context, session_id: str = "default", landuse_id: str = ""
-) -> dict:
+async def landuse_index(ctx: Context, session_id: str = "default", landuse_id: str = "") -> dict:
     """Return the integer index for a landuse string id (-1 if not found)."""
     session = await _get_session(ctx, session_id)
     idx = await asyncio.to_thread(session.quality.landuse_index, landuse_id)
@@ -183,25 +168,30 @@ async def get_sweep_interval(
     idx = await _resolve_landuse(session, landuse_id)
     v = await asyncio.to_thread(session.quality.landuse_get_sweep_interval, idx)
     return {
-        "session_id": session_id, "landuse_id": landuse_id,
-        "landuse_index": idx, "sweep_interval_days": float(v),
+        "session_id": session_id,
+        "landuse_id": landuse_id,
+        "landuse_index": idx,
+        "sweep_interval_days": float(v),
     }
 
 
 @quality_mcp.tool()
 async def set_sweep_interval(
-    ctx: Context, session_id: str = "default",
-    landuse_id: str | int = "", days: float = 0.0,
+    ctx: Context,
+    session_id: str = "default",
+    landuse_id: str | int = "",
+    days: float = 0.0,
 ) -> dict:
     """Set the days-between-street-sweeps for a landuse."""
     session = await _get_session(ctx, session_id)
     idx = await _resolve_landuse(session, landuse_id)
-    await asyncio.to_thread(
-        session.quality.landuse_set_sweep_interval, idx, float(days)
-    )
+    await asyncio.to_thread(session.quality.landuse_set_sweep_interval, idx, float(days))
     return {
-        "status": "ok", "session_id": session_id, "landuse_id": landuse_id,
-        "landuse_index": idx, "sweep_interval_days": days,
+        "status": "ok",
+        "session_id": session_id,
+        "landuse_id": landuse_id,
+        "landuse_index": idx,
+        "sweep_interval_days": days,
     }
 
 
@@ -214,30 +204,34 @@ async def get_sweep_removal(
     idx = await _resolve_landuse(session, landuse_id)
     v = await asyncio.to_thread(session.quality.landuse_get_sweep_removal, idx)
     return {
-        "session_id": session_id, "landuse_id": landuse_id,
-        "landuse_index": idx, "removal_fraction": float(v),
+        "session_id": session_id,
+        "landuse_id": landuse_id,
+        "landuse_index": idx,
+        "removal_fraction": float(v),
     }
 
 
 @quality_mcp.tool()
 async def set_sweep_removal(
-    ctx: Context, session_id: str = "default",
-    landuse_id: str | int = "", fraction: float = 0.0,
+    ctx: Context,
+    session_id: str = "default",
+    landuse_id: str | int = "",
+    fraction: float = 0.0,
 ) -> dict:
     """Set the sweep removal fraction for a landuse (must be in [0, 1])."""
     if not 0.0 <= fraction <= 1.0:
         raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] fraction must be in [0, 1]; "
-            f"got {fraction}."
+            f"[{ErrorCode.VALIDATION_ERROR}] fraction must be in [0, 1]; got {fraction}."
         )
     session = await _get_session(ctx, session_id)
     idx = await _resolve_landuse(session, landuse_id)
-    await asyncio.to_thread(
-        session.quality.landuse_set_sweep_removal, idx, float(fraction)
-    )
+    await asyncio.to_thread(session.quality.landuse_set_sweep_removal, idx, float(fraction))
     return {
-        "status": "ok", "session_id": session_id, "landuse_id": landuse_id,
-        "landuse_index": idx, "removal_fraction": fraction,
+        "status": "ok",
+        "session_id": session_id,
+        "landuse_id": landuse_id,
+        "landuse_index": idx,
+        "removal_fraction": fraction,
     }
 
 
@@ -248,8 +242,10 @@ async def set_sweep_removal(
 
 @quality_mcp.tool()
 async def buildup_get(
-    ctx: Context, session_id: str = "default",
-    landuse_id: str | int = "", pollutant_id: str | int = "",
+    ctx: Context,
+    session_id: str = "default",
+    landuse_id: str | int = "",
+    pollutant_id: str | int = "",
 ) -> dict:
     """Return the buildup function parameters for a (landuse, pollutant) pair."""
     session = await _get_session(ctx, session_id)
@@ -259,11 +255,16 @@ async def buildup_get(
         session.quality.buildup_get, l_idx, p_idx
     )
     return {
-        "session_id": session_id, "landuse_id": landuse_id, "landuse_index": l_idx,
-        "pollutant_id": pollutant_id, "pollutant_index": p_idx,
+        "session_id": session_id,
+        "landuse_id": landuse_id,
+        "landuse_index": l_idx,
+        "pollutant_id": pollutant_id,
+        "pollutant_index": p_idx,
         "function_code": int(func_code),
         "function": _BUILDUP_FUNCS.get(int(func_code), "unknown"),
-        "c1": c1, "c2": c2, "c3": c3,
+        "c1": c1,
+        "c2": c2,
+        "c3": c3,
         "normalizer_code": int(norm_code),
         "normalizer": _NORMALIZERS.get(int(norm_code), "unknown"),
     }
@@ -271,9 +272,14 @@ async def buildup_get(
 
 @quality_mcp.tool()
 async def buildup_set(
-    ctx: Context, session_id: str = "default",
-    landuse_id: str | int = "", pollutant_id: str | int = "",
-    function: str = "none", c1: float = 0.0, c2: float = 0.0, c3: float = 0.0,
+    ctx: Context,
+    session_id: str = "default",
+    landuse_id: str | int = "",
+    pollutant_id: str | int = "",
+    function: str = "none",
+    c1: float = 0.0,
+    c2: float = 0.0,
+    c3: float = 0.0,
     normalizer: str = "per_area",
 ) -> dict:
     """Set the buildup function for a (landuse, pollutant) pair.
@@ -287,30 +293,42 @@ async def buildup_set(
     l_idx = await _resolve_landuse(session, landuse_id)
     p_idx = await _resolve_pollutant(session, pollutant_id)
     await asyncio.to_thread(
-        session.quality.buildup_set, l_idx, p_idx,
-        func_int, float(c1), float(c2), float(c3), norm_int,
+        session.quality.buildup_set,
+        l_idx,
+        p_idx,
+        func_int,
+        float(c1),
+        float(c2),
+        float(c3),
+        norm_int,
     )
     return {
-        "status": "ok", "session_id": session_id,
-        "landuse_id": landuse_id, "landuse_index": l_idx,
-        "pollutant_id": pollutant_id, "pollutant_index": p_idx,
-        "function": function, "c1": c1, "c2": c2, "c3": c3,
+        "status": "ok",
+        "session_id": session_id,
+        "landuse_id": landuse_id,
+        "landuse_index": l_idx,
+        "pollutant_id": pollutant_id,
+        "pollutant_index": p_idx,
+        "function": function,
+        "c1": c1,
+        "c2": c2,
+        "c3": c3,
         "normalizer": normalizer,
     }
 
 
 @quality_mcp.tool()
 async def washoff_get(
-    ctx: Context, session_id: str = "default",
-    landuse_id: str | int = "", pollutant_id: str | int = "",
+    ctx: Context,
+    session_id: str = "default",
+    landuse_id: str | int = "",
+    pollutant_id: str | int = "",
 ) -> dict:
     """Return the washoff function parameters for a (landuse, pollutant) pair."""
     session = await _get_session(ctx, session_id)
     l_idx = await _resolve_landuse(session, landuse_id)
     p_idx = await _resolve_pollutant(session, pollutant_id)
-    result = await asyncio.to_thread(
-        session.quality.washoff_get, l_idx, p_idx
-    )
+    result = await asyncio.to_thread(session.quality.washoff_get, l_idx, p_idx)
     # washoff_get returns at least (func_code, c1, c2, sweep_eff, bmp_eff)
     # depending on engine version; serialize defensively.
     if isinstance(result, (list, tuple)):
@@ -322,21 +340,31 @@ async def washoff_get(
     else:
         func_code, c1, c2, sweep_eff, bmp_eff = 0, 0.0, 0.0, 0.0, 0.0
     return {
-        "session_id": session_id, "landuse_id": landuse_id, "landuse_index": l_idx,
-        "pollutant_id": pollutant_id, "pollutant_index": p_idx,
+        "session_id": session_id,
+        "landuse_id": landuse_id,
+        "landuse_index": l_idx,
+        "pollutant_id": pollutant_id,
+        "pollutant_index": p_idx,
         "function_code": func_code,
         "function": _WASHOFF_FUNCS.get(func_code, "unknown"),
-        "c1": c1, "c2": c2,
-        "sweep_efficiency": sweep_eff, "bmp_efficiency": bmp_eff,
+        "c1": c1,
+        "c2": c2,
+        "sweep_efficiency": sweep_eff,
+        "bmp_efficiency": bmp_eff,
     }
 
 
 @quality_mcp.tool()
 async def washoff_set(
-    ctx: Context, session_id: str = "default",
-    landuse_id: str | int = "", pollutant_id: str | int = "",
-    function: str = "exponential", c1: float = 0.0, c2: float = 0.0,
-    sweep_efficiency: float = 0.0, bmp_efficiency: float = 0.0,
+    ctx: Context,
+    session_id: str = "default",
+    landuse_id: str | int = "",
+    pollutant_id: str | int = "",
+    function: str = "exponential",
+    c1: float = 0.0,
+    c2: float = 0.0,
+    sweep_efficiency: float = 0.0,
+    bmp_efficiency: float = 0.0,
 ) -> dict:
     """Set the washoff function for a (landuse, pollutant) pair.
 
@@ -347,16 +375,27 @@ async def washoff_set(
     l_idx = await _resolve_landuse(session, landuse_id)
     p_idx = await _resolve_pollutant(session, pollutant_id)
     await asyncio.to_thread(
-        session.quality.washoff_set, l_idx, p_idx,
-        func_int, float(c1), float(c2),
-        float(sweep_efficiency), float(bmp_efficiency),
+        session.quality.washoff_set,
+        l_idx,
+        p_idx,
+        func_int,
+        float(c1),
+        float(c2),
+        float(sweep_efficiency),
+        float(bmp_efficiency),
     )
     return {
-        "status": "ok", "session_id": session_id,
-        "landuse_id": landuse_id, "landuse_index": l_idx,
-        "pollutant_id": pollutant_id, "pollutant_index": p_idx,
-        "function": function, "c1": c1, "c2": c2,
-        "sweep_efficiency": sweep_efficiency, "bmp_efficiency": bmp_efficiency,
+        "status": "ok",
+        "session_id": session_id,
+        "landuse_id": landuse_id,
+        "landuse_index": l_idx,
+        "pollutant_id": pollutant_id,
+        "pollutant_index": p_idx,
+        "function": function,
+        "c1": c1,
+        "c2": c2,
+        "sweep_efficiency": sweep_efficiency,
+        "bmp_efficiency": bmp_efficiency,
     }
 
 
@@ -367,8 +406,10 @@ async def washoff_set(
 
 @quality_mcp.tool()
 async def treatment_get(
-    ctx: Context, session_id: str = "default",
-    node_id: str = "", pollutant_id: str | int = "",
+    ctx: Context,
+    session_id: str = "default",
+    node_id: str = "",
+    pollutant_id: str | int = "",
 ) -> dict:
     """Return the treatment expression text for a (node, pollutant) pair."""
     if not node_id:
@@ -376,24 +417,25 @@ async def treatment_get(
     session = await _get_session(ctx, session_id)
     node_idx = await asyncio.to_thread(session.nodes.get_index, node_id)
     if node_idx < 0:
-        raise ToolError(
-            f"[{ErrorCode.ELEMENT_NOT_FOUND}] Node '{node_id}' not found."
-        )
+        raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Node '{node_id}' not found.")
     pollut_idx = await _resolve_pollutant(session, pollutant_id)
-    expr = await asyncio.to_thread(
-        session.quality.treatment_get, node_idx, pollut_idx
-    )
+    expr = await asyncio.to_thread(session.quality.treatment_get, node_idx, pollut_idx)
     return {
-        "session_id": session_id, "node_id": node_id, "node_index": node_idx,
-        "pollutant_id": pollutant_id, "pollutant_index": pollut_idx,
+        "session_id": session_id,
+        "node_id": node_id,
+        "node_index": node_idx,
+        "pollutant_id": pollutant_id,
+        "pollutant_index": pollut_idx,
         "expression": expr or "",
     }
 
 
 @quality_mcp.tool()
 async def treatment_clear(
-    ctx: Context, session_id: str = "default",
-    node_id: str = "", pollutant_id: str | int = "",
+    ctx: Context,
+    session_id: str = "default",
+    node_id: str = "",
+    pollutant_id: str | int = "",
 ) -> dict:
     """Remove the treatment expression for a (node, pollutant) pair."""
     if not node_id:
@@ -401,15 +443,14 @@ async def treatment_clear(
     session = await _get_session(ctx, session_id)
     node_idx = await asyncio.to_thread(session.nodes.get_index, node_id)
     if node_idx < 0:
-        raise ToolError(
-            f"[{ErrorCode.ELEMENT_NOT_FOUND}] Node '{node_id}' not found."
-        )
+        raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Node '{node_id}' not found.")
     pollut_idx = await _resolve_pollutant(session, pollutant_id)
-    await asyncio.to_thread(
-        session.quality.treatment_clear, node_idx, pollut_idx
-    )
+    await asyncio.to_thread(session.quality.treatment_clear, node_idx, pollut_idx)
     return {
-        "status": "ok", "session_id": session_id,
-        "node_id": node_id, "node_index": node_idx,
-        "pollutant_id": pollutant_id, "pollutant_index": pollut_idx,
+        "status": "ok",
+        "session_id": session_id,
+        "node_id": node_id,
+        "node_index": node_idx,
+        "pollutant_id": pollutant_id,
+        "pollutant_index": pollut_idx,
     }

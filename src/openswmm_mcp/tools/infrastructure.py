@@ -53,13 +53,13 @@ infrastructure_mcp = FastMCP("infrastructure")
 
 # Matches openswmm.engine._enums.LidType.
 _LID_TYPES: dict[str, int] = {
-    "bio_cell":         0,
-    "rain_garden":      1,
-    "green_roof":       2,
-    "infil_trench":     3,
-    "perm_pavement":    4,
-    "rain_barrel":      5,
-    "rooftop_disconn":  6,
+    "bio_cell": 0,
+    "rain_garden": 1,
+    "green_roof": 2,
+    "infil_trench": 3,
+    "perm_pavement": 4,
+    "rain_barrel": 5,
+    "rooftop_disconn": 6,
     "vegetative_swale": 7,
 }
 
@@ -71,8 +71,7 @@ def _resolve_lid_type(name: str | int) -> int:
     if key not in _LID_TYPES:
         valid = ", ".join(sorted(_LID_TYPES))
         raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] Unknown lid_type '{name}'. "
-            f"Valid types: {valid}."
+            f"[{ErrorCode.VALIDATION_ERROR}] Unknown lid_type '{name}'. Valid types: {valid}."
         )
     return _LID_TYPES[key]
 
@@ -92,9 +91,7 @@ async def _get_session(ctx: Context, session_id: str) -> SimSession:
     return session
 
 
-async def _get_accessors(
-    ctx: Context, session_id: str
-) -> tuple[SimSession, Any, Any]:
+async def _get_accessors(ctx: Context, session_id: str) -> tuple[SimSession, Any, Any]:
     """Return ``(session, infrastructure, subcatchments)`` for any non-closed state.
 
     ``subcatchments`` is supplied so :func:`add_lid_usage` can resolve a
@@ -149,9 +146,7 @@ async def transect_count(ctx: Context, session_id: str = "default") -> dict:
 
 
 @infrastructure_mcp.tool()
-async def add_transect(
-    ctx: Context, session_id: str = "default", transect_id: str = ""
-) -> dict:
+async def add_transect(ctx: Context, session_id: str = "default", transect_id: str = "") -> dict:
     """Create a new (empty) transect. Returns the assigned zero-based index.
 
     Populate the transect with :func:`set_transect_roughness` and
@@ -235,9 +230,7 @@ async def street_count(ctx: Context, session_id: str = "default") -> dict:
 
 
 @infrastructure_mcp.tool()
-async def add_street(
-    ctx: Context, session_id: str = "default", street_id: str = ""
-) -> dict:
+async def add_street(ctx: Context, session_id: str = "default", street_id: str = "") -> dict:
     """Create a new (empty) street cross-section. Returns its index."""
     if not street_id:
         raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] street_id must not be empty.")
@@ -282,17 +275,21 @@ async def set_street_params(
         Backing (behind-curb) geometry — width, slope, and Manning's M{n}.
     """
     if sides not in (1, 2):
-        raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] sides must be 1 or 2; got {sides}."
-        )
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] sides must be 1 or 2; got {sides}.")
     _, infra, _ = await _get_accessors(ctx, session_id)
     await asyncio.to_thread(
         infra.street_set_params,
         street_index,
-        float(t_crown), float(h_curb), float(sx), float(n_road),
-        float(gutter_depres), float(gutter_width),
+        float(t_crown),
+        float(h_curb),
+        float(sx),
+        float(n_road),
+        float(gutter_depres),
+        float(gutter_width),
         sides,
-        float(back_width), float(back_slope), float(back_n),
+        float(back_width),
+        float(back_slope),
+        float(back_n),
     )
     return {
         "status": "ok",
@@ -483,8 +480,12 @@ async def set_lid_soil(
     await asyncio.to_thread(
         infra.lid_set_soil,
         lid_index,
-        float(thick), float(porosity), float(fc), float(wp),
-        float(ksat), float(kslope),
+        float(thick),
+        float(porosity),
+        float(fc),
+        float(wp),
+        float(ksat),
+        float(kslope),
     )
     return {
         "status": "ok",
@@ -585,23 +586,17 @@ async def add_lid_usage(
     must lie in [0.0, 1.0]; ``number`` must be >= 1.
     """
     if area <= 0.0:
-        raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] area must be positive; got {area}."
-        )
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] area must be positive; got {area}.")
     if not 0.0 <= init_sat <= 1.0:
         raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] init_sat must be in [0, 1]; "
-            f"got {init_sat}."
+            f"[{ErrorCode.VALIDATION_ERROR}] init_sat must be in [0, 1]; got {init_sat}."
         )
     if not 0.0 <= from_imperv <= 1.0:
         raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] from_imperv must be in [0, 1]; "
-            f"got {from_imperv}."
+            f"[{ErrorCode.VALIDATION_ERROR}] from_imperv must be in [0, 1]; got {from_imperv}."
         )
     if number < 1:
-        raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] number must be >= 1; got {number}."
-        )
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] number must be >= 1; got {number}.")
 
     _, infra, subcatchments = await _get_accessors(ctx, session_id)
     sc_idx = await _resolve_subcatch_idx(subcatchments, subcatch_id)

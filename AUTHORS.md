@@ -1,6 +1,6 @@
 # Authors
 
-OpenSWMM MCP Server is built on the [OpenSWMM](https://github.com/HydroCouple/OpenSWMMCore) engine and the [FastMCP](https://gofastmcp.com/) framework by the contributors listed below.
+OpenSWMM MCP Server is built on the [openswmm.engine](https://github.com/HydroCouple/openswmm.engine) and the [FastMCP](https://gofastmcp.com/) framework by the contributors listed below.
 
 ## Project Lead
 

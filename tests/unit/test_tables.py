@@ -14,7 +14,6 @@ pytest.importorskip("openswmm.engine")
 
 from openswmm_mcp.errors import ToolError
 
-
 # ---------------------------------------------------------------------------
 # Mock MCP Context
 # ---------------------------------------------------------------------------
@@ -94,9 +93,7 @@ class TestAddTimeseries:
         assert result["index"] >= 0
 
         assert (await count(ctx, session_id="tbl_ts"))["count"] == 1
-        assert (
-            await get_point_count(ctx, session_id="tbl_ts", table_id="RainTS")
-        )["count"] == 4
+        assert (await get_point_count(ctx, session_id="tbl_ts", table_id="RainTS"))["count"] == 4
 
     async def test_empty_id_rejected(self, session_manager):
         from openswmm_mcp.tools.tables import add_timeseries
@@ -104,7 +101,11 @@ class TestAddTimeseries:
         ctx = await _create_building_session(session_manager, "tbl_ts_empty")
         with pytest.raises(ToolError, match="ts_id must not be empty"):
             await add_timeseries(
-                ctx, session_id="tbl_ts_empty", ts_id="", times=[0.0], values=[1.0],
+                ctx,
+                session_id="tbl_ts_empty",
+                ts_id="",
+                times=[0.0],
+                values=[1.0],
             )
 
     async def test_mismatched_lengths_rejected(self, session_manager):
@@ -126,7 +127,11 @@ class TestAddTimeseries:
         ctx = await _create_building_session(session_manager, "tbl_ts_emp")
         with pytest.raises(ToolError, match="must both be non-empty"):
             await add_timeseries(
-                ctx, session_id="tbl_ts_emp", ts_id="TS1", times=[], values=[],
+                ctx,
+                session_id="tbl_ts_emp",
+                ts_id="TS1",
+                times=[],
+                values=[],
             )
 
 
@@ -193,7 +198,10 @@ class TestAddCurve:
             y_values=[0.0, 1.0, 2.0],
         )
         result = await lookup(
-            ctx, session_id="tbl_lookup", table_id="LinearCurve", x=0.5,
+            ctx,
+            session_id="tbl_lookup",
+            table_id="LinearCurve",
+            x=0.5,
         )
         assert result["x"] == 0.5
         assert result["y"] == pytest.approx(0.5)
@@ -326,7 +334,10 @@ class TestPatterns:
         # Replace with non-trivial factors
         new = [0.5] * 12
         result = await pattern_set_factors(
-            ctx, session_id="tbl_psf", pattern_index=added["index"], factors=new,
+            ctx,
+            session_id="tbl_psf",
+            pattern_index=added["index"],
+            factors=new,
         )
         assert result["status"] == "ok"
         assert result["factors"] == 12
@@ -355,9 +366,7 @@ class TestGuards:
         with pytest.raises(ToolError, match="not supported|legacy"):
             await count(ctx, session_id="legacy_tables")
 
-    async def test_creation_outside_building_state_rejected(
-        self, session_manager, inp_path
-    ):
+    async def test_creation_outside_building_state_rejected(self, session_manager, inp_path):
         """add_timeseries / add_curve require the building state."""
         from openswmm_mcp.tools.lifecycle import open_model
         from openswmm_mcp.tools.tables import add_timeseries

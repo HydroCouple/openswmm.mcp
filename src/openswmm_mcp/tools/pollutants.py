@@ -15,7 +15,6 @@ the ``running`` state.
 from __future__ import annotations
 
 import asyncio
-from typing import Any
 
 from fastmcp import Context, FastMCP
 
@@ -63,9 +62,7 @@ def _pollutants_accessor(session: SimSession):
 
     if session.state == "building":
         if session.model_builder is None:
-            raise ToolError(
-                f"[{ErrorCode.INVALID_STATE}] Building session has no ModelBuilder."
-            )
+            raise ToolError(f"[{ErrorCode.INVALID_STATE}] Building session has no ModelBuilder.")
         return Pollutants(session.model_builder)
     return session.pollutants
 
@@ -88,22 +85,14 @@ def _links_accessor(session: SimSession):
     return session.links
 
 
-async def _resolve_pollutant(
-    session: SimSession, pollutant_id: str | int
-) -> int:
+async def _resolve_pollutant(session: SimSession, pollutant_id: str | int) -> int:
     if isinstance(pollutant_id, int):
         return pollutant_id
     if not pollutant_id:
-        raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] pollutant_id must not be empty."
-        )
-    idx = await asyncio.to_thread(
-        _pollutants_accessor(session).get_index, pollutant_id
-    )
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] pollutant_id must not be empty.")
+    idx = await asyncio.to_thread(_pollutants_accessor(session).get_index, pollutant_id)
     if idx < 0:
-        raise ToolError(
-            f"[{ErrorCode.ELEMENT_NOT_FOUND}] Pollutant '{pollutant_id}' not found."
-        )
+        raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Pollutant '{pollutant_id}' not found.")
     return idx
 
 
@@ -132,9 +121,7 @@ async def add(
     ``units``: ``mg_per_l`` (0), ``ug_per_l`` (1), or ``count_per_l`` (2).
     """
     if not pollutant_id:
-        raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] pollutant_id must not be empty."
-        )
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] pollutant_id must not be empty.")
     units_int = _resolve_units(units)
     session = await _get_session(ctx, session_id)
     # Pollutants.add works in building state via the ModelBuilder accessor.
@@ -143,17 +130,18 @@ async def add(
 
     if session.state == "building":
         if session.model_builder is None:
-            raise ToolError(
-                f"[{ErrorCode.INVALID_STATE}] Building session has no ModelBuilder."
-            )
+            raise ToolError(f"[{ErrorCode.INVALID_STATE}] Building session has no ModelBuilder.")
         accessor = Pollutants(session.model_builder)
     else:
         accessor = session.pollutants
     await asyncio.to_thread(accessor.add, pollutant_id, units_int)
     idx = await asyncio.to_thread(accessor.get_index, pollutant_id)
     return {
-        "status": "ok", "session_id": session_id,
-        "id": pollutant_id, "index": idx, "units": units,
+        "status": "ok",
+        "session_id": session_id,
+        "id": pollutant_id,
+        "index": idx,
+        "units": units,
     }
 
 
@@ -162,35 +150,31 @@ async def add(
 # ===========================================================================
 
 
-async def _scalar_get(
-    ctx, session_id, pollutant_id, attr, key, value_type
-):
+async def _scalar_get(ctx, session_id, pollutant_id, attr, key, value_type):
     session = await _get_session(ctx, session_id)
     idx = await _resolve_pollutant(session, pollutant_id)
     accessor = _pollutants_accessor(session)
     v = await asyncio.to_thread(getattr(accessor, attr), idx)
     return {
-        "session_id": session_id, "pollutant_id": pollutant_id,
-        "pollutant_index": idx, key: value_type(v),
+        "session_id": session_id,
+        "pollutant_id": pollutant_id,
+        "pollutant_index": idx,
+        key: value_type(v),
     }
 
 
-async def _scalar_set(
-    ctx, session_id, pollutant_id, attr, value, key, value_type
-):
+async def _scalar_set(ctx, session_id, pollutant_id, attr, value, key, value_type):
     if value is None:
-        raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] {key} is required."
-        )
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] {key} is required.")
     session = await _get_session(ctx, session_id)
     idx = await _resolve_pollutant(session, pollutant_id)
     accessor = _pollutants_accessor(session)
-    await asyncio.to_thread(
-        getattr(accessor, attr), idx, value_type(value)
-    )
+    await asyncio.to_thread(getattr(accessor, attr), idx, value_type(value))
     return {
-        "status": "ok", "session_id": session_id,
-        "pollutant_id": pollutant_id, "pollutant_index": idx,
+        "status": "ok",
+        "session_id": session_id,
+        "pollutant_id": pollutant_id,
+        "pollutant_index": idx,
         key: value_type(value),
     }
 
@@ -204,8 +188,10 @@ async def get_units(
     idx = await _resolve_pollutant(session, pollutant_id)
     code = await asyncio.to_thread(_pollutants_accessor(session).get_units, idx)
     return {
-        "session_id": session_id, "pollutant_id": pollutant_id,
-        "pollutant_index": idx, "units_code": int(code),
+        "session_id": session_id,
+        "pollutant_id": pollutant_id,
+        "pollutant_index": idx,
+        "units_code": int(code),
         "units": _POLLUT_UNITS.get(int(code), "unknown"),
     }
 
@@ -215,20 +201,18 @@ async def get_kdecay(
     ctx: Context, session_id: str = "default", pollutant_id: str | int = ""
 ) -> dict:
     """Return the first-order decay coefficient (1/day) for a pollutant."""
-    return await _scalar_get(
-        ctx, session_id, pollutant_id, "get_kdecay", "kdecay", float
-    )
+    return await _scalar_get(ctx, session_id, pollutant_id, "get_kdecay", "kdecay", float)
 
 
 @pollutants_mcp.tool()
 async def set_kdecay(
-    ctx: Context, session_id: str = "default",
-    pollutant_id: str | int = "", kdecay: float = 0.0,
+    ctx: Context,
+    session_id: str = "default",
+    pollutant_id: str | int = "",
+    kdecay: float = 0.0,
 ) -> dict:
     """Set the first-order decay coefficient (1/day)."""
-    return await _scalar_set(
-        ctx, session_id, pollutant_id, "set_kdecay", kdecay, "kdecay", float
-    )
+    return await _scalar_set(ctx, session_id, pollutant_id, "set_kdecay", kdecay, "kdecay", float)
 
 
 @pollutants_mcp.tool()
@@ -236,20 +220,25 @@ async def get_rain_conc(
     ctx: Context, session_id: str = "default", pollutant_id: str | int = ""
 ) -> dict:
     """Return the concentration of this pollutant in rainfall."""
-    return await _scalar_get(
-        ctx, session_id, pollutant_id, "get_rain_conc", "rain_conc", float
-    )
+    return await _scalar_get(ctx, session_id, pollutant_id, "get_rain_conc", "rain_conc", float)
 
 
 @pollutants_mcp.tool()
 async def set_rain_conc(
-    ctx: Context, session_id: str = "default",
-    pollutant_id: str | int = "", rain_conc: float = 0.0,
+    ctx: Context,
+    session_id: str = "default",
+    pollutant_id: str | int = "",
+    rain_conc: float = 0.0,
 ) -> dict:
     """Set the rainfall concentration."""
     return await _scalar_set(
-        ctx, session_id, pollutant_id, "set_rain_conc", rain_conc,
-        "rain_conc", float,
+        ctx,
+        session_id,
+        pollutant_id,
+        "set_rain_conc",
+        rain_conc,
+        "rain_conc",
+        float,
     )
 
 
@@ -258,20 +247,25 @@ async def get_gw_conc(
     ctx: Context, session_id: str = "default", pollutant_id: str | int = ""
 ) -> dict:
     """Return the concentration of this pollutant in groundwater."""
-    return await _scalar_get(
-        ctx, session_id, pollutant_id, "get_gw_conc", "gw_conc", float
-    )
+    return await _scalar_get(ctx, session_id, pollutant_id, "get_gw_conc", "gw_conc", float)
 
 
 @pollutants_mcp.tool()
 async def set_gw_conc(
-    ctx: Context, session_id: str = "default",
-    pollutant_id: str | int = "", gw_conc: float = 0.0,
+    ctx: Context,
+    session_id: str = "default",
+    pollutant_id: str | int = "",
+    gw_conc: float = 0.0,
 ) -> dict:
     """Set the groundwater concentration."""
     return await _scalar_set(
-        ctx, session_id, pollutant_id, "set_gw_conc", gw_conc,
-        "gw_conc", float,
+        ctx,
+        session_id,
+        pollutant_id,
+        "set_gw_conc",
+        gw_conc,
+        "gw_conc",
+        float,
     )
 
 
@@ -280,20 +274,25 @@ async def get_rdii_conc(
     ctx: Context, session_id: str = "default", pollutant_id: str | int = ""
 ) -> dict:
     """Return the concentration of this pollutant in RDII."""
-    return await _scalar_get(
-        ctx, session_id, pollutant_id, "get_rdii_conc", "rdii_conc", float
-    )
+    return await _scalar_get(ctx, session_id, pollutant_id, "get_rdii_conc", "rdii_conc", float)
 
 
 @pollutants_mcp.tool()
 async def set_rdii_conc(
-    ctx: Context, session_id: str = "default",
-    pollutant_id: str | int = "", rdii_conc: float = 0.0,
+    ctx: Context,
+    session_id: str = "default",
+    pollutant_id: str | int = "",
+    rdii_conc: float = 0.0,
 ) -> dict:
     """Set the RDII concentration."""
     return await _scalar_set(
-        ctx, session_id, pollutant_id, "set_rdii_conc", rdii_conc,
-        "rdii_conc", float,
+        ctx,
+        session_id,
+        pollutant_id,
+        "set_rdii_conc",
+        rdii_conc,
+        "rdii_conc",
+        float,
     )
 
 
@@ -302,42 +301,50 @@ async def get_init_conc(
     ctx: Context, session_id: str = "default", pollutant_id: str | int = ""
 ) -> dict:
     """Return the initial concentration throughout the system."""
-    return await _scalar_get(
-        ctx, session_id, pollutant_id, "get_init_conc", "init_conc", float
-    )
+    return await _scalar_get(ctx, session_id, pollutant_id, "get_init_conc", "init_conc", float)
 
 
 @pollutants_mcp.tool()
 async def set_init_conc(
-    ctx: Context, session_id: str = "default",
-    pollutant_id: str | int = "", init_conc: float = 0.0,
+    ctx: Context,
+    session_id: str = "default",
+    pollutant_id: str | int = "",
+    init_conc: float = 0.0,
 ) -> dict:
     """Set the initial system-wide concentration."""
     return await _scalar_set(
-        ctx, session_id, pollutant_id, "set_init_conc", init_conc,
-        "init_conc", float,
+        ctx,
+        session_id,
+        pollutant_id,
+        "set_init_conc",
+        init_conc,
+        "init_conc",
+        float,
     )
 
 
 @pollutants_mcp.tool()
-async def get_mwt(
-    ctx: Context, session_id: str = "default", pollutant_id: str | int = ""
-) -> dict:
+async def get_mwt(ctx: Context, session_id: str = "default", pollutant_id: str | int = "") -> dict:
     """Return the molecular weight of a pollutant (g/mol)."""
-    return await _scalar_get(
-        ctx, session_id, pollutant_id, "get_mwt", "molecular_weight", float
-    )
+    return await _scalar_get(ctx, session_id, pollutant_id, "get_mwt", "molecular_weight", float)
 
 
 @pollutants_mcp.tool()
 async def set_mwt(
-    ctx: Context, session_id: str = "default",
-    pollutant_id: str | int = "", molecular_weight: float = 0.0,
+    ctx: Context,
+    session_id: str = "default",
+    pollutant_id: str | int = "",
+    molecular_weight: float = 0.0,
 ) -> dict:
     """Set the molecular weight (g/mol)."""
     return await _scalar_set(
-        ctx, session_id, pollutant_id, "set_mwt", molecular_weight,
-        "molecular_weight", float,
+        ctx,
+        session_id,
+        pollutant_id,
+        "set_mwt",
+        molecular_weight,
+        "molecular_weight",
+        float,
     )
 
 
@@ -350,25 +357,30 @@ async def get_snow_only(
     idx = await _resolve_pollutant(session, pollutant_id)
     flag = await asyncio.to_thread(_pollutants_accessor(session).get_snow_only, idx)
     return {
-        "session_id": session_id, "pollutant_id": pollutant_id,
-        "pollutant_index": idx, "snow_only": bool(flag),
+        "session_id": session_id,
+        "pollutant_id": pollutant_id,
+        "pollutant_index": idx,
+        "snow_only": bool(flag),
     }
 
 
 @pollutants_mcp.tool()
 async def set_snow_only(
-    ctx: Context, session_id: str = "default",
-    pollutant_id: str | int = "", snow_only: bool = False,
+    ctx: Context,
+    session_id: str = "default",
+    pollutant_id: str | int = "",
+    snow_only: bool = False,
 ) -> dict:
     """Set the snow-only flag for a pollutant."""
     session = await _get_session(ctx, session_id)
     idx = await _resolve_pollutant(session, pollutant_id)
-    await asyncio.to_thread(
-        _pollutants_accessor(session).set_snow_only, idx, bool(snow_only)
-    )
+    await asyncio.to_thread(_pollutants_accessor(session).set_snow_only, idx, bool(snow_only))
     return {
-        "status": "ok", "session_id": session_id, "pollutant_id": pollutant_id,
-        "pollutant_index": idx, "snow_only": snow_only,
+        "status": "ok",
+        "session_id": session_id,
+        "pollutant_id": pollutant_id,
+        "pollutant_index": idx,
+        "snow_only": snow_only,
     }
 
 
@@ -378,15 +390,21 @@ async def get_co_pollutant(
 ) -> dict:
     """Return the co-pollutant index assigned to this pollutant (-1 = none)."""
     return await _scalar_get(
-        ctx, session_id, pollutant_id, "get_co_pollutant",
-        "co_pollutant_index", int,
+        ctx,
+        session_id,
+        pollutant_id,
+        "get_co_pollutant",
+        "co_pollutant_index",
+        int,
     )
 
 
 @pollutants_mcp.tool()
 async def set_co_pollutant(
-    ctx: Context, session_id: str = "default",
-    pollutant_id: str | int = "", co_pollutant_index: int = -1,
+    ctx: Context,
+    session_id: str = "default",
+    pollutant_id: str | int = "",
+    co_pollutant_index: int = -1,
 ) -> dict:
     """Assign a co-pollutant (set to -1 to clear).
 
@@ -394,8 +412,13 @@ async def set_co_pollutant(
     decay products or pollutant pairs that move together in the system.
     """
     return await _scalar_set(
-        ctx, session_id, pollutant_id, "set_co_pollutant",
-        co_pollutant_index, "co_pollutant_index", int,
+        ctx,
+        session_id,
+        pollutant_id,
+        "set_co_pollutant",
+        co_pollutant_index,
+        "co_pollutant_index",
+        int,
     )
 
 
@@ -424,18 +447,21 @@ async def set_node_quality(
     require_state(session, "running")
     node_idx = await asyncio.to_thread(session.nodes.get_index, node_id)
     if node_idx < 0:
-        raise ToolError(
-            f"[{ErrorCode.ELEMENT_NOT_FOUND}] Node '{node_id}' not found."
-        )
+        raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Node '{node_id}' not found.")
     pollut_idx = await _resolve_pollutant(session, pollutant_id)
     await asyncio.to_thread(
         _pollutants_accessor(session).set_node_quality,
-        node_idx, pollut_idx, float(concentration),
+        node_idx,
+        pollut_idx,
+        float(concentration),
     )
     return {
-        "status": "ok", "session_id": session_id,
-        "node_id": node_id, "node_index": node_idx,
-        "pollutant_id": pollutant_id, "pollutant_index": pollut_idx,
+        "status": "ok",
+        "session_id": session_id,
+        "node_id": node_id,
+        "node_index": node_idx,
+        "pollutant_id": pollutant_id,
+        "pollutant_index": pollut_idx,
         "concentration": concentration,
     }
 
@@ -455,17 +481,20 @@ async def set_link_quality(
     require_state(session, "running")
     link_idx = await asyncio.to_thread(session.links.get_index, link_id)
     if link_idx < 0:
-        raise ToolError(
-            f"[{ErrorCode.ELEMENT_NOT_FOUND}] Link '{link_id}' not found."
-        )
+        raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Link '{link_id}' not found.")
     pollut_idx = await _resolve_pollutant(session, pollutant_id)
     await asyncio.to_thread(
         _pollutants_accessor(session).set_link_quality,
-        link_idx, pollut_idx, float(concentration),
+        link_idx,
+        pollut_idx,
+        float(concentration),
     )
     return {
-        "status": "ok", "session_id": session_id,
-        "link_id": link_id, "link_index": link_idx,
-        "pollutant_id": pollutant_id, "pollutant_index": pollut_idx,
+        "status": "ok",
+        "session_id": session_id,
+        "link_id": link_id,
+        "link_index": link_idx,
+        "pollutant_id": pollutant_id,
+        "pollutant_index": pollut_idx,
         "concentration": concentration,
     }

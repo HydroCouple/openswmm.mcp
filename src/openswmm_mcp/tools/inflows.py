@@ -52,8 +52,18 @@ inflows_mcp = FastMCP("inflows")
 _UH_RESPONSE: dict[str, int] = {"short": 0, "medium": 1, "long": 2}
 _MONTHS: dict[str, int] = {
     "all": -1,
-    "jan": 0, "feb": 1, "mar": 2, "apr": 3, "may": 4, "jun": 5,
-    "jul": 6, "aug": 7, "sep": 8, "oct": 9, "nov": 10, "dec": 11,
+    "jan": 0,
+    "feb": 1,
+    "mar": 2,
+    "apr": 3,
+    "may": 4,
+    "jun": 5,
+    "jul": 6,
+    "aug": 7,
+    "sep": 8,
+    "oct": 9,
+    "nov": 10,
+    "dec": 11,
 }
 
 
@@ -69,8 +79,7 @@ def _resolve_response(name: str | int) -> int:
     if key not in _UH_RESPONSE:
         valid = ", ".join(sorted(_UH_RESPONSE))
         raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] Unknown response '{name}'. "
-            f"Valid values: {valid}."
+            f"[{ErrorCode.VALIDATION_ERROR}] Unknown response '{name}'. Valid values: {valid}."
         )
     return _UH_RESPONSE[key]
 
@@ -87,8 +96,7 @@ def _resolve_month(name: str | int) -> int:
     if key not in _MONTHS:
         valid = ", ".join(sorted(_MONTHS))
         raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] Unknown month '{name}'. "
-            f"Valid values: {valid}."
+            f"[{ErrorCode.VALIDATION_ERROR}] Unknown month '{name}'. Valid values: {valid}."
         )
     return _MONTHS[key]
 
@@ -105,9 +113,7 @@ async def _get_session(ctx: Context, session_id: str) -> SimSession:
     return session
 
 
-async def _get_inflows_accessor(
-    ctx: Context, session_id: str
-) -> tuple[SimSession, Any, Any]:
+async def _get_inflows_accessor(ctx: Context, session_id: str) -> tuple[SimSession, Any, Any]:
     """Return ``(session, inflows, nodes)`` for an inflows tool call.
 
     ``nodes`` is used to resolve string node IDs to integer indices for the
@@ -299,9 +305,7 @@ async def add_rdii(
 
 
 @inflows_mcp.tool()
-async def get_rdii(
-    ctx: Context, session_id: str = "default", entry_index: int = 0
-) -> dict:
+async def get_rdii(ctx: Context, session_id: str = "default", entry_index: int = 0) -> dict:
     """Read back the I{entry_index}-th RDII assignment as ``(node_idx, uh_name, area)``."""
     _, inflows, _ = await _get_inflows_accessor(ctx, session_id)
     node_idx, uh_name, area = await asyncio.to_thread(inflows.get_rdii, entry_index)
@@ -368,8 +372,7 @@ async def add_hydrograph(
         raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] uh_name must not be empty.")
     if k < 1.0:
         raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] k (base/peak time ratio) must be "
-            f">= 1.0; got {k}."
+            f"[{ErrorCode.VALIDATION_ERROR}] k (base/peak time ratio) must be >= 1.0; got {k}."
         )
     m_int = _resolve_month(month)
     r_int = _resolve_response(response)
@@ -396,9 +399,7 @@ async def add_hydrograph(
 
 
 @inflows_mcp.tool()
-async def get_hydrograph(
-    ctx: Context, session_id: str = "default", entry_index: int = 0
-) -> dict:
+async def get_hydrograph(ctx: Context, session_id: str = "default", entry_index: int = 0) -> dict:
     """Read back the I{entry_index}-th hydrograph row as a dict."""
     _, inflows, _ = await _get_inflows_accessor(ctx, session_id)
     entry = await asyncio.to_thread(inflows.get_hydrograph, entry_index)
@@ -477,9 +478,7 @@ async def hydrograph_group_count(ctx: Context, session_id: str = "default") -> d
 
 
 @inflows_mcp.tool()
-async def list_hydrograph_groups(
-    ctx: Context, session_id: str = "default"
-) -> dict:
+async def list_hydrograph_groups(ctx: Context, session_id: str = "default") -> dict:
     """Return the unit-hydrograph groups as a list of ``{index, name}`` dicts.
 
     Groups are enumerated in first-occurrence order across the parameter
@@ -493,10 +492,7 @@ async def list_hydrograph_groups(
 
     def _read_all() -> list[dict[str, Any]]:
         n = inflows.hydrograph_group_count()
-        return [
-            {"index": i, "name": inflows.get_hydrograph_group_id(i)}
-            for i in range(n)
-        ]
+        return [{"index": i, "name": inflows.get_hydrograph_group_id(i)} for i in range(n)]
 
     groups = await asyncio.to_thread(_read_all)
     return {"session_id": session_id, "count": len(groups), "groups": groups}
@@ -555,9 +551,7 @@ async def add_rdii_decay(
 
 
 @inflows_mcp.tool()
-async def get_rdii_decay(
-    ctx: Context, session_id: str = "default", entry_index: int = 0
-) -> dict:
+async def get_rdii_decay(ctx: Context, session_id: str = "default", entry_index: int = 0) -> dict:
     """Read back the I{entry_index}-th exponential-decay row as a dict."""
     _, inflows, _ = await _get_inflows_accessor(ctx, session_id)
     entry = await asyncio.to_thread(inflows.get_rdii_decay, entry_index)

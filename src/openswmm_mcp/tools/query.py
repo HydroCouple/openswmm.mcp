@@ -48,25 +48,39 @@ _OUTFALL_TYPE_NAMES = {0: "FREE", 1: "NORMAL", 2: "FIXED", 3: "TIDAL", 4: "TIMES
 
 # Cross-section shape codes → names
 _XSECT_SHAPE_NAMES: dict[int, str] = {
-    0: "CIRCULAR", 1: "FILLED_CIRCULAR", 2: "RECT_CLOSED", 3: "RECT_OPEN",
-    4: "TRAPEZOIDAL", 5: "TRIANGULAR", 6: "PARABOLIC", 7: "POWER",
-    8: "MODBASKETHANDLE", 9: "EGGSHAPED", 10: "HORSESHOE", 11: "GOTHIC",
-    12: "CATENARY", 13: "SEMIELLIPTICAL", 14: "BASKETHANDLE", 15: "SEMICIRCULAR",
-    16: "IRREGULAR", 17: "CUSTOM", 18: "FORCE_MAIN",
+    0: "CIRCULAR",
+    1: "FILLED_CIRCULAR",
+    2: "RECT_CLOSED",
+    3: "RECT_OPEN",
+    4: "TRAPEZOIDAL",
+    5: "TRIANGULAR",
+    6: "PARABOLIC",
+    7: "POWER",
+    8: "MODBASKETHANDLE",
+    9: "EGGSHAPED",
+    10: "HORSESHOE",
+    11: "GOTHIC",
+    12: "CATENARY",
+    13: "SEMIELLIPTICAL",
+    14: "BASKETHANDLE",
+    15: "SEMICIRCULAR",
+    16: "IRREGULAR",
+    17: "CUSTOM",
+    18: "FORCE_MAIN",
 }
 
 # Per-shape geometry parameter labels (geom1, geom2, geom3, geom4)
 _XSECT_GEOM_LABELS: dict[int, tuple[str, ...]] = {
-    0:  ("diameter",),
-    1:  ("diameter", "filled_depth"),
-    2:  ("height", "width"),
-    3:  ("height", "width"),
-    4:  ("height", "bottom_width", "side_slope"),
-    5:  ("height", "top_width"),
-    6:  ("height", "top_width"),
-    7:  ("height", "top_width", "exponent"),
-    8:  ("height", "bottom_width", "top_radius"),
-    9:  ("height",),
+    0: ("diameter",),
+    1: ("diameter", "filled_depth"),
+    2: ("height", "width"),
+    3: ("height", "width"),
+    4: ("height", "bottom_width", "side_slope"),
+    5: ("height", "top_width"),
+    6: ("height", "top_width"),
+    7: ("height", "top_width", "exponent"),
+    8: ("height", "bottom_width", "top_radius"),
+    9: ("height",),
     10: ("height",),
     11: ("height",),
     12: ("height",),
@@ -87,7 +101,10 @@ def _make_xsect_info(shape: int, g1: float, g2: float, g3: float, g4: float) -> 
     return CrossSectionInfo(
         shape=shape,
         shape_name=_XSECT_SHAPE_NAMES.get(shape, f"SHAPE_{shape}"),
-        geom1=g1, geom2=g2, geom3=g3, geom4=g4,
+        geom1=g1,
+        geom2=g2,
+        geom3=g3,
+        geom4=g4,
         geom_labels=geom_labels,
     )
 
@@ -101,9 +118,18 @@ async def _build_node_info(session, nodes, index: int) -> NodeInfo:
     """Build a NodeInfo for a single node by index, including all geometry."""
     # Fetch basic identity + all static geometry concurrently
     (
-        node_id, type_code, invert, max_depth,
-        crown_elev, full_volume, surcharge_depth, ponded_area,
-        degree, initial_depth, losses, outflow,
+        node_id,
+        type_code,
+        invert,
+        max_depth,
+        crown_elev,
+        full_volume,
+        surcharge_depth,
+        ponded_area,
+        degree,
+        initial_depth,
+        losses,
+        outflow,
     ) = await asyncio.gather(
         asyncio.to_thread(nodes.get_id, index),
         asyncio.to_thread(nodes.get_type, index),
@@ -224,8 +250,16 @@ async def _build_link_info(session, links, nodes, index: int) -> LinkInfo:
     """Build a LinkInfo for a single link by index, including full geometry."""
     # Fetch all common static properties concurrently
     (
-        link_id, type_code, from_node_idx, to_node_idx,
-        length, roughness, slope, offset_up, offset_dn, xsect_raw,
+        link_id,
+        type_code,
+        from_node_idx,
+        to_node_idx,
+        length,
+        roughness,
+        slope,
+        offset_up,
+        offset_dn,
+        xsect_raw,
     ) = await asyncio.gather(
         asyncio.to_thread(links.get_id, index),
         asyncio.to_thread(links.get_type, index),
@@ -236,7 +270,7 @@ async def _build_link_info(session, links, nodes, index: int) -> LinkInfo:
         asyncio.to_thread(links.get_slope, index),
         asyncio.to_thread(links.get_offset_up, index),
         asyncio.to_thread(links.get_offset_dn, index),
-        asyncio.to_thread(links.get_xsect, index),    # → (shape, g1, g2, g3, g4)
+        asyncio.to_thread(links.get_xsect, index),  # → (shape, g1, g2, g3, g4)
     )
     from_node_id, to_node_id = await asyncio.gather(
         asyncio.to_thread(nodes.get_id, from_node_idx),
@@ -516,7 +550,9 @@ async def get_link_info(
     if count == 0:
         return []
 
-    results = await asyncio.gather(*[_build_link_info(session, links, nodes, i) for i in range(count)])
+    results = await asyncio.gather(
+        *[_build_link_info(session, links, nodes, i) for i in range(count)]
+    )
     return list(results)
 
 
@@ -772,18 +808,26 @@ _POLLUTANT_UNITS_NAMES = {0: "MG/L", 1: "UG/L", 2: "#/L"}
 
 async def _build_pollutant_info(pollutants, index: int) -> PollutantInfo:
     """Build a PollutantInfo for a single pollutant by index."""
-    poll_id, units, kdecay, rain_conc, gw_conc, init_conc, rdii_conc, mwt, snow_only = (
-        await asyncio.gather(
-            asyncio.to_thread(pollutants.get_id, index),
-            asyncio.to_thread(pollutants.get_units, index),
-            asyncio.to_thread(pollutants.get_kdecay, index),
-            asyncio.to_thread(pollutants.get_rain_conc, index),
-            asyncio.to_thread(pollutants.get_gw_conc, index),
-            asyncio.to_thread(pollutants.get_init_conc, index),
-            asyncio.to_thread(pollutants.get_rdii_conc, index),
-            asyncio.to_thread(pollutants.get_mwt, index),
-            asyncio.to_thread(pollutants.get_snow_only, index),
-        )
+    (
+        poll_id,
+        units,
+        kdecay,
+        rain_conc,
+        gw_conc,
+        init_conc,
+        rdii_conc,
+        mwt,
+        snow_only,
+    ) = await asyncio.gather(
+        asyncio.to_thread(pollutants.get_id, index),
+        asyncio.to_thread(pollutants.get_units, index),
+        asyncio.to_thread(pollutants.get_kdecay, index),
+        asyncio.to_thread(pollutants.get_rain_conc, index),
+        asyncio.to_thread(pollutants.get_gw_conc, index),
+        asyncio.to_thread(pollutants.get_init_conc, index),
+        asyncio.to_thread(pollutants.get_rdii_conc, index),
+        asyncio.to_thread(pollutants.get_mwt, index),
+        asyncio.to_thread(pollutants.get_snow_only, index),
     )
     co_idx = co_frac = 0
     try:

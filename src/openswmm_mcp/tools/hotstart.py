@@ -206,9 +206,7 @@ async def saves_count(ctx: Context, session_id: str = "default") -> dict:
 
 
 @hotstart_mcp.tool()
-async def saves_get(
-    ctx: Context, session_id: str = "default", index: int = 0
-) -> dict:
+async def saves_get(ctx: Context, session_id: str = "default", index: int = 0) -> dict:
     """Return the path + datetime of the I{index}-th scheduled save."""
     from openswmm.engine import HotStart
 
@@ -218,15 +216,19 @@ async def saves_get(
     path = await asyncio.to_thread(HotStart.saves_get_path, session.solver, index)
     dt = await asyncio.to_thread(HotStart.saves_get_datetime, session.solver, index)
     return {
-        "session_id": session_id, "index": index,
-        "path": path, "datetime_oadate": dt,
+        "session_id": session_id,
+        "index": index,
+        "path": path,
+        "datetime_oadate": dt,
     }
 
 
 @hotstart_mcp.tool()
 async def saves_add(
-    ctx: Context, session_id: str = "default",
-    path: str = "", datetime_oadate: float = 0.0,
+    ctx: Context,
+    session_id: str = "default",
+    path: str = "",
+    datetime_oadate: float = 0.0,
 ) -> dict:
     """Append a new SAVE HOTSTART entry.
 
@@ -240,20 +242,23 @@ async def saves_add(
     sm = _get_session_manager(ctx)
     session = await sm.get_session(session_id)
     require_new_engine(session, "Hotstart saves management")
-    await asyncio.to_thread(
-        HotStart.saves_add, session.solver, path, float(datetime_oadate)
-    )
+    await asyncio.to_thread(HotStart.saves_add, session.solver, path, float(datetime_oadate))
     n = await asyncio.to_thread(HotStart.saves_count, session.solver)
     return {
-        "status": "ok", "session_id": session_id,
-        "index": n - 1, "path": path, "datetime_oadate": datetime_oadate,
+        "status": "ok",
+        "session_id": session_id,
+        "index": n - 1,
+        "path": path,
+        "datetime_oadate": datetime_oadate,
     }
 
 
 @hotstart_mcp.tool()
 async def saves_set(
-    ctx: Context, session_id: str = "default",
-    index: int = 0, path: str | None = None,
+    ctx: Context,
+    session_id: str = "default",
+    index: int = 0,
+    path: str | None = None,
     datetime_oadate: float | None = None,
 ) -> dict:
     """Update the path and/or datetime of the I{index}-th scheduled save.
@@ -272,15 +277,16 @@ async def saves_set(
             HotStart.saves_set_datetime, session.solver, index, float(datetime_oadate)
         )
     return {
-        "status": "ok", "session_id": session_id, "index": index,
-        "path": path, "datetime_oadate": datetime_oadate,
+        "status": "ok",
+        "session_id": session_id,
+        "index": index,
+        "path": path,
+        "datetime_oadate": datetime_oadate,
     }
 
 
 @hotstart_mcp.tool()
-async def saves_remove(
-    ctx: Context, session_id: str = "default", index: int = 0
-) -> dict:
+async def saves_remove(ctx: Context, session_id: str = "default", index: int = 0) -> dict:
     """Remove the I{index}-th scheduled save. Trailing entries shift down."""
     from openswmm.engine import HotStart
 

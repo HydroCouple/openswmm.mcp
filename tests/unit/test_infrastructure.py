@@ -82,7 +82,9 @@ class TestTransects:
 
         ctx = await _create_building_session(session_manager, "infra_tx_add")
         result = await add_transect(
-            ctx, session_id="infra_tx_add", transect_id="TX1",
+            ctx,
+            session_id="infra_tx_add",
+            transect_id="TX1",
         )
         assert result["status"] == "ok"
         assert result["id"] == "TX1"
@@ -111,13 +113,18 @@ class TestTransects:
             ctx,
             session_id="infra_tx_full",
             transect_index=0,
-            n_left=0.05, n_right=0.05, n_channel=0.03,
+            n_left=0.05,
+            n_right=0.05,
+            n_channel=0.03,
         )
         # Stations along an asymmetric overbank profile.
         for s, e in [(0, 100), (10, 95), (20, 90), (30, 95), (40, 100)]:
             r = await add_transect_station(
-                ctx, session_id="infra_tx_full",
-                transect_index=0, station=float(s), elevation=float(e),
+                ctx,
+                session_id="infra_tx_full",
+                transect_index=0,
+                station=float(s),
+                elevation=float(e),
             )
             assert r["status"] == "ok"
 
@@ -167,7 +174,10 @@ class TestStreets:
         await add_street(ctx, session_id="infra_st_bad", street_id="ST")
         with pytest.raises(ToolError, match="sides must be 1 or 2"):
             await set_street_params(
-                ctx, session_id="infra_st_bad", street_index=0, sides=3,
+                ctx,
+                session_id="infra_st_bad",
+                street_index=0,
+                sides=3,
             )
 
     async def test_empty_street_id_rejected(self, session_manager):
@@ -190,7 +200,10 @@ class TestInlets:
         ctx = await _create_building_session(session_manager, "infra_in_t")
         with pytest.raises(ToolError, match="inlet_type must not be empty"):
             await add_inlet(
-                ctx, session_id="infra_in_t", inlet_id="I1", inlet_type="",
+                ctx,
+                session_id="infra_in_t",
+                inlet_id="I1",
+                inlet_type="",
             )
 
 
@@ -205,7 +218,10 @@ class TestLidControls:
 
         ctx = await _create_building_session(session_manager, "infra_lid_s")
         result = await add_lid(
-            ctx, session_id="infra_lid_s", lid_id="BIO1", lid_type="bio_cell",
+            ctx,
+            session_id="infra_lid_s",
+            lid_id="BIO1",
+            lid_type="bio_cell",
         )
         assert result["status"] == "ok"
         assert result["index"] == 0
@@ -216,7 +232,10 @@ class TestLidControls:
 
         ctx = await _create_building_session(session_manager, "infra_lid_i")
         result = await add_lid(
-            ctx, session_id="infra_lid_i", lid_id="L", lid_type=5,  # RAIN_BARREL
+            ctx,
+            session_id="infra_lid_i",
+            lid_id="L",
+            lid_type=5,  # RAIN_BARREL
         )
         assert result["status"] == "ok"
 
@@ -226,7 +245,10 @@ class TestLidControls:
         ctx = await _create_building_session(session_manager, "infra_lid_bad")
         with pytest.raises(ToolError, match="Unknown lid_type"):
             await add_lid(
-                ctx, session_id="infra_lid_bad", lid_id="L", lid_type="bogus",
+                ctx,
+                session_id="infra_lid_bad",
+                lid_id="L",
+                lid_type="bogus",
             )
 
     async def test_lid_layer_setters_all_succeed(self, session_manager):
@@ -240,24 +262,45 @@ class TestLidControls:
 
         ctx = await _create_building_session(session_manager, "infra_lid_layers")
         await add_lid(
-            ctx, session_id="infra_lid_layers", lid_id="L_FULL",
+            ctx,
+            session_id="infra_lid_layers",
+            lid_id="L_FULL",
             lid_type="bio_cell",
         )
         r1 = await set_lid_surface(
-            ctx, session_id="infra_lid_layers", lid_index=0,
-            storage=6.0, roughness=0.1, slope=0.01,
+            ctx,
+            session_id="infra_lid_layers",
+            lid_index=0,
+            storage=6.0,
+            roughness=0.1,
+            slope=0.01,
         )
         r2 = await set_lid_soil(
-            ctx, session_id="infra_lid_layers", lid_index=0,
-            thick=12.0, porosity=0.5, fc=0.2, wp=0.1, ksat=0.5, kslope=10.0,
+            ctx,
+            session_id="infra_lid_layers",
+            lid_index=0,
+            thick=12.0,
+            porosity=0.5,
+            fc=0.2,
+            wp=0.1,
+            ksat=0.5,
+            kslope=10.0,
         )
         r3 = await set_lid_storage(
-            ctx, session_id="infra_lid_layers", lid_index=0,
-            thick=12.0, void_frac=0.75, ksat=0.5,
+            ctx,
+            session_id="infra_lid_layers",
+            lid_index=0,
+            thick=12.0,
+            void_frac=0.75,
+            ksat=0.5,
         )
         r4 = await set_lid_drain(
-            ctx, session_id="infra_lid_layers", lid_index=0,
-            coeff=0.5, expon=0.5, offset=0.0,
+            ctx,
+            session_id="infra_lid_layers",
+            lid_index=0,
+            coeff=0.5,
+            expon=0.5,
+            offset=0.0,
         )
         for r in (r1, r2, r3, r4):
             assert r["status"] == "ok"
@@ -282,9 +325,15 @@ class TestLidUsage:
         ctx = await _opened_session(session_manager, inp_path, "infra_usage_bad")
         with pytest.raises(ToolError, match="ELEMENT_NOT_FOUND|not found"):
             await add_lid_usage(
-                ctx, session_id="infra_usage_bad",
-                subcatch_id="NOSUCH", lid_index=0,
-                number=1, area=1.0, width=1.0, init_sat=0.0, from_imperv=1.0,
+                ctx,
+                session_id="infra_usage_bad",
+                subcatch_id="NOSUCH",
+                lid_index=0,
+                number=1,
+                area=1.0,
+                width=1.0,
+                init_sat=0.0,
+                from_imperv=1.0,
             )
 
     async def test_invalid_area_rejected(self, session_manager, inp_path):
@@ -293,8 +342,15 @@ class TestLidUsage:
         ctx = await _opened_session(session_manager, inp_path, "infra_usage_a")
         with pytest.raises(ToolError, match="area must be positive"):
             await add_lid_usage(
-                ctx, session_id="infra_usage_a", subcatch_id="S1", lid_index=0,
-                number=1, area=0.0, width=1.0, init_sat=0.0, from_imperv=1.0,
+                ctx,
+                session_id="infra_usage_a",
+                subcatch_id="S1",
+                lid_index=0,
+                number=1,
+                area=0.0,
+                width=1.0,
+                init_sat=0.0,
+                from_imperv=1.0,
             )
 
     async def test_init_sat_out_of_range_rejected(self, session_manager, inp_path):
@@ -303,8 +359,15 @@ class TestLidUsage:
         ctx = await _opened_session(session_manager, inp_path, "infra_usage_is")
         with pytest.raises(ToolError, match=r"init_sat must be in \[0, 1\]"):
             await add_lid_usage(
-                ctx, session_id="infra_usage_is", subcatch_id="S1", lid_index=0,
-                number=1, area=1.0, width=1.0, init_sat=1.5, from_imperv=1.0,
+                ctx,
+                session_id="infra_usage_is",
+                subcatch_id="S1",
+                lid_index=0,
+                number=1,
+                area=1.0,
+                width=1.0,
+                init_sat=1.5,
+                from_imperv=1.0,
             )
 
     async def test_from_imperv_out_of_range_rejected(self, session_manager, inp_path):
@@ -313,8 +376,15 @@ class TestLidUsage:
         ctx = await _opened_session(session_manager, inp_path, "infra_usage_fi")
         with pytest.raises(ToolError, match=r"from_imperv must be in \[0, 1\]"):
             await add_lid_usage(
-                ctx, session_id="infra_usage_fi", subcatch_id="S1", lid_index=0,
-                number=1, area=1.0, width=1.0, init_sat=0.0, from_imperv=1.5,
+                ctx,
+                session_id="infra_usage_fi",
+                subcatch_id="S1",
+                lid_index=0,
+                number=1,
+                area=1.0,
+                width=1.0,
+                init_sat=0.0,
+                from_imperv=1.5,
             )
 
     async def test_number_below_one_rejected(self, session_manager, inp_path):
@@ -323,8 +393,15 @@ class TestLidUsage:
         ctx = await _opened_session(session_manager, inp_path, "infra_usage_n")
         with pytest.raises(ToolError, match="number must be >= 1"):
             await add_lid_usage(
-                ctx, session_id="infra_usage_n", subcatch_id="S1", lid_index=0,
-                number=0, area=1.0, width=1.0, init_sat=0.0, from_imperv=1.0,
+                ctx,
+                session_id="infra_usage_n",
+                subcatch_id="S1",
+                lid_index=0,
+                number=0,
+                area=1.0,
+                width=1.0,
+                init_sat=0.0,
+                from_imperv=1.0,
             )
 
     async def test_empty_subcatch_id_rejected(self, session_manager, inp_path):
@@ -333,8 +410,15 @@ class TestLidUsage:
         ctx = await _opened_session(session_manager, inp_path, "infra_usage_e")
         with pytest.raises(ToolError, match="subcatch_id must not be empty"):
             await add_lid_usage(
-                ctx, session_id="infra_usage_e", subcatch_id="", lid_index=0,
-                number=1, area=1.0, width=1.0, init_sat=0.0, from_imperv=1.0,
+                ctx,
+                session_id="infra_usage_e",
+                subcatch_id="",
+                lid_index=0,
+                number=1,
+                area=1.0,
+                width=1.0,
+                init_sat=0.0,
+                from_imperv=1.0,
             )
 
 

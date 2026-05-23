@@ -443,24 +443,26 @@ async def events_count(ctx: Context, session_id: str = "default") -> dict:
 
 
 @lifecycle_mcp.tool()
-async def events_get(
-    ctx: Context, session_id: str = "default", index: int = 0
-) -> dict:
+async def events_get(ctx: Context, session_id: str = "default", index: int = 0) -> dict:
     """Return the start/end OADate of the I{index}-th event."""
     sm = get_session_manager(ctx)
     session = await sm.get_session(session_id)
     require_new_engine(session, "Events editor")
     start, end = await asyncio.to_thread(session.solver.events_get, index)
     return {
-        "session_id": session_id, "index": index,
-        "start_oadate": start, "end_oadate": end,
+        "session_id": session_id,
+        "index": index,
+        "start_oadate": start,
+        "end_oadate": end,
     }
 
 
 @lifecycle_mcp.tool()
 async def events_add(
-    ctx: Context, session_id: str = "default",
-    start_oadate: float = 0.0, end_oadate: float = 0.0,
+    ctx: Context,
+    session_id: str = "default",
+    start_oadate: float = 0.0,
+    end_oadate: float = 0.0,
 ) -> dict:
     """Append a new event window (OADate decimal days)."""
     if end_oadate <= start_oadate:
@@ -475,38 +477,45 @@ async def events_add(
         session.solver.events_add, float(start_oadate), float(end_oadate)
     )
     return {
-        "status": "ok", "session_id": session_id, "index": new_idx,
-        "start_oadate": start_oadate, "end_oadate": end_oadate,
+        "status": "ok",
+        "session_id": session_id,
+        "index": new_idx,
+        "start_oadate": start_oadate,
+        "end_oadate": end_oadate,
     }
 
 
 @lifecycle_mcp.tool()
 async def events_set(
-    ctx: Context, session_id: str = "default", index: int = 0,
-    start_oadate: float = 0.0, end_oadate: float = 0.0,
+    ctx: Context,
+    session_id: str = "default",
+    index: int = 0,
+    start_oadate: float = 0.0,
+    end_oadate: float = 0.0,
 ) -> dict:
     """Overwrite the I{index}-th event window."""
     if end_oadate <= start_oadate:
-        raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] end_oadate must be > start_oadate."
-        )
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] end_oadate must be > start_oadate.")
     sm = get_session_manager(ctx)
     session = await sm.get_session(session_id)
     require_new_engine(session, "Events editor")
     await asyncio.to_thread(
-        session.solver.events_set, index,
-        float(start_oadate), float(end_oadate),
+        session.solver.events_set,
+        index,
+        float(start_oadate),
+        float(end_oadate),
     )
     return {
-        "status": "ok", "session_id": session_id, "index": index,
-        "start_oadate": start_oadate, "end_oadate": end_oadate,
+        "status": "ok",
+        "session_id": session_id,
+        "index": index,
+        "start_oadate": start_oadate,
+        "end_oadate": end_oadate,
     }
 
 
 @lifecycle_mcp.tool()
-async def events_remove(
-    ctx: Context, session_id: str = "default", index: int = 0
-) -> dict:
+async def events_remove(ctx: Context, session_id: str = "default", index: int = 0) -> dict:
     """Remove the I{index}-th event; trailing entries shift down."""
     sm = get_session_manager(ctx)
     session = await sm.get_session(session_id)
@@ -526,9 +535,7 @@ async def events_clear(ctx: Context, session_id: str = "default") -> dict:
 
 
 @lifecycle_mcp.tool()
-async def is_between_events(
-    ctx: Context, session_id: str = "default"
-) -> dict:
+async def is_between_events(ctx: Context, session_id: str = "default") -> dict:
     """Return whether the current sim time falls inside a defined event window."""
     sm = get_session_manager(ctx)
     session = await sm.get_session(session_id)
@@ -538,9 +545,7 @@ async def is_between_events(
 
 
 @lifecycle_mcp.tool()
-async def get_steady_state_skip(
-    ctx: Context, session_id: str = "default"
-) -> dict:
+async def get_steady_state_skip(ctx: Context, session_id: str = "default") -> dict:
     """Return whether SKIP_STEADY_STATE routing skip is enabled."""
     sm = get_session_manager(ctx)
     session = await sm.get_session(session_id)

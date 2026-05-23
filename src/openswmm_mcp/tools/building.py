@@ -227,6 +227,7 @@ async def add_node(
         # so the subsequent setters target the right slot.
         await asyncio.to_thread(builder.add_node, node_id, type_code)
         from openswmm.engine import Nodes
+
         nodes_accessor = Nodes(builder)
         idx = await asyncio.to_thread(nodes_accessor.get_index, node_id)
         if idx < 0:
@@ -354,6 +355,7 @@ async def add_link(
     try:
         await asyncio.to_thread(builder.add_link, link_id, type_code)
         from openswmm.engine import Links, Nodes
+
         links_accessor = Links(builder)
         nodes_accessor = Nodes(builder)
         idx = await asyncio.to_thread(links_accessor.get_index, link_id)
@@ -364,14 +366,10 @@ async def add_link(
             )
         from_idx = await asyncio.to_thread(nodes_accessor.get_index, from_node)
         if from_idx < 0:
-            raise ToolError(
-                f"[{ErrorCode.ELEMENT_NOT_FOUND}] from_node '{from_node}' not found."
-            )
+            raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] from_node '{from_node}' not found.")
         to_idx = await asyncio.to_thread(nodes_accessor.get_index, to_node)
         if to_idx < 0:
-            raise ToolError(
-                f"[{ErrorCode.ELEMENT_NOT_FOUND}] to_node '{to_node}' not found."
-            )
+            raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] to_node '{to_node}' not found.")
         await asyncio.to_thread(builder.set_link_nodes, idx, from_idx, to_idx)
         await asyncio.to_thread(builder.set_link_length, idx, length)
         await asyncio.to_thread(builder.set_link_roughness, idx, roughness)
@@ -481,6 +479,7 @@ async def add_subcatchment(
     try:
         await asyncio.to_thread(builder.add_subcatchment, subcatch_id)
         from openswmm.engine import Nodes, Subcatchments
+
         sc_accessor = Subcatchments(builder)
         idx = await asyncio.to_thread(sc_accessor.get_index, subcatch_id)
         if idx < 0:
@@ -498,8 +497,7 @@ async def add_subcatchment(
             outlet_idx = await asyncio.to_thread(nodes_accessor.get_index, outlet_node)
             if outlet_idx < 0:
                 raise ToolError(
-                    f"[{ErrorCode.ELEMENT_NOT_FOUND}] outlet_node '{outlet_node}' "
-                    f"not found."
+                    f"[{ErrorCode.ELEMENT_NOT_FOUND}] outlet_node '{outlet_node}' not found."
                 )
             await asyncio.to_thread(sc_accessor.set_outlet, idx, outlet_idx)
     except ToolError:
@@ -897,9 +895,7 @@ async def add_pollutant(
     units_key = units.strip().lower()
     if units_key not in _POLLUTANT_UNITS:
         valid = ", ".join(sorted(_POLLUTANT_UNITS))
-        raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] Unknown units '{units}'. Valid: {valid}."
-        )
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] Unknown units '{units}'. Valid: {valid}.")
     units_code = _POLLUTANT_UNITS[units_key]
 
     sm = get_session_manager(ctx)
@@ -940,7 +936,10 @@ async def add_pollutant(
 
     logger.info(
         "Session '%s': pollutant '%s' added at index %d (units=%s).",
-        session_id, pollutant_id, new_idx, units,
+        session_id,
+        pollutant_id,
+        new_idx,
+        units,
     )
     return BuildingResult(
         status="ok",

@@ -42,14 +42,11 @@ async def _get_target(ctx: Context, session_id: str) -> tuple[SimSession, Any]:
     session = await sm.get_session(session_id)
     require_new_engine(session, "Model (title / options / userflags)")
     if session.state == "closed":
-        raise ToolError(
-            f"[{ErrorCode.INVALID_STATE}] Session '{session_id}' is closed."
-        )
+        raise ToolError(f"[{ErrorCode.INVALID_STATE}] Session '{session_id}' is closed.")
     if session.state == "building":
         if session.model_builder is None:
             raise ToolError(
-                f"[{ErrorCode.INVALID_STATE}] Session '{session_id}' has no "
-                f"ModelBuilder attached."
+                f"[{ErrorCode.INVALID_STATE}] Session '{session_id}' has no ModelBuilder attached."
             )
         return session, session.model_builder
     return session, session.solver
@@ -72,8 +69,7 @@ async def _get_builder(ctx: Context, session_id: str) -> tuple[SimSession, Any]:
         )
     if session.model_builder is None:
         raise ToolError(
-            f"[{ErrorCode.INVALID_STATE}] Session '{session_id}' has no "
-            f"ModelBuilder attached."
+            f"[{ErrorCode.INVALID_STATE}] Session '{session_id}' has no ModelBuilder attached."
         )
     return session, session.model_builder
 
@@ -92,14 +88,14 @@ async def get_title_count(ctx: Context, session_id: str = "default") -> dict:
 
 
 @model_mcp.tool()
-async def get_title_line(
-    ctx: Context, session_id: str = "default", line_index: int = 0
-) -> dict:
+async def get_title_line(ctx: Context, session_id: str = "default", line_index: int = 0) -> dict:
     """Return the I{line_index}-th line of the [TITLE] section (BUILDING)."""
     _, target = await _get_builder(ctx, session_id)
     text = await asyncio.to_thread(target.get_title_line, line_index)
     return {
-        "session_id": session_id, "line_index": line_index, "text": text,
+        "session_id": session_id,
+        "line_index": line_index,
+        "text": text,
     }
 
 
@@ -117,14 +113,14 @@ async def get_title(ctx: Context, session_id: str = "default") -> dict:
 
     lines = await asyncio.to_thread(_read_all)
     return {
-        "session_id": session_id, "count": len(lines), "lines": lines,
+        "session_id": session_id,
+        "count": len(lines),
+        "lines": lines,
     }
 
 
 @model_mcp.tool()
-async def add_title_line(
-    ctx: Context, session_id: str = "default", text: str = ""
-) -> dict:
+async def add_title_line(ctx: Context, session_id: str = "default", text: str = "") -> dict:
     """Append a line to the [TITLE] section."""
     if not text:
         raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] text must not be empty.")
@@ -134,9 +130,7 @@ async def add_title_line(
 
 
 @model_mcp.tool()
-async def set_title(
-    ctx: Context, session_id: str = "default", text: str = ""
-) -> dict:
+async def set_title(ctx: Context, session_id: str = "default", text: str = "") -> dict:
     """Replace all [TITLE] lines with new text (newline-separated, BUILDING)."""
     _, target = await _get_builder(ctx, session_id)
     await asyncio.to_thread(target.set_title, text)
@@ -157,9 +151,7 @@ async def clear_title(ctx: Context, session_id: str = "default") -> dict:
 
 
 @model_mcp.tool()
-async def get_option(
-    ctx: Context, session_id: str = "default", key: str = ""
-) -> dict:
+async def get_option(ctx: Context, session_id: str = "default", key: str = "") -> dict:
     """Return a SWMM option value as a string.
 
     Example keys: ``FLOW_UNITS``, ``FLOW_ROUTING``, ``ROUTING_STEP``,
@@ -175,8 +167,10 @@ async def get_option(
 
 @model_mcp.tool()
 async def set_option(
-    ctx: Context, session_id: str = "default",
-    key: str = "", value: str = "",
+    ctx: Context,
+    session_id: str = "default",
+    key: str = "",
+    value: str = "",
 ) -> dict:
     """Set a SWMM option (string key, string value)."""
     if not key:
@@ -187,9 +181,7 @@ async def set_option(
 
 
 @model_mcp.tool()
-async def get_option_ext(
-    ctx: Context, session_id: str = "default", key: str = ""
-) -> dict:
+async def get_option_ext(ctx: Context, session_id: str = "default", key: str = "") -> dict:
     """Return an extension option value (unknown to base SWMM)."""
     if not key:
         raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] key must not be empty.")
@@ -200,8 +192,10 @@ async def get_option_ext(
 
 @model_mcp.tool()
 async def set_option_ext(
-    ctx: Context, session_id: str = "default",
-    key: str = "", value: str = "",
+    ctx: Context,
+    session_id: str = "default",
+    key: str = "",
+    value: str = "",
 ) -> dict:
     """Set an extension option."""
     if not key:
@@ -224,91 +218,80 @@ async def get_crs(ctx: Context, session_id: str = "default") -> dict:
 # ===========================================================================
 
 
-async def _userflag_get(
-    ctx, session_id, name, method, value_key
-) -> dict:
+async def _userflag_get(ctx, session_id, name, method, value_key) -> dict:
     if not name:
         raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] name must not be empty.")
     _, target = await _get_builder(ctx, session_id)
     v = await asyncio.to_thread(getattr(target, method), name)
     return {
-        "session_id": session_id, "name": name, value_key: v,
+        "session_id": session_id,
+        "name": name,
+        value_key: v,
     }
 
 
-async def _userflag_set(
-    ctx, session_id, name, value, method, value_key
-) -> dict:
+async def _userflag_set(ctx, session_id, name, value, method, value_key) -> dict:
     if not name:
         raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] name must not be empty.")
     _, target = await _get_builder(ctx, session_id)
     await asyncio.to_thread(getattr(target, method), name, value)
     return {
-        "status": "ok", "session_id": session_id, "name": name, value_key: value,
+        "status": "ok",
+        "session_id": session_id,
+        "name": name,
+        value_key: value,
     }
 
 
 @model_mcp.tool()
-async def get_userflag_bool(
-    ctx: Context, session_id: str = "default", name: str = ""
-) -> dict:
+async def get_userflag_bool(ctx: Context, session_id: str = "default", name: str = "") -> dict:
     """Return a boolean user flag (application-defined metadata)."""
-    return await _userflag_get(
-        ctx, session_id, name, "get_userflag_bool", "value"
-    )
+    return await _userflag_get(ctx, session_id, name, "get_userflag_bool", "value")
 
 
 @model_mcp.tool()
 async def set_userflag_bool(
-    ctx: Context, session_id: str = "default",
-    name: str = "", value: bool = False,
+    ctx: Context,
+    session_id: str = "default",
+    name: str = "",
+    value: bool = False,
 ) -> dict:
     """Set a boolean user flag."""
-    return await _userflag_set(
-        ctx, session_id, name, bool(value), "set_userflag_bool", "value"
-    )
+    return await _userflag_set(ctx, session_id, name, bool(value), "set_userflag_bool", "value")
 
 
 @model_mcp.tool()
-async def get_userflag_int(
-    ctx: Context, session_id: str = "default", name: str = ""
-) -> dict:
+async def get_userflag_int(ctx: Context, session_id: str = "default", name: str = "") -> dict:
     """Return an integer user flag."""
-    return await _userflag_get(
-        ctx, session_id, name, "get_userflag_int", "value"
-    )
+    return await _userflag_get(ctx, session_id, name, "get_userflag_int", "value")
 
 
 @model_mcp.tool()
 async def set_userflag_int(
-    ctx: Context, session_id: str = "default",
-    name: str = "", value: int = 0,
+    ctx: Context,
+    session_id: str = "default",
+    name: str = "",
+    value: int = 0,
 ) -> dict:
     """Set an integer user flag."""
-    return await _userflag_set(
-        ctx, session_id, name, int(value), "set_userflag_int", "value"
-    )
+    return await _userflag_set(ctx, session_id, name, int(value), "set_userflag_int", "value")
 
 
 @model_mcp.tool()
-async def get_userflag_real(
-    ctx: Context, session_id: str = "default", name: str = ""
-) -> dict:
+async def get_userflag_real(ctx: Context, session_id: str = "default", name: str = "") -> dict:
     """Return a real-valued user flag."""
-    return await _userflag_get(
-        ctx, session_id, name, "get_userflag_real", "value"
-    )
+    return await _userflag_get(ctx, session_id, name, "get_userflag_real", "value")
 
 
 @model_mcp.tool()
 async def set_userflag_real(
-    ctx: Context, session_id: str = "default",
-    name: str = "", value: float = 0.0,
+    ctx: Context,
+    session_id: str = "default",
+    name: str = "",
+    value: float = 0.0,
 ) -> dict:
     """Set a real-valued user flag."""
-    return await _userflag_set(
-        ctx, session_id, name, float(value), "set_userflag_real", "value"
-    )
+    return await _userflag_set(ctx, session_id, name, float(value), "set_userflag_real", "value")
 
 
 # ===========================================================================
@@ -325,59 +308,57 @@ async def plugins_count(ctx: Context, session_id: str = "default") -> dict:
 
 
 @model_mcp.tool()
-async def plugin_get(
-    ctx: Context, session_id: str = "default", index: int = 0
-) -> dict:
+async def plugin_get(ctx: Context, session_id: str = "default", index: int = 0) -> dict:
     """Return the (path, args) of the I{index}-th plugin entry."""
     _, target = await _get_builder(ctx, session_id)
     path, args = await asyncio.to_thread(target.plugin_get, index)
     return {
-        "session_id": session_id, "index": index,
-        "path": path, "args": args,
+        "session_id": session_id,
+        "index": index,
+        "path": path,
+        "args": args,
     }
 
 
 @model_mcp.tool()
 async def plugin_set(
-    ctx: Context, session_id: str = "default",
-    path_or_id: str = "", args: str = "",
+    ctx: Context,
+    session_id: str = "default",
+    path_or_id: str = "",
+    args: str = "",
 ) -> dict:
     """Add or update a plugin entry.
 
     ``path_or_id`` is the library path, plugin id, or ``id:version`` string.
     """
     if not path_or_id:
-        raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] path_or_id must not be empty."
-        )
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] path_or_id must not be empty.")
     _, target = await _get_builder(ctx, session_id)
     await asyncio.to_thread(target.plugin_set, path_or_id, args)
     return {
-        "status": "ok", "session_id": session_id,
-        "path_or_id": path_or_id, "args": args,
+        "status": "ok",
+        "session_id": session_id,
+        "path_or_id": path_or_id,
+        "args": args,
     }
 
 
 @model_mcp.tool()
-async def plugin_remove(
-    ctx: Context, session_id: str = "default", path_or_id: str = ""
-) -> dict:
+async def plugin_remove(ctx: Context, session_id: str = "default", path_or_id: str = "") -> dict:
     """Remove the plugin entry matching ``path_or_id``."""
     if not path_or_id:
-        raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] path_or_id must not be empty."
-        )
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] path_or_id must not be empty.")
     _, target = await _get_builder(ctx, session_id)
     await asyncio.to_thread(target.plugin_remove, path_or_id)
     return {
-        "status": "ok", "session_id": session_id, "removed": path_or_id,
+        "status": "ok",
+        "session_id": session_id,
+        "removed": path_or_id,
     }
 
 
 @model_mcp.tool()
-async def files_get(
-    ctx: Context, session_id: str = "default", key: str = ""
-) -> dict:
+async def files_get(ctx: Context, session_id: str = "default", key: str = "") -> dict:
     """Return the path / value for a [FILES] section field.
 
     Common keys: ``RAINFALL_PATH``, ``RUNOFF_PATH``, ``RDII_PATH``,
@@ -392,8 +373,10 @@ async def files_get(
 
 @model_mcp.tool()
 async def files_set(
-    ctx: Context, session_id: str = "default",
-    key: str = "", value: str = "",
+    ctx: Context,
+    session_id: str = "default",
+    key: str = "",
+    value: str = "",
 ) -> dict:
     """Set a [FILES] section field. Empty value clears the field."""
     if not key:
@@ -405,8 +388,10 @@ async def files_set(
 
 @model_mcp.tool()
 async def write_with_plugin(
-    ctx: Context, session_id: str = "default",
-    path: str = "", output_plugin_id: str = "",
+    ctx: Context,
+    session_id: str = "default",
+    path: str = "",
+    output_plugin_id: str = "",
 ) -> dict:
     """Write the model to disk via an output plugin (or built-in writer).
 
@@ -419,6 +404,8 @@ async def write_with_plugin(
     _, target = await _get_builder(ctx, session_id)
     await asyncio.to_thread(target.write_with_plugin, path, output_plugin_id)
     return {
-        "status": "ok", "session_id": session_id,
-        "path": path, "output_plugin_id": output_plugin_id,
+        "status": "ok",
+        "session_id": session_id,
+        "path": path,
+        "output_plugin_id": output_plugin_id,
     }
