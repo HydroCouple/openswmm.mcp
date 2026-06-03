@@ -150,6 +150,20 @@ async def clear_title(ctx: Context, session_id: str = "default") -> dict:
 # ===========================================================================
 
 
+def _options_mapping(target):
+    """Return the v1 ``options`` MutableMapping when present, else ``None``.
+
+    ``ModelBuilder`` keeps the v0 ``get_option`` / ``set_option`` method
+    pair (no ``options`` mapping attribute), while ``Solver`` (and the
+    legacy adapter shim) expose ``options`` as a mapping.  Tools that
+    need to work against both branch on this helper.
+    """
+    options = getattr(target, "options", None)
+    if options is not None and hasattr(options, "__getitem__"):
+        return options
+    return None
+
+
 @model_mcp.tool()
 async def get_option(ctx: Context, session_id: str = "default", key: str = "") -> dict:
     """Return a SWMM option value as a string.
@@ -161,7 +175,14 @@ async def get_option(ctx: Context, session_id: str = "default", key: str = "") -
     if not key:
         raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] key must not be empty.")
     _, target = await _get_target(ctx, session_id)
-    value = await asyncio.to_thread(target.get_option, key)
+
+    def _read() -> str:
+        options = _options_mapping(target)
+        if options is not None:
+            return options[key]
+        return target.get_option(key)
+
+    value = await asyncio.to_thread(_read)
     return {"session_id": session_id, "key": key, "value": value}
 
 
@@ -176,8 +197,133 @@ async def set_option(
     if not key:
         raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] key must not be empty.")
     _, target = await _get_target(ctx, session_id)
-    await asyncio.to_thread(target.set_option, key, value)
+
+    def _write() -> None:
+        options = _options_mapping(target)
+        if options is not None and hasattr(options, "__setitem__"):
+            options[key] = value
+            return
+        target.set_option(key, value)
+
+    await asyncio.to_thread(_write)
     return {"status": "ok", "session_id": session_id, "key": key, "value": value}
+
+
+# US-customary vs SI partition of the FLOW_UNITS tokens. CFS/GPM/MGD are US
+# customary; CMS/LPS/MLD are SI. Kept local so the tool reports units even
+# when running against an engine build without the ``Solver.flow_units``
+# property (it derives the answer from the FLOW_UNITS option string).
+_US_FLOW_UNITS = frozenset({"CFS", "GPM", "MGD"})
+_SI_FLOW_UNITS = frozenset({"CMS", "LPS", "MLD"})
+
+
+@model_mcp.tool()
+async def get_unit_system(ctx: Context, session_id: str = "default") -> dict:
+    """Report the model's flow units and unit system.
+
+    Because the engine returns every quantity in the units declared in the
+    ``.inp`` file (project units), a client must know those units to
+    interpret returned magnitudes. This tool resolves ``[OPTIONS]
+    FLOW_UNITS`` and classifies it:
+
+    * ``flow_units`` — the raw token, e.g. ``"CFS"`` / ``"CMS"``.
+    * ``unit_system`` — ``"US"`` (CFS/GPM/MGD) or ``"SI"`` (CMS/LPS/MLD).
+
+    Works in BUILDING (ModelBuilder) and OPENED/RUNNING/ENDED (Solver)
+    states.
+    """
+    _, target = await _get_target(ctx, session_id)
+
+    def _read() -> str:
+        options = _options_mapping(target)
+        if options is not None:
+            return options["FLOW_UNITS"]
+        return target.get_option("FLOW_UNITS")
+
+    raw = await asyncio.to_thread(_read)
+    token = raw.strip().upper()
+    if token in _US_FLOW_UNITS:
+        system = "US"
+    elif token in _SI_FLOW_UNITS:
+        system = "SI"
+    else:
+        raise ToolError(
+            f"[{ErrorCode.VALIDATION_ERROR}] Unrecognised FLOW_UNITS token "
+            f"{raw!r}."
+        )
+    return {
+        "session_id": session_id,
+        "flow_units": token,
+        "unit_system": system,
+    }
+
+
+async def _list_named_collection(ctx, session_id, attr, label):
+    """Return ``{count, ids}`` for a name-keyed Solver collection."""
+    _, target = await _get_target(ctx, session_id)
+    coll = getattr(target, attr, None)
+    if coll is None:
+        raise ToolError(
+            f"[{ErrorCode.VALIDATION_ERROR}] {label} are not available in this "
+            f"session state."
+        )
+    ids = await asyncio.to_thread(lambda: list(coll))
+    return {"session_id": session_id, "count": len(ids), "ids": ids}
+
+
+@model_mcp.tool()
+async def list_aquifers(ctx: Context, session_id: str = "default") -> dict:
+    """List the model's ``[AQUIFERS]`` entries.
+
+    Returns ``count`` and the ordered list of aquifer ``ids``.
+    """
+    return await _list_named_collection(ctx, session_id, "aquifers", "Aquifers")
+
+
+@model_mcp.tool()
+async def list_snowpacks(ctx: Context, session_id: str = "default") -> dict:
+    """List the model's ``[SNOWPACKS]`` entries.
+
+    Returns ``count`` and the ordered list of snowpack ``ids``.
+    """
+    return await _list_named_collection(ctx, session_id, "snowpacks", "Snowpacks")
+
+
+@model_mcp.tool()
+async def get_pattern_factors(
+    ctx: Context, session_id: str = "default", pattern_id: str = ""
+) -> dict:
+    """Read a time pattern's type and multiplier factors.
+
+    Surfaces ``solver.patterns[...]`` — the multiplier list whose length
+    depends on the pattern type (12 monthly, 7 daily, 24 hourly/weekend).
+
+    Parameters
+    ----------
+    pattern_id:
+        The ``[PATTERNS]`` id to read (required).
+    """
+    if not pattern_id:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] pattern_id must not be empty.")
+    _, target = await _get_target(ctx, session_id)
+    patterns = getattr(target, "patterns", None)
+    if patterns is None:
+        raise ToolError(
+            f"[{ErrorCode.VALIDATION_ERROR}] Patterns are not available in this "
+            f"session state."
+        )
+
+    def _read():
+        pat = patterns[pattern_id]
+        return {"type": pat.type.name, "factors": list(pat.factors)}
+
+    try:
+        data = await asyncio.to_thread(_read)
+    except (KeyError, IndexError) as exc:
+        raise ToolError(
+            f"[{ErrorCode.ELEMENT_NOT_FOUND}] No pattern with id {pattern_id!r}."
+        ) from exc
+    return {"session_id": session_id, "pattern_id": pattern_id, **data}
 
 
 @model_mcp.tool()
@@ -186,7 +332,17 @@ async def get_option_ext(ctx: Context, session_id: str = "default", key: str = "
     if not key:
         raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] key must not be empty.")
     _, target = await _get_target(ctx, session_id)
-    value = await asyncio.to_thread(target.get_option_ext, key)
+
+    def _read() -> str:
+        options = _options_mapping(target)
+        if options is not None:
+            # v1 Solver: extension options live on options.ext.
+            ext = getattr(options, "ext", None)
+            if ext is not None:
+                return ext[key]
+        return target.get_option_ext(key)
+
+    value = await asyncio.to_thread(_read)
     return {"session_id": session_id, "key": key, "value": value}
 
 
@@ -201,7 +357,17 @@ async def set_option_ext(
     if not key:
         raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] key must not be empty.")
     _, target = await _get_target(ctx, session_id)
-    await asyncio.to_thread(target.set_option_ext, key, value)
+
+    def _write() -> None:
+        options = _options_mapping(target)
+        if options is not None:
+            ext = getattr(options, "ext", None)
+            if ext is not None and hasattr(ext, "__setitem__"):
+                ext[key] = value
+                return
+        target.set_option_ext(key, value)
+
+    await asyncio.to_thread(_write)
     return {"status": "ok", "session_id": session_id, "key": key, "value": value}
 
 
@@ -209,7 +375,17 @@ async def set_option_ext(
 async def get_crs(ctx: Context, session_id: str = "default") -> dict:
     """Return the model's coordinate reference system string."""
     _, target = await _get_target(ctx, session_id)
-    crs = await asyncio.to_thread(target.get_crs)
+
+    def _read() -> str:
+        # Solver: ``crs`` is a property; ModelBuilder: ``get_crs()`` method.
+        if not hasattr(target, "get_crs"):
+            return target.crs
+        crs_attr = getattr(target, "crs", None)
+        if crs_attr is not None and not callable(crs_attr):
+            return crs_attr
+        return target.get_crs()
+
+    crs = await asyncio.to_thread(_read)
     return {"session_id": session_id, "crs": crs}
 
 
