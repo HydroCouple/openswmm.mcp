@@ -107,26 +107,27 @@ class TestSimSession:
 
         nodes = session.nodes
         assert nodes is not None
-        assert nodes.count() == reference_model.NODE_COUNT
+        # v1: collections expose the container protocol — use len().
+        assert len(nodes) == reference_model.NODE_COUNT
         # Second access returns the same object (cached)
         assert session.nodes is nodes
 
     async def test_lazy_links(self, open_session, reference_model):
         session = await open_session()
         links = session.links
-        assert links.count() == reference_model.LINK_COUNT
+        assert len(links) == reference_model.LINK_COUNT
         assert session.links is links
 
     async def test_lazy_subcatchments(self, open_session, reference_model):
         session = await open_session()
         sc = session.subcatchments
-        assert sc.count() == reference_model.SUBCATCH_COUNT
+        assert len(sc) == reference_model.SUBCATCH_COUNT
         assert session.subcatchments is sc
 
     async def test_lazy_gages(self, open_session, reference_model):
         session = await open_session()
         gages = session.gages
-        assert gages.count() == reference_model.GAGE_COUNT
+        assert len(gages) == reference_model.GAGE_COUNT
         assert session.gages is gages
 
     async def test_lazy_attribute_error(self, open_session):
@@ -165,3 +166,80 @@ class TestSimSession:
     async def test_engine_kind_legacy(self, session_manager, inp_path):
         session = await session_manager.create_session("legacy_eng", inp_path, engine="legacy")
         assert session.engine_kind == "legacy"
+
+
+# ---------------------------------------------------------------------------
+# TestSessionMeta — Phase 4 static-metadata cache
+# ---------------------------------------------------------------------------
+
+
+class TestSessionMeta:
+    """Tests for the ``session.meta`` lazy static-metadata cache added in
+    Phase 4 of the C_API_BINDINGS_MCP_IMPROVEMENT_PLAN.
+
+    The cache populates from the engine's bulk getters on first access and
+    is shared across all tool calls for the session — every hot-path tool
+    in the MCP server is expected to read ids/counts from here rather than
+    looping ``get_id`` through the C ABI N times.
+    """
+
+    async def test_meta_returns_same_instance(self, open_session):
+        """Subsequent accesses must return the same SessionMeta object,
+        otherwise the cache would be defeated."""
+        session = await open_session()
+        meta1 = session.meta
+        meta2 = session.meta
+        assert meta1 is meta2
+
+    async def test_counts_match_scalar_count_attrs(self, open_session):
+        """``meta.n_nodes`` etc. must agree with ``len(collection)``
+        (v1 container protocol — single source of truth on the C side)."""
+        session = await open_session()
+        assert session.meta.n_nodes == len(session.nodes)
+        assert session.meta.n_links == len(session.links)
+        assert session.meta.n_subcatchments == len(session.subcatchments)
+
+    async def test_node_ids_match_scalar_getter(self, open_session):
+        """Cached id list must agree with per-index ``nodes.get_id`` —
+        catches a regression where the bulk getter reads the wrong
+        column or stride is off."""
+        session = await open_session()
+        ids = session.meta.node_ids
+        assert len(ids) == len(session.nodes)
+        for i, cached in enumerate(ids):
+            assert cached == session.nodes.get_id(i), f"node {i}"
+
+    async def test_link_ids_match_scalar_getter(self, open_session):
+        session = await open_session()
+        ids = session.meta.link_ids
+        assert len(ids) == len(session.links)
+        for i, cached in enumerate(ids):
+            assert cached == session.links.get_id(i), f"link {i}"
+
+    async def test_subcatch_ids_match_scalar_getter(self, open_session):
+        session = await open_session()
+        ids = session.meta.subcatch_ids
+        assert len(ids) == len(session.subcatchments)
+        for i, cached in enumerate(ids):
+            assert cached == session.subcatchments.get_id(i), f"subcatch {i}"
+
+    async def test_invalidate_meta_drops_cache(self, open_session):
+        """After ``invalidate_meta()`` a subsequent access must rebuild
+        the cache (verifies the cache is truly lazy and not a stale
+        snapshot)."""
+        session = await open_session()
+        m1 = session.meta
+        _ = m1.node_ids  # force population
+        session.invalidate_meta()
+        m2 = session.meta
+        assert m1 is not m2
+
+    async def test_repeated_id_access_is_cheap(self, open_session):
+        """Once populated the id list should be returned without
+        re-fetching — verifies the cache is genuinely a cache."""
+        session = await open_session()
+        first = session.meta.node_ids
+        second = session.meta.node_ids
+        # Identity, not just equality — the second call should return the
+        # exact same list object.
+        assert first is second

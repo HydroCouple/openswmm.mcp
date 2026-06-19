@@ -30,7 +30,8 @@ before the AttributeError path is ever hit.
 
 from __future__ import annotations
 
-from datetime import datetime
+from collections.abc import Iterator
+from datetime import datetime, timedelta
 from typing import Any
 
 from openswmm.legacy.engine import (
@@ -223,20 +224,212 @@ class _LegacySolverAdapter:
         # DPS_* / event_count / steady_state_skip via the toolkit API.
         raise KeyError(f"Option '{key}' is not exposed by the legacy engine.")
 
+    # ------------------------------------------------------------------------
+    # v1-shape properties (alongside the v0 get_* methods above).
+    #
+    # Tools that have migrated to the v1 surface read these property names
+    # directly (``solver.start_datetime``, ``solver.options[key]``, …).  The
+    # underlying SWMM 5 toolkit only surfaces a small subset of options, so
+    # ``options`` is read-only and raises ``KeyError`` on unsupported keys.
+    # ------------------------------------------------------------------------
+
+    @property
+    def start_datetime(self) -> datetime:
+        if self._epoch is None:
+            self._epoch = self._solver.start_datetime
+        return self._epoch
+
+    @property
+    def end_datetime(self) -> datetime:
+        if self._end_dt is None:
+            self._end_dt = self._solver.end_datetime
+        return self._end_dt
+
+    @property
+    def current_datetime(self) -> datetime:
+        if self._last_current_dt is not None:
+            return self._last_current_dt
+        return self._solver.current_datetime
+
+    @property
+    def routing_step(self) -> timedelta:
+        return timedelta(seconds=float(self._solver.routing_step))
+
+    @property
+    def options(self) -> "_LegacyOptionsView":
+        view = getattr(self, "_options_view", None)
+        if view is None:
+            view = _LegacyOptionsView(self)
+            self._options_view = view
+        return view
+
+
+class _LegacyOptionsView:
+    """Read-only v1-shape ``solver.options`` view for the legacy backend.
+
+    Forwards ``[key]`` reads through :meth:`_LegacySolverAdapter.get_option`.
+    Iteration yields the keys legacy actually supports; ``__contains__`` is
+    a try/except over ``[key]``.  Writes are not supported — the legacy
+    toolkit doesn't expose option setters via the C API.
+    """
+
+    _SUPPORTED_KEYS: tuple[str, ...] = ("FLOW_UNITS",)
+
+    def __init__(self, adapter: "_LegacySolverAdapter") -> None:
+        self._adapter = adapter
+
+    def __getitem__(self, key: str) -> str:
+        return self._adapter.get_option(key)
+
+    def __contains__(self, key: object) -> bool:
+        if not isinstance(key, str):
+            return False
+        try:
+            self._adapter.get_option(key)
+            return True
+        except KeyError:
+            return False
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._SUPPORTED_KEYS)
+
+    def __len__(self) -> int:
+        return len(self._SUPPORTED_KEYS)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        try:
+            return self._adapter.get_option(key)
+        except KeyError:
+            return default
+
 
 # ---------------------------------------------------------------------------
 # Element collection adapters
 # ---------------------------------------------------------------------------
 
 
+class _LegacyNode:
+    """v1-shape proxy for a single legacy node.
+
+    Exposes only the attributes the legacy engine can actually compute.
+    Anything v1 surfaces that legacy can't provide (``.stats``,
+    ``.storage``, ``.outfall``, ``.divider``, ``.quality()``,
+    ``.set_quality_mass_flux()``, ``.depth_from_volume()``) raises
+    :class:`AttributeError`; tools that hit those code paths must guard
+    with :func:`openswmm_mcp.dependencies.require_new_engine`.
+    """
+
+    __slots__ = ("_collection", "_index")
+
+    def __init__(self, collection: "_LegacyNodes", index: int) -> None:
+        self._collection = collection
+        self._index = index
+
+    @property
+    def id(self) -> str:
+        return self._collection.get_id(self._index)
+
+    @property
+    def index(self) -> int:
+        return self._index
+
+    @property
+    def type(self) -> int:
+        return self._collection.get_type(self._index)
+
+    @property
+    def invert_elev(self) -> float:
+        return self._collection.get_invert_elev(self._index)
+
+    @property
+    def max_depth(self) -> float:
+        return self._collection.get_max_depth(self._index)
+
+    @property
+    def depth(self) -> float:
+        return self._collection.get_depth(self._index)
+
+    @property
+    def head(self) -> float:
+        return self._collection.get_head(self._index)
+
+    @property
+    def volume(self) -> float:
+        return self._collection.get_volume(self._index)
+
+    @property
+    def lateral_inflow(self) -> float:
+        return self._collection.get_lateral_inflow(self._index)
+
+    @lateral_inflow.setter
+    def lateral_inflow(self, value: float) -> None:
+        self._collection.set_lateral_inflow(self._index, value)
+
+    @property
+    def overflow(self) -> float:
+        return self._collection.get_overflow(self._index)
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, _LegacyNode):
+            return NotImplemented
+        return self._index == other._index and self._collection is other._collection
+
+    def __hash__(self) -> int:
+        return hash((id(self._collection), self._index))
+
+    def __repr__(self) -> str:
+        try:
+            return f"<LegacyNode id={self.id!r} index={self._index}>"
+        except Exception:
+            return f"<LegacyNode index={self._index}>"
+
+
 class _LegacyNodes:
-    """Indexed-getter shim over the legacy ``Solver`` node API."""
+    """Indexed-getter shim over the legacy ``Solver`` node API.
 
-    def __init__(self, solver: LegacySolver) -> None:
+    Exposes both the v0 ``get_*(idx)`` methods (used by un-migrated tools)
+    and the v1 container protocol (``len``, ``iter``, ``[key]``,
+    ``in``) returning :class:`_LegacyNode` wrappers.
+    """
+
+    def __init__(self, solver: LegacySolver, backend: "LegacyBackend" | None = None) -> None:
         self._solver = solver
+        self._backend = backend
 
-    def count(self) -> int:
+    # -- v1 container protocol ----------------------------------------------
+
+    def __len__(self) -> int:
         return self._solver.get_object_count(SWMMObjects.NODE)
+
+    def __iter__(self) -> Any:
+        for i in range(len(self)):
+            yield _LegacyNode(self, i)
+
+    def __getitem__(self, key: Any) -> _LegacyNode:
+        if isinstance(key, int):
+            if key < 0 or key >= len(self):
+                raise IndexError(f"Node index {key} out of range.")
+            return _LegacyNode(self, key)
+        if isinstance(key, str):
+            idx = self.get_index(key)
+            if idx < 0:
+                raise KeyError(f"Node id {key!r} not found.")
+            return _LegacyNode(self, idx)
+        raise TypeError(f"Node lookup expects int or str, got {type(key).__name__}.")
+
+    def __contains__(self, key: object) -> bool:
+        if isinstance(key, int):
+            return 0 <= key < len(self)
+        if isinstance(key, str):
+            return self.get_index(key) >= 0
+        return False
+
+    # -- v0-named scalar accessors (implementation backing for _LegacyNode) --
+    #
+    # These look like the old v0 method-style API but are *not* a transition
+    # shim — the v1 ``_LegacyNode`` wrapper class calls back into them as
+    # the actual SWMM-5-toolkit dispatch path.  Removing any of them breaks
+    # the corresponding wrapper property.
 
     def get_id(self, index: int) -> str:
         return self._solver.get_object_name(SWMMObjects.NODE, index)
@@ -275,14 +468,127 @@ class _LegacyNodes:
         self._solver.set_value(SWMMObjects.NODE, SWMMNodeProperties.LATERAL_INFLOW, index, value)
 
 
+class _LegacyLink:
+    """v1-shape proxy for a single legacy link.
+
+    Sub-views (``.pump``, ``.weir``, ``.orifice``, ``.outlet``, ``.stats``,
+    ``.xsect``) and bulk quality / pump-stat methods are NOT exposed —
+    callers must guard with :func:`require_new_engine`.
+    """
+
+    __slots__ = ("_collection", "_index")
+
+    def __init__(self, collection: "_LegacyLinks", index: int) -> None:
+        self._collection = collection
+        self._index = index
+
+    @property
+    def id(self) -> str:
+        return self._collection.get_id(self._index)
+
+    @property
+    def index(self) -> int:
+        return self._index
+
+    @property
+    def type(self) -> int:
+        return self._collection.get_type(self._index)
+
+    @property
+    def from_node(self) -> "_LegacyNode":
+        # v1 returns a Node wrapper, not an int index.  Mirror that shape
+        # by resolving through the backend's nodes collection.
+        backend = self._collection._backend
+        if backend is None:
+            raise AttributeError("Link.from_node requires a backend-bound Links collection.")
+        return backend.nodes[self._collection.get_from_node(self._index)]
+
+    @property
+    def to_node(self) -> "_LegacyNode":
+        backend = self._collection._backend
+        if backend is None:
+            raise AttributeError("Link.to_node requires a backend-bound Links collection.")
+        return backend.nodes[self._collection.get_to_node(self._index)]
+
+    @property
+    def length(self) -> float:
+        return self._collection.get_length(self._index)
+
+    @property
+    def max_depth(self) -> float:
+        return self._collection.get_max_depth(self._index)
+
+    @property
+    def flow(self) -> float:
+        return self._collection.get_flow(self._index)
+
+    @property
+    def depth(self) -> float:
+        return self._collection.get_depth(self._index)
+
+    @property
+    def velocity(self) -> float:
+        return self._collection.get_velocity(self._index)
+
+    @property
+    def capacity(self) -> float:
+        return self._collection.get_capacity(self._index)
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, _LegacyLink):
+            return NotImplemented
+        return self._index == other._index and self._collection is other._collection
+
+    def __hash__(self) -> int:
+        return hash((id(self._collection), self._index))
+
+    def __repr__(self) -> str:
+        try:
+            return f"<LegacyLink id={self.id!r} index={self._index}>"
+        except Exception:
+            return f"<LegacyLink index={self._index}>"
+
+
 class _LegacyLinks:
-    """Indexed-getter shim over the legacy ``Solver`` link API."""
+    """Indexed-getter shim over the legacy ``Solver`` link API.
 
-    def __init__(self, solver: LegacySolver) -> None:
+    Exposes both v0 (``get_*(idx)``) and v1 container protocol returning
+    :class:`_LegacyLink` wrappers.
+    """
+
+    def __init__(self, solver: LegacySolver, backend: "LegacyBackend" | None = None) -> None:
         self._solver = solver
+        self._backend = backend
 
-    def count(self) -> int:
+    # -- v1 container protocol ----------------------------------------------
+
+    def __len__(self) -> int:
         return self._solver.get_object_count(SWMMObjects.LINK)
+
+    def __iter__(self) -> Any:
+        for i in range(len(self)):
+            yield _LegacyLink(self, i)
+
+    def __getitem__(self, key: Any) -> _LegacyLink:
+        if isinstance(key, int):
+            if key < 0 or key >= len(self):
+                raise IndexError(f"Link index {key} out of range.")
+            return _LegacyLink(self, key)
+        if isinstance(key, str):
+            idx = self.get_index(key)
+            if idx < 0:
+                raise KeyError(f"Link id {key!r} not found.")
+            return _LegacyLink(self, idx)
+        raise TypeError(f"Link lookup expects int or str, got {type(key).__name__}.")
+
+    def __contains__(self, key: object) -> bool:
+        if isinstance(key, int):
+            return 0 <= key < len(self)
+        if isinstance(key, str):
+            return self.get_index(key) >= 0
+        return False
+
+    # -- v0-named scalar accessors (implementation backing for _LegacyLink) --
 
     def get_id(self, index: int) -> str:
         return self._solver.get_object_name(SWMMObjects.LINK, index)
@@ -332,14 +638,109 @@ class _LegacyLinks:
         self._solver.set_value(SWMMObjects.LINK, SWMMLinkProperties.SETTING, index, value)
 
 
+class _LegacySubcatchment:
+    """v1-shape proxy for a single legacy subcatchment.
+
+    Sub-views (``.stats``, ``.infiltration``, ``.coverage``) and pollutant
+    methods are NOT exposed — callers must guard with
+    :func:`require_new_engine`.
+    """
+
+    __slots__ = ("_collection", "_index")
+
+    def __init__(self, collection: "_LegacySubcatchments", index: int) -> None:
+        self._collection = collection
+        self._index = index
+
+    @property
+    def id(self) -> str:
+        return self._collection.get_id(self._index)
+
+    @property
+    def index(self) -> int:
+        return self._index
+
+    @property
+    def area(self) -> float:
+        return self._collection.get_area(self._index)
+
+    @property
+    def imperv_pct(self) -> float | None:
+        return self._collection.get_imperv_pct(self._index)
+
+    @property
+    def slope(self) -> float:
+        return self._collection.get_slope(self._index)
+
+    @property
+    def width(self) -> float:
+        return self._collection.get_width(self._index)
+
+    @property
+    def rainfall(self) -> float:
+        return self._collection.get_rainfall(self._index)
+
+    @property
+    def runoff(self) -> float:
+        return self._collection.get_runoff(self._index)
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, _LegacySubcatchment):
+            return NotImplemented
+        return self._index == other._index and self._collection is other._collection
+
+    def __hash__(self) -> int:
+        return hash((id(self._collection), self._index))
+
+    def __repr__(self) -> str:
+        try:
+            return f"<LegacySubcatchment id={self.id!r} index={self._index}>"
+        except Exception:
+            return f"<LegacySubcatchment index={self._index}>"
+
+
 class _LegacySubcatchments:
-    """Indexed-getter shim over the legacy ``Solver`` subcatchment API."""
+    """Indexed-getter shim over the legacy ``Solver`` subcatchment API.
 
-    def __init__(self, solver: LegacySolver) -> None:
+    Exposes both v0 (``get_*(idx)``) and v1 container protocol returning
+    :class:`_LegacySubcatchment` wrappers.
+    """
+
+    def __init__(self, solver: LegacySolver, backend: "LegacyBackend" | None = None) -> None:
         self._solver = solver
+        self._backend = backend
 
-    def count(self) -> int:
+    # -- v1 container protocol ----------------------------------------------
+
+    def __len__(self) -> int:
         return self._solver.get_object_count(SWMMObjects.SUBCATCHMENT)
+
+    def __iter__(self) -> Any:
+        for i in range(len(self)):
+            yield _LegacySubcatchment(self, i)
+
+    def __getitem__(self, key: Any) -> _LegacySubcatchment:
+        if isinstance(key, int):
+            if key < 0 or key >= len(self):
+                raise IndexError(f"Subcatchment index {key} out of range.")
+            return _LegacySubcatchment(self, key)
+        if isinstance(key, str):
+            idx = self.get_index(key)
+            if idx < 0:
+                raise KeyError(f"Subcatchment id {key!r} not found.")
+            return _LegacySubcatchment(self, idx)
+        raise TypeError(
+            f"Subcatchment lookup expects int or str, got {type(key).__name__}."
+        )
+
+    def __contains__(self, key: object) -> bool:
+        if isinstance(key, int):
+            return 0 <= key < len(self)
+        if isinstance(key, str):
+            return self.get_index(key) >= 0
+        return False
+
+    # -- v0-named scalar accessors (implementation backing for _LegacySubcatchment) --
 
     def get_id(self, index: int) -> str:
         return self._solver.get_object_name(SWMMObjects.SUBCATCHMENT, index)
@@ -400,14 +801,85 @@ _GAGE_DATA_SOURCE = {0: 0, 1: 1}  # legacy doesn't surface this distinctly
 _GAGE_RAIN_TYPE = {0: 0, 1: 1, 2: 2}
 
 
+class _LegacyGage:
+    """v1-shape proxy for a single legacy rain gage."""
+
+    __slots__ = ("_collection", "_index")
+
+    def __init__(self, collection: "_LegacyGages", index: int) -> None:
+        self._collection = collection
+        self._index = index
+
+    @property
+    def id(self) -> str:
+        return self._collection.get_id(self._index)
+
+    @property
+    def index(self) -> int:
+        return self._index
+
+    @property
+    def rainfall(self) -> float:
+        return self._collection.get_rainfall(self._index)
+
+    @rainfall.setter
+    def rainfall(self, value: float) -> None:
+        self._collection.set_rainfall(self._index, value)
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, _LegacyGage):
+            return NotImplemented
+        return self._index == other._index and self._collection is other._collection
+
+    def __hash__(self) -> int:
+        return hash((id(self._collection), self._index))
+
+    def __repr__(self) -> str:
+        try:
+            return f"<LegacyGage id={self.id!r} index={self._index}>"
+        except Exception:
+            return f"<LegacyGage index={self._index}>"
+
+
 class _LegacyGages:
-    """Indexed-getter shim over the legacy ``Solver`` rain-gage API."""
+    """Indexed-getter shim over the legacy ``Solver`` rain-gage API.
 
-    def __init__(self, solver: LegacySolver) -> None:
+    Exposes both v0 and v1 surfaces.
+    """
+
+    def __init__(self, solver: LegacySolver, backend: "LegacyBackend" | None = None) -> None:
         self._solver = solver
+        self._backend = backend
 
-    def count(self) -> int:
+    # -- v1 container protocol ----------------------------------------------
+
+    def __len__(self) -> int:
         return self._solver.get_object_count(SWMMObjects.RAIN_GAGE)
+
+    def __iter__(self) -> Any:
+        for i in range(len(self)):
+            yield _LegacyGage(self, i)
+
+    def __getitem__(self, key: Any) -> _LegacyGage:
+        if isinstance(key, int):
+            if key < 0 or key >= len(self):
+                raise IndexError(f"Gage index {key} out of range.")
+            return _LegacyGage(self, key)
+        if isinstance(key, str):
+            idx = self.get_index(key)
+            if idx < 0:
+                raise KeyError(f"Gage id {key!r} not found.")
+            return _LegacyGage(self, idx)
+        raise TypeError(f"Gage lookup expects int or str, got {type(key).__name__}.")
+
+    def __contains__(self, key: object) -> bool:
+        if isinstance(key, int):
+            return 0 <= key < len(self)
+        if isinstance(key, str):
+            return self.get_index(key) >= 0
+        return False
+
+    # -- v0-named scalar accessors (implementation backing for _LegacyGage) --
 
     def get_id(self, index: int) -> str:
         return self._solver.get_object_name(SWMMObjects.RAIN_GAGE, index)
@@ -437,14 +909,90 @@ class _LegacyGages:
         )
 
 
+class _LegacyPollutant:
+    """v1-shape proxy for a single legacy pollutant.
+
+    Legacy exposes only ``id`` / ``index``; every other v1 attribute
+    (``.units``, ``.kdecay``, ``.init_conc`` …) raises
+    :class:`AttributeError`.
+    """
+
+    __slots__ = ("_collection", "_index")
+
+    def __init__(self, collection: "_LegacyPollutants", index: int) -> None:
+        self._collection = collection
+        self._index = index
+
+    @property
+    def id(self) -> str:
+        return self._collection.get_id(self._index)
+
+    @property
+    def index(self) -> int:
+        return self._index
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, _LegacyPollutant):
+            return NotImplemented
+        return self._index == other._index and self._collection is other._collection
+
+    def __hash__(self) -> int:
+        return hash((id(self._collection), self._index))
+
+    def __repr__(self) -> str:
+        try:
+            return f"<LegacyPollutant id={self.id!r} index={self._index}>"
+        except Exception:
+            return f"<LegacyPollutant index={self._index}>"
+
+
 class _LegacyPollutants:
-    """Pollutant accessor — count only, no per-element getters in legacy."""
+    """Pollutant accessor — count + name only, no per-element data getters in legacy.
 
-    def __init__(self, solver: LegacySolver) -> None:
+    Exposes both v0 and v1 surfaces.
+    """
+
+    def __init__(self, solver: LegacySolver, backend: "LegacyBackend" | None = None) -> None:
         self._solver = solver
+        self._backend = backend
 
-    def count(self) -> int:
+    # -- v1 container protocol ----------------------------------------------
+
+    def __len__(self) -> int:
         return self._solver.get_object_count(SWMMObjects.POLLUTANT)
+
+    def __iter__(self) -> Any:
+        for i in range(len(self)):
+            yield _LegacyPollutant(self, i)
+
+    def __getitem__(self, key: Any) -> _LegacyPollutant:
+        if isinstance(key, int):
+            if key < 0 or key >= len(self):
+                raise IndexError(f"Pollutant index {key} out of range.")
+            return _LegacyPollutant(self, key)
+        if isinstance(key, str):
+            idx = self.get_index(key)
+            if idx < 0:
+                raise KeyError(f"Pollutant id {key!r} not found.")
+            return _LegacyPollutant(self, idx)
+        raise TypeError(
+            f"Pollutant lookup expects int or str, got {type(key).__name__}."
+        )
+
+    def __contains__(self, key: object) -> bool:
+        if isinstance(key, int):
+            return 0 <= key < len(self)
+        if isinstance(key, str):
+            return self.get_index(key) >= 0
+        return False
+
+    def get_index(self, pollutant_id: str) -> int:
+        try:
+            return self._solver.get_object_index(SWMMObjects.POLLUTANT, pollutant_id)
+        except Exception:
+            return -1
+
+    # -- v0-named scalar accessors (implementation backing for _LegacyPollutant) --
 
     def get_id(self, index: int) -> str:
         return self._solver.get_object_name(SWMMObjects.POLLUTANT, index)
@@ -466,17 +1014,23 @@ class _LegacyMassBalance:
     def __init__(self, solver: LegacySolver) -> None:
         self._solver = solver
 
-    def get_runoff_continuity_error(self) -> float:
+    @property
+    def runoff_continuity_error(self) -> float:
         runoff_pct, _flow_pct, _qual_pct = self._solver.get_mass_balance_error()
         return runoff_pct / 100.0
 
-    def get_routing_continuity_error(self) -> float:
+    @property
+    def routing_continuity_error(self) -> float:
         _runoff_pct, flow_pct, _qual_pct = self._solver.get_mass_balance_error()
         return flow_pct / 100.0
 
-    def get_quality_continuity_error(self, pollutant_index: int = 0) -> float:
+    def quality_continuity_error(self, pollutant: Any = 0) -> float:
+        """Per-pollutant continuity-error query (v1-shape).
+
+        Legacy reports one aggregate quality error, so the ``pollutant``
+        argument is accepted for signature parity but ignored.
+        """
         _runoff, _flow, qual_pct = self._solver.get_mass_balance_error()
-        # Legacy returns one aggregate quality error, not per-pollutant.
         return qual_pct / 100.0
 
 
@@ -529,7 +1083,9 @@ class _LegacyForcing:
         idx = self._resolve_index(self._links, target)
         self._links.set_setting(idx, value)
 
-    def subcatch_rainfall(self, target: Any, value: float, mode: int = 0, persist: int = 0) -> None:
+    def subcatchment_rainfall(
+        self, target: Any, value: float, mode: int = 0, persist: int = 0
+    ) -> None:
         idx = self._resolve_index(self._subcatchments, target)
         self._subcatchments.set_rainfall_override(idx, value)
 
@@ -550,7 +1106,7 @@ class _LegacyForcing:
             "Forcing 'link flow override' is not supported by the legacy engine."
         )
 
-    def subcatch_evap(self, *args: Any, **kw: Any) -> None:
+    def subcatchment_evap(self, *args: Any, **kw: Any) -> None:
         raise NotImplementedError(
             "Forcing 'subcatchment evaporation override' is not supported by the legacy engine."
         )
@@ -622,15 +1178,15 @@ class LegacyBackend:
         raw = adapter.raw
 
         if name == "nodes":
-            cache[name] = _LegacyNodes(raw)
+            cache[name] = _LegacyNodes(raw, self)
         elif name == "links":
-            cache[name] = _LegacyLinks(raw)
+            cache[name] = _LegacyLinks(raw, self)
         elif name == "subcatchments":
-            cache[name] = _LegacySubcatchments(raw)
+            cache[name] = _LegacySubcatchments(raw, self)
         elif name == "gages":
-            cache[name] = _LegacyGages(raw)
+            cache[name] = _LegacyGages(raw, self)
         elif name == "pollutants":
-            cache[name] = _LegacyPollutants(raw)
+            cache[name] = _LegacyPollutants(raw, self)
         elif name == "mass_balance":
             cache[name] = _LegacyMassBalance(raw)
         elif name == "forcing":

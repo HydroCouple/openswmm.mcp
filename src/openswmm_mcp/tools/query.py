@@ -9,11 +9,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from typing import Any
 
 from fastmcp import Context, FastMCP
 
 from openswmm_mcp.dependencies import get_session_manager, require_state
-from openswmm_mcp.errors import ErrorCode, ToolError
+from openswmm_mcp._util.formatting import paginate_list
+from openswmm_mcp.errors import ErrorCode, ToolError, resolve_index
 from openswmm_mcp.models import (
     ConduitGeometry,
     CrossSectionInfo,
@@ -114,38 +116,35 @@ def _make_xsect_info(shape: int, g1: float, g2: float, g3: float, g4: float) -> 
 # ---------------------------------------------------------------------------
 
 
-async def _build_node_info(session, nodes, index: int) -> NodeInfo:
-    """Build a NodeInfo for a single node by index, including all geometry."""
-    # Fetch basic identity + all static geometry concurrently
-    (
-        node_id,
-        type_code,
-        invert,
-        max_depth,
-        crown_elev,
-        full_volume,
-        surcharge_depth,
-        ponded_area,
-        degree,
-        initial_depth,
-        losses,
-        outflow,
-    ) = await asyncio.gather(
-        asyncio.to_thread(nodes.get_id, index),
-        asyncio.to_thread(nodes.get_type, index),
-        asyncio.to_thread(nodes.get_invert_elev, index),
-        asyncio.to_thread(nodes.get_max_depth, index),
-        asyncio.to_thread(nodes.get_crown_elev, index),
-        asyncio.to_thread(nodes.get_full_volume, index),
-        asyncio.to_thread(nodes.get_surcharge_depth, index),
-        asyncio.to_thread(nodes.get_ponded_area, index),
-        asyncio.to_thread(nodes.get_degree, index),
-        asyncio.to_thread(nodes.get_initial_depth, index),
-        asyncio.to_thread(nodes.get_losses, index),
-        asyncio.to_thread(nodes.get_outflow, index),
-    )
+def _build_node_info_sync(session, nodes, index: int) -> NodeInfo:
+    """Build NodeInfo synchronously by holding the Node wrapper once.
 
-    # Runtime hydraulic state
+    Designed to be wrapped in a single ``asyncio.to_thread`` — replaces
+    the previous ~17 ``asyncio.gather`` thread submissions with one C-ABI
+    crossing per attribute via the v1 property surface.
+
+    Sub-views (``.storage``, ``.outfall``) are accessed only when the node
+    type matches; everything else is direct ``node.<attr>`` access.
+    """
+    node = nodes[index]
+
+    node_id = node.id
+    type_code = int(node.type)
+    invert = node.invert_elev
+    max_depth = node.max_depth
+    crown_elev = node.crown_elev
+    full_volume = node.full_volume
+    surcharge_depth = node.surcharge_depth
+    ponded_area = node.ponded_area
+    degree = node.degree
+    initial_depth = node.initial_depth
+    losses = node.losses
+    outflow = node.outflow
+
+    # Runtime hydraulic state — only meaningful after start().  v1 exposes
+    # them on every node, but read attempts during "opened" / "initialized"
+    # can return zeros; we still gate on session.state to match the
+    # previous behaviour exactly.
     depth: float | None = None
     head: float | None = None
     volume: float | None = None
@@ -154,41 +153,29 @@ async def _build_node_info(session, nodes, index: int) -> NodeInfo:
 
     if session.state in ("running", "ended"):
         try:
-            depth, head, volume, lat_inflow, overflow = await asyncio.gather(
-                asyncio.to_thread(nodes.get_depth, index),
-                asyncio.to_thread(nodes.get_head, index),
-                asyncio.to_thread(nodes.get_volume, index),
-                asyncio.to_thread(nodes.get_lateral_inflow, index),
-                asyncio.to_thread(nodes.get_overflow, index),
-            )
+            depth = node.depth
+            head = node.head
+            volume = node.volume
+            lat_inflow = node.lateral_inflow
+            overflow = node.overflow
         except Exception:
             pass
 
-    outfall_route_to: int | None = None
-    if hasattr(nodes, "get_outfall_route_to"):
-        try:
-            rt = await asyncio.to_thread(nodes.get_outfall_route_to, index)
-            if rt >= 0:
-                outfall_route_to = rt
-        except Exception:
-            pass
-
-    # Type-specific geometry
+    # Type-specific geometry (sub-views raise AttributeError on the wrong
+    # type, so guard with the type code).
     storage_geom: StorageGeometry | None = None
     outfall_geom: OutfallGeometry | None = None
+    outfall_route_to: int | None = None
 
     if type_code == 2:  # STORAGE
         try:
-            curve_idx, (fa, fb, fc), seep_rate = await asyncio.gather(
-                asyncio.to_thread(nodes.get_storage_curve, index),
-                asyncio.to_thread(nodes.get_storage_functional, index),
-                asyncio.to_thread(nodes.get_storage_seep_rate, index),
-            )
+            storage = node.storage
+            curve_idx = storage.curve
+            fa, fb, fc = storage.functional
+            seep_rate = storage.seep_rate
             exfil_suction = exfil_ksat = exfil_imd = None
             try:
-                exfil_suction, exfil_ksat, exfil_imd = await asyncio.to_thread(
-                    nodes.get_exfil_params, index
-                )
+                exfil_suction, exfil_ksat, exfil_imd = storage.exfil_params
             except Exception:
                 pass
             storage_geom = StorageGeometry(
@@ -207,11 +194,16 @@ async def _build_node_info(session, nodes, index: int) -> NodeInfo:
 
     elif type_code == 1:  # OUTFALL
         try:
-            outfall_type, outfall_param, flap_gate = await asyncio.gather(
-                asyncio.to_thread(nodes.get_outfall_type, index),
-                asyncio.to_thread(nodes.get_outfall_param, index),
-                asyncio.to_thread(nodes.get_outfall_flap_gate, index),
-            )
+            outfall = node.outfall
+            outfall_type = int(outfall.type)
+            outfall_param = outfall.param
+            flap_gate = outfall.flap_gate
+            try:
+                rt = outfall.route_to
+                if rt >= 0:
+                    outfall_route_to = int(rt)
+            except Exception:
+                pass
             outfall_geom = OutfallGeometry(
                 outfall_type=outfall_type,
                 outfall_type_name=_OUTFALL_TYPE_NAMES.get(outfall_type, f"TYPE_{outfall_type}"),
@@ -246,62 +238,222 @@ async def _build_node_info(session, nodes, index: int) -> NodeInfo:
     )
 
 
-async def _build_link_info(session, links, nodes, index: int) -> LinkInfo:
-    """Build a LinkInfo for a single link by index, including full geometry."""
-    # Fetch all common static properties concurrently
-    (
-        link_id,
-        type_code,
-        from_node_idx,
-        to_node_idx,
-        length,
-        roughness,
-        slope,
-        offset_up,
-        offset_dn,
-        xsect_raw,
-    ) = await asyncio.gather(
-        asyncio.to_thread(links.get_id, index),
-        asyncio.to_thread(links.get_type, index),
-        asyncio.to_thread(links.get_from_node, index),
-        asyncio.to_thread(links.get_to_node, index),
-        asyncio.to_thread(links.get_length, index),
-        asyncio.to_thread(links.get_roughness, index),
-        asyncio.to_thread(links.get_slope, index),
-        asyncio.to_thread(links.get_offset_up, index),
-        asyncio.to_thread(links.get_offset_dn, index),
-        asyncio.to_thread(links.get_xsect, index),  # → (shape, g1, g2, g3, g4)
-    )
-    from_node_id, to_node_id = await asyncio.gather(
-        asyncio.to_thread(nodes.get_id, from_node_idx),
-        asyncio.to_thread(nodes.get_id, to_node_idx),
-    )
+async def _build_node_info(session, nodes, index: int) -> NodeInfo:
+    """Async wrapper around :func:`_build_node_info_sync`.
 
-    # Build cross-section info from raw tuple
-    xsect_info: CrossSectionInfo | None = None
-    if xsect_raw is not None:
+    Single ``to_thread`` containing every attribute read for one node.
+    """
+    return await asyncio.to_thread(_build_node_info_sync, session, nodes, index)
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: bulk all-node-info builder
+# ---------------------------------------------------------------------------
+#
+# ``_build_node_info`` is fine for a single-node query (it issues at most
+# ~17 ``asyncio.to_thread`` calls, which is negligible).  But for "all
+# nodes" mode the original ``get_node_info`` looped ``asyncio.gather`` over
+# every node — N × 17 thread submissions on a 5 000-node network is roughly
+# 85 000 context switches just to assemble a static-geometry snapshot.
+#
+# ``_build_all_node_infos_sync`` collapses that into a single ``to_thread``:
+# the Phase 3 bulk getters (``get_volumes_bulk`` / ``get_outflows_bulk`` /
+# …) fill NumPy arrays for the runtime state in O(n_nodes) total C work,
+# and the static scalar accessors are looped *inside* the same worker
+# thread (no Python-side hops between them).  The result is one thread
+# submission per ``get_node_info`` call regardless of model size.
+
+
+def _build_all_node_infos_sync(session, nodes) -> list[NodeInfo]:
+    """Single-thread bulk assembly of NodeInfo for every node.
+
+    Designed to be wrapped in **one** ``asyncio.to_thread`` so the entire
+    network snapshot is built in a single worker hop.
+
+    Bulk-vs-scalar split:
+
+      * Runtime state (depths, heads, volumes, overflows, lateral_inflows,
+        losses, outflows) — fetched via v1 numpy-array properties on the
+        collection (``nodes.depths``, ``nodes.heads``, …); one C call per
+        quantity over the whole network.
+      * Static geometry (invert, max_depth, crown_elev, …) — looped per
+        node via property access on the wrapper; no thread hops occur
+        inside the loop (we are already inside the ``to_thread`` worker).
+      * Type-specific geometry (storage / outfall blocks) — populated only
+        for nodes whose type matches.
+    """
+    n = len(nodes)
+    if n == 0:
+        return []
+
+    meta = session.meta
+    ids = meta.node_ids  # cached after first call this session
+
+    # ---- runtime state via bulk numpy properties -----------------------
+    running = session.state in ("running", "ended")
+    depths = heads = volumes = lats = overflows = None
+    losses_bulk = outflows_bulk = None
+    if running:
         try:
-            xsect_info = _make_xsect_info(*xsect_raw)
+            depths = nodes.depths
+            heads = nodes.heads
+            volumes = nodes.volumes
+            lats = nodes.lateral_inflows
+            overflows = nodes.overflows
+            losses_bulk = nodes.losses
+            outflows_bulk = nodes.outflows
+        except AttributeError:
+            # Legacy backend doesn't surface these as bulk; the
+            # per-node scalar fallback below handles it.
+            depths = heads = volumes = lats = overflows = None
+            losses_bulk = outflows_bulk = None
         except Exception:
-            pass
+            depths = heads = volumes = lats = overflows = None
+            losses_bulk = outflows_bulk = None
+
+    results: list[NodeInfo] = []
+    for i in range(n):
+        node = nodes[i]
+        type_code = int(node.type)
+
+        # Static geometry — direct property access, no thread hops.
+        invert = node.invert_elev
+        max_depth = node.max_depth
+        crown_elev = node.crown_elev
+        full_volume = node.full_volume
+        surcharge_depth = node.surcharge_depth
+        ponded_area = node.ponded_area
+        degree = node.degree
+        initial_depth = node.initial_depth
+        # Losses / outflow: prefer the bulk array if we have it.
+        losses_val = float(losses_bulk[i]) if losses_bulk is not None else node.losses
+        outflow_val = float(outflows_bulk[i]) if outflows_bulk is not None else node.outflow
+
+        # Runtime state — prefer bulks, scalar fallback for legacy.
+        depth = float(depths[i]) if depths is not None else (node.depth if running else None)
+        head = float(heads[i]) if heads is not None else (node.head if running else None)
+        volume = (float(volumes[i]) if volumes is not None
+                  else (node.volume if running else None))
+        lat_inflow = (float(lats[i]) if lats is not None
+                      else (node.lateral_inflow if running else None))
+        overflow = (float(overflows[i]) if overflows is not None
+                    else (node.overflow if running else None))
+
+        outfall_route_to: int | None = None
+        storage_geom: StorageGeometry | None = None
+        outfall_geom: OutfallGeometry | None = None
+
+        if type_code == 2:  # STORAGE
+            try:
+                storage = node.storage
+                curve_idx = storage.curve
+                fa, fb, fc = storage.functional
+                seep_rate = storage.seep_rate
+                exfil_suction = exfil_ksat = exfil_imd = None
+                try:
+                    exfil_suction, exfil_ksat, exfil_imd = storage.exfil_params
+                except Exception:
+                    pass
+                storage_geom = StorageGeometry(
+                    storage_type="curve" if curve_idx >= 0 else "functional",
+                    curve_idx=curve_idx if curve_idx >= 0 else None,
+                    functional_a=fa,
+                    functional_b=fb,
+                    functional_c=fc,
+                    seep_rate=seep_rate,
+                    exfil_suction=exfil_suction,
+                    exfil_ksat=exfil_ksat,
+                    exfil_imd=exfil_imd,
+                )
+            except Exception:
+                pass
+        elif type_code == 1:  # OUTFALL
+            try:
+                outfall = node.outfall
+                outfall_type = int(outfall.type)
+                outfall_param = outfall.param
+                flap_gate = outfall.flap_gate
+                try:
+                    rt = outfall.route_to
+                    if rt >= 0:
+                        outfall_route_to = int(rt)
+                except Exception:
+                    pass
+                outfall_geom = OutfallGeometry(
+                    outfall_type=outfall_type,
+                    outfall_type_name=_OUTFALL_TYPE_NAMES.get(
+                        outfall_type, f"TYPE_{outfall_type}"),
+                    param=outfall_param,
+                    flap_gate=bool(flap_gate),
+                )
+            except Exception:
+                pass
+
+        results.append(NodeInfo(
+            node_id=ids[i],
+            index=i,
+            node_type=_NODE_TYPE_NAMES.get(type_code, f"UNKNOWN({type_code})"),
+            invert_elev=invert,
+            max_depth=max_depth,
+            crown_elev=crown_elev,
+            full_volume=full_volume,
+            surcharge_depth=surcharge_depth,
+            ponded_area=ponded_area,
+            degree=degree,
+            initial_depth=initial_depth,
+            losses=losses_val,
+            outflow=outflow_val,
+            storage=storage_geom,
+            outfall=outfall_geom,
+            depth=depth,
+            head=head,
+            volume=volume,
+            lateral_inflow=lat_inflow,
+            overflow=overflow,
+            outfall_route_to=outfall_route_to,
+        ))
+    return results
+
+
+def _build_link_info_sync(session, links, nodes, index: int) -> LinkInfo:
+    """Build LinkInfo synchronously via v1 property access on the wrapper.
+
+    Designed to be wrapped in a single ``asyncio.to_thread``.  ``nodes``
+    is kept as a parameter for backward signature compatibility; v1
+    ``link.from_node`` already returns a Node wrapper exposing ``.id``,
+    so we don't need to do a separate ``nodes.get_id(idx)`` round-trip.
+    """
+    link = links[index]
+
+    link_id = link.id
+    type_code = int(link.type)
+    from_node_wrap = link.from_node
+    to_node_wrap = link.to_node
+    from_node_id = from_node_wrap.id
+    to_node_id = to_node_wrap.id
+    length = link.length
+    roughness = link.roughness
+    slope = link.slope
+    offset_up = link.offset_up
+    offset_dn = link.offset_dn
+
+    # Cross-section: v1 returns an XSection object with as_tuple().
+    xsect_info: CrossSectionInfo | None = None
+    try:
+        shape, g1, g2, g3, g4 = link.xsect.as_tuple()
+        xsect_info = _make_xsect_info(int(shape), g1, g2, g3, g4)
+    except Exception:
+        pass
 
     # Type-specific geometry
     conduit_geom: ConduitGeometry | None = None
     weir_geom: WeirGeometry | None = None
     orifice_geom: OrificeGeometry | None = None
     pump_geom: PumpGeometry | None = None
-    initial_flow: float | None = None
-    max_flow: float | None = None
 
     if type_code == 0:  # CONDUIT
         try:
-            loss_raw, flap_gate, seep_rate, culvert_code, barrels = await asyncio.gather(
-                asyncio.to_thread(links.get_loss_coeff, index),  # → (inlet, outlet, avg)
-                asyncio.to_thread(links.get_flap_gate, index),
-                asyncio.to_thread(links.get_seep_rate, index),
-                asyncio.to_thread(links.get_culvert_code, index),
-                asyncio.to_thread(links.get_barrels, index),
-            )
+            loss_raw = link.loss_coeff  # tuple (inlet, outlet, avg)
             conduit_geom = ConduitGeometry(
                 xsect=xsect_info,
                 slope=slope,
@@ -312,26 +464,22 @@ async def _build_link_info(session, links, nodes, index: int) -> LinkInfo:
                 loss_coeff_inlet=loss_raw[0],
                 loss_coeff_outlet=loss_raw[1],
                 loss_coeff_avg=loss_raw[2],
-                flap_gate=bool(flap_gate),
-                seep_rate=seep_rate,
-                culvert_code=culvert_code,
-                barrels=barrels,
+                flap_gate=bool(link.flap_gate),
+                seep_rate=link.seep_rate,
+                culvert_code=link.culvert_code,
+                barrels=link.barrels,
             )
         except Exception:
             pass
 
     elif type_code == 3:  # WEIR
         try:
-            crest_height, discharge_coeff, end_contractions = await asyncio.gather(
-                asyncio.to_thread(links.get_crest_height, index),
-                asyncio.to_thread(links.get_discharge_coeff, index),
-                asyncio.to_thread(links.get_end_contractions, index),
-            )
+            weir = link.weir
             weir_geom = WeirGeometry(
                 xsect=xsect_info,
-                crest_height=crest_height,
-                discharge_coeff=discharge_coeff,
-                end_contractions=end_contractions,
+                crest_height=weir.crest_height,
+                discharge_coeff=weir.discharge_coeff,
+                end_contractions=weir.end_contractions,
                 offset_up=offset_up,
                 offset_dn=offset_dn,
             )
@@ -347,13 +495,10 @@ async def _build_link_info(session, links, nodes, index: int) -> LinkInfo:
 
     elif type_code == 1:  # PUMP
         try:
-            pump_curve_idx, init_state = await asyncio.gather(
-                asyncio.to_thread(links.get_pump_curve, index),
-                asyncio.to_thread(links.get_pump_init_state, index),
-            )
+            pump = link.pump
             pump_geom = PumpGeometry(
-                pump_curve_idx=pump_curve_idx,
-                init_state_on=bool(init_state),
+                pump_curve_idx=pump.curve,
+                init_state_on=bool(pump.init_state),
                 offset_up=offset_up,
                 offset_dn=offset_dn,
             )
@@ -372,28 +517,24 @@ async def _build_link_info(session, links, nodes, index: int) -> LinkInfo:
 
     if session.state in ("running", "ended"):
         try:
-            flow, depth, velocity, capacity = await asyncio.gather(
-                asyncio.to_thread(links.get_flow, index),
-                asyncio.to_thread(links.get_depth, index),
-                asyncio.to_thread(links.get_velocity, index),
-                asyncio.to_thread(links.get_capacity, index),
-            )
+            flow = link.flow
+            depth = link.depth
+            velocity = link.velocity
+            capacity = link.capacity
         except Exception:
             pass
 
-        if hasattr(links, "get_hyd_power"):
-            try:
-                hydraulic_power = await asyncio.to_thread(links.get_hyd_power, index)
-            except Exception:
-                pass
+        try:
+            hydraulic_power = link.hyd_power
+        except Exception:
+            pass
 
-        if type_code == 1 and hasattr(links, "get_stat_pump_cycles"):
+        if type_code == 1:  # PUMP — read stats from the sub-view.
             try:
-                pump_cycles, pump_on_time, pump_volume = await asyncio.gather(
-                    asyncio.to_thread(links.get_stat_pump_cycles, index),
-                    asyncio.to_thread(links.get_stat_pump_on_time, index),
-                    asyncio.to_thread(links.get_stat_pump_volume, index),
-                )
+                stats = link.stats
+                pump_cycles = int(stats.pump_cycles)
+                pump_on_time = float(stats.pump_on_time)
+                pump_volume = float(stats.pump_volume)
             except Exception:
                 pass
 
@@ -408,8 +549,8 @@ async def _build_link_info(session, links, nodes, index: int) -> LinkInfo:
         slope=slope,
         offset_up=offset_up,
         offset_dn=offset_dn,
-        initial_flow=initial_flow,
-        max_flow=max_flow,
+        initial_flow=None,
+        max_flow=None,
         xsect=xsect_info,
         conduit=conduit_geom,
         weir=weir_geom,
@@ -426,13 +567,236 @@ async def _build_link_info(session, links, nodes, index: int) -> LinkInfo:
     )
 
 
-async def _build_subcatch_info(session, subcatchments, index: int) -> SubcatchmentInfo:
-    """Build a SubcatchmentInfo for a single subcatchment by index."""
-    sc_id = await asyncio.to_thread(subcatchments.get_id, index)
-    area = await asyncio.to_thread(subcatchments.get_area, index)
-    imperv = await asyncio.to_thread(subcatchments.get_imperv_pct, index)
-    slope = await asyncio.to_thread(subcatchments.get_slope, index)
-    width = await asyncio.to_thread(subcatchments.get_width, index)
+async def _build_link_info(session, links, nodes, index: int) -> LinkInfo:
+    """Async wrapper around :func:`_build_link_info_sync`."""
+    return await asyncio.to_thread(_build_link_info_sync, session, links, nodes, index)
+
+
+# ---------------------------------------------------------------------------
+# Phase 4b: bulk all-link-info builder
+# ---------------------------------------------------------------------------
+#
+# Mirrors ``_build_all_node_infos_sync`` for links. The old all-mode path
+# launched N independent ``_build_link_info`` coroutines, each of which
+# fired ~10–13 ``asyncio.to_thread`` calls. For a 5 000-link network that
+# is ~50 000 context switches per ``get_link_info`` call. The bulk
+# version does ONE ``to_thread`` and uses Phase 3 link bulks for runtime
+# state (flows, depths, velocities, capacities, hyd_powers, pump stats).
+
+
+def _build_all_link_infos_sync(session, links, nodes) -> list[LinkInfo]:
+    """Single-thread bulk assembly of LinkInfo for every link.
+
+    Designed to be wrapped in **one** ``asyncio.to_thread``.  See
+    :func:`_build_all_node_infos_sync` for the rationale; this is the link
+    analogue.
+
+    Bulk-vs-scalar split:
+
+      * Runtime state — fetched via v1 numpy-array properties on the
+        collection (``links.flows``, ``links.depths``, ``links.velocities``,
+        ``links.capacities``, ``links.hyd_powers``) and ``links.pump_stats()``
+        for the pump triple.
+      * Identifiers — ``session.meta.link_ids`` / ``node_ids`` (cached).
+      * Static geometry and per-type blocks (conduit / weir / orifice /
+        pump) — looped via v1 property access on the wrapper.
+    """
+    meta = session.meta
+    n = meta.n_links
+    if n == 0:
+        return []
+
+    link_ids = meta.link_ids
+    node_ids = meta.node_ids
+
+    # ---- runtime bulks (no-ops when not running, fall back on legacy) --
+    running = session.state in ("running", "ended")
+    flows = depths = velocities = capacities = hyd_powers = None
+    pump_stats: tuple[Any, Any, Any] | None = None
+    if running:
+        try:
+            flows = links.flows
+            depths = links.depths
+            velocities = links.velocities
+            capacities = links.capacities
+            hyd_powers = links.hyd_powers
+        except AttributeError:
+            # Legacy backend — scalar fallback per link below.
+            flows = depths = velocities = capacities = hyd_powers = None
+        except Exception:
+            flows = depths = velocities = capacities = hyd_powers = None
+        # Pump stats live behind a method, not a property, in v1.
+        pump_stats_fn = getattr(links, "pump_stats", None)
+        if callable(pump_stats_fn):
+            try:
+                pump_stats = pump_stats_fn()
+            except Exception:
+                pump_stats = None
+
+    results: list[LinkInfo] = []
+    for i in range(n):
+        link = links[i]
+        type_code = int(link.type)
+
+        # Identifiers — use the v1 from_node/to_node wrappers for ids when
+        # the cached node_ids array is too short (defensive).
+        try:
+            from_idx = link.from_node.index
+        except AttributeError:
+            from_idx = -1
+        try:
+            to_idx = link.to_node.index
+        except AttributeError:
+            to_idx = -1
+        from_node_id = (node_ids[from_idx]
+                        if 0 <= from_idx < len(node_ids) else "")
+        to_node_id = (node_ids[to_idx]
+                      if 0 <= to_idx < len(node_ids) else "")
+
+        length = link.length
+        roughness = link.roughness
+        slope = link.slope
+        offset_up = link.offset_up
+        offset_dn = link.offset_dn
+
+        xsect_info: CrossSectionInfo | None = None
+        try:
+            shape, g1, g2, g3, g4 = link.xsect.as_tuple()
+            xsect_info = _make_xsect_info(int(shape), g1, g2, g3, g4)
+        except Exception:
+            pass
+
+        # Per-type geometry block.
+        conduit_geom: ConduitGeometry | None = None
+        weir_geom: WeirGeometry | None = None
+        orifice_geom: OrificeGeometry | None = None
+        pump_geom: PumpGeometry | None = None
+        if type_code == 0:  # CONDUIT
+            try:
+                loss_raw = link.loss_coeff
+                conduit_geom = ConduitGeometry(
+                    xsect=xsect_info,
+                    slope=slope,
+                    offset_up=offset_up,
+                    offset_dn=offset_dn,
+                    initial_flow=0.0,
+                    max_flow=0.0,
+                    loss_coeff_inlet=loss_raw[0],
+                    loss_coeff_outlet=loss_raw[1],
+                    loss_coeff_avg=loss_raw[2],
+                    flap_gate=bool(link.flap_gate),
+                    seep_rate=link.seep_rate,
+                    culvert_code=link.culvert_code,
+                    barrels=link.barrels,
+                )
+            except Exception:
+                pass
+        elif type_code == 3:  # WEIR
+            try:
+                weir = link.weir
+                weir_geom = WeirGeometry(
+                    xsect=xsect_info,
+                    crest_height=weir.crest_height,
+                    discharge_coeff=weir.discharge_coeff,
+                    end_contractions=weir.end_contractions,
+                    offset_up=offset_up,
+                    offset_dn=offset_dn,
+                )
+            except Exception:
+                pass
+        elif type_code == 2:  # ORIFICE
+            orifice_geom = OrificeGeometry(
+                xsect=xsect_info,
+                offset_up=offset_up,
+                offset_dn=offset_dn,
+            )
+        elif type_code == 1:  # PUMP
+            try:
+                pump = link.pump
+                pump_geom = PumpGeometry(
+                    pump_curve_idx=pump.curve,
+                    init_state_on=bool(pump.init_state),
+                    offset_up=offset_up,
+                    offset_dn=offset_dn,
+                )
+            except Exception:
+                pass
+
+        # Runtime state — prefer bulks, scalar fallback.
+        flow = float(flows[i]) if flows is not None else (
+            link.flow if running else None)
+        depth = float(depths[i]) if depths is not None else (
+            link.depth if running else None)
+        velocity = float(velocities[i]) if velocities is not None else (
+            link.velocity if running else None)
+        capacity = float(capacities[i]) if capacities is not None else (
+            link.capacity if running else None)
+        hydraulic_power = float(hyd_powers[i]) if hyd_powers is not None else None
+        if hydraulic_power is None and running:
+            try:
+                hydraulic_power = link.hyd_power
+            except Exception:
+                pass
+
+        pump_cycles = pump_on_time = pump_volume = None
+        if type_code == 1 and running:
+            if pump_stats is not None:
+                try:
+                    cycles_arr, on_time_arr, vol_arr = pump_stats
+                    c = int(cycles_arr[i])
+                    if c >= 0:
+                        pump_cycles = c
+                        pump_on_time = float(on_time_arr[i])
+                        pump_volume = float(vol_arr[i])
+                except Exception:
+                    pass
+            else:
+                try:
+                    stats = link.stats
+                    pump_cycles = int(stats.pump_cycles)
+                    pump_on_time = float(stats.pump_on_time)
+                    pump_volume = float(stats.pump_volume)
+                except Exception:
+                    pass
+
+        results.append(LinkInfo(
+            link_id=link_ids[i],
+            index=i,
+            link_type=_LINK_TYPE_NAMES.get(type_code, f"UNKNOWN({type_code})"),
+            from_node=from_node_id,
+            to_node=to_node_id,
+            length=length,
+            roughness=roughness,
+            slope=slope,
+            offset_up=offset_up,
+            offset_dn=offset_dn,
+            initial_flow=None,
+            max_flow=None,
+            xsect=xsect_info,
+            conduit=conduit_geom,
+            weir=weir_geom,
+            orifice=orifice_geom,
+            pump=pump_geom,
+            flow=flow,
+            depth=depth,
+            velocity=velocity,
+            capacity=capacity,
+            hydraulic_power=hydraulic_power,
+            pump_cycles=pump_cycles,
+            pump_on_time=pump_on_time,
+            pump_volume=pump_volume,
+        ))
+    return results
+
+
+def _build_subcatch_info_sync(session, subcatchments, index: int) -> SubcatchmentInfo:
+    """Build SubcatchmentInfo synchronously via v1 property access."""
+    sub = subcatchments[index]
+    sc_id = sub.id
+    area = sub.area
+    imperv = sub.imperv_pct
+    slope = sub.slope
+    width = sub.width
 
     # Runtime state
     rainfall: float | None = None
@@ -441,8 +805,8 @@ async def _build_subcatch_info(session, subcatchments, index: int) -> Subcatchme
 
     if session.state in ("running", "ended"):
         try:
-            rainfall = await asyncio.to_thread(subcatchments.get_rainfall, index)
-            runoff = await asyncio.to_thread(subcatchments.get_runoff, index)
+            rainfall = sub.rainfall
+            runoff = sub.runoff
         except Exception:
             pass
 
@@ -459,16 +823,32 @@ async def _build_subcatch_info(session, subcatchments, index: int) -> Subcatchme
     )
 
 
-async def _build_gage_info(session, gages, index: int) -> GageInfo:
-    """Build a GageInfo for a single rain gage by index."""
-    gage_id = await asyncio.to_thread(gages.get_id, index)
-    source_code = await asyncio.to_thread(gages.get_data_source, index)
-    rain_type_code = await asyncio.to_thread(gages.get_rain_type, index)
+async def _build_subcatch_info(session, subcatchments, index: int) -> SubcatchmentInfo:
+    return await asyncio.to_thread(_build_subcatch_info_sync, session, subcatchments, index)
+
+
+def _build_gage_info_sync(session, gages, index: int) -> GageInfo:
+    """Build GageInfo synchronously via v1 property access.
+
+    Legacy backend returns plain ints for data_source / rain_type since
+    those aren't surfaced via the toolkit; v1 returns enum members.
+    Coerce both to int for the lookup table.
+    """
+    gage = gages[index]
+    gage_id = gage.id
+    try:
+        source_code = int(gage.data_source)
+    except AttributeError:
+        source_code = 0
+    try:
+        rain_type_code = int(gage.rain_type)
+    except AttributeError:
+        rain_type_code = 0
 
     rainfall: float | None = None
     if session.state in ("running", "ended"):
         try:
-            rainfall = await asyncio.to_thread(gages.get_rainfall, index)
+            rainfall = gage.rainfall
         except Exception:
             pass
 
@@ -479,6 +859,10 @@ async def _build_gage_info(session, gages, index: int) -> GageInfo:
         rain_type=_GAGE_RAIN_NAMES.get(rain_type_code, f"UNKNOWN({rain_type_code})"),
         rainfall=rainfall,
     )
+
+
+async def _build_gage_info(session, gages, index: int) -> GageInfo:
+    return await asyncio.to_thread(_build_gage_info_sync, session, gages, index)
 
 
 # ---------------------------------------------------------------------------
@@ -492,13 +876,32 @@ async def get_node_info(
     session_id: str = "default",
     node_id: str | None = None,
     properties: list[str] | None = None,
+    start_index: int = 0,
+    limit: int | None = None,
 ) -> NodeInfo | list[NodeInfo]:
     """Return properties and state for one or all nodes.
 
-    When *node_id* is given, returns a single NodeInfo.  When omitted,
-    returns a list of NodeInfo for every node in the model.  The optional
-    *properties* list filters which fields are included (not yet implemented;
-    reserved for future optimisation).
+    When *node_id* is given, returns a single :class:`NodeInfo`. When
+    omitted, returns a list of :class:`NodeInfo` for every node in the
+    model.  The optional *properties* list filters which fields are
+    included (not yet implemented; reserved for future optimisation).
+
+    Phase 4d adds ``start_index`` and ``limit`` for paginated reads of
+    the all-mode response.  Both default to "no pagination" (return
+    every node).  Pagination is applied **after** the bulk fetch — the
+    underlying engine still does one pass over the entire network
+    regardless of slice — so callers can safely make many small paged
+    calls without re-paying the bulk-fetch cost beyond the per-call
+    Python-side slice.
+
+    Parameters
+    ----------
+    start_index:
+        Zero-based offset of the first node to include in the response.
+        Negative values are clamped to ``0``.
+    limit:
+        Maximum number of nodes returned.  ``None`` (the default) means
+        "no limit"; non-positive values produce an empty list.
     """
     sm = get_session_manager(ctx)
     session = await sm.get_session(session_id)
@@ -507,18 +910,23 @@ async def get_node_info(
     nodes = session.nodes
 
     if node_id is not None:
-        idx = await asyncio.to_thread(nodes.get_index, node_id)
+        idx = await resolve_index(nodes, node_id, "Node")
         if idx < 0:
             raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Node '{node_id}' not found.")
         return await _build_node_info(session, nodes, idx)
 
-    # Return all nodes — build each concurrently (each _build_node_info uses gather internally)
-    count = await asyncio.to_thread(nodes.count)
-    if count == 0:
-        return []
-
-    results = await asyncio.gather(*[_build_node_info(session, nodes, i) for i in range(count)])
-    return list(results)
+    # All-nodes mode (Phase 4): one ``to_thread`` that performs every C call
+    # inside the worker — bulk getters for runtime state (Phase 3) and an
+    # in-thread scalar loop for static geometry.  Replaces the previous
+    # ``asyncio.gather`` over N * ~17 ``to_thread`` submissions, which became
+    # the dominant cost on large networks (5 000+ nodes).
+    all_infos = await asyncio.to_thread(_build_all_node_infos_sync, session, nodes)
+    # Phase 4d pagination — applied after the bulk fetch so the engine
+    # work is amortised across paginated polls.
+    if start_index == 0 and limit is None:
+        return all_infos
+    sliced, _meta = paginate_list(all_infos, start_index=start_index, limit=limit)
+    return sliced
 
 
 @query_mcp.tool
@@ -526,11 +934,24 @@ async def get_link_info(
     ctx: Context,
     session_id: str = "default",
     link_id: str | None = None,
+    start_index: int = 0,
+    limit: int | None = None,
 ) -> LinkInfo | list[LinkInfo]:
     """Return properties and state for one or all links.
 
-    When *link_id* is given, returns a single LinkInfo.  When omitted,
-    returns a list of LinkInfo for every link in the model.
+    When *link_id* is given, returns a single :class:`LinkInfo`. When
+    omitted, returns a list of :class:`LinkInfo` for every link in the
+    model.
+
+    Phase 4d adds ``start_index`` / ``limit`` for paginated reads of the
+    all-mode response, mirroring :func:`get_node_info`.
+
+    Parameters
+    ----------
+    start_index:
+        Zero-based offset of the first link to include.
+    limit:
+        Maximum number of links returned, or ``None`` for "no limit".
     """
     sm = get_session_manager(ctx)
     session = await sm.get_session(session_id)
@@ -540,20 +961,21 @@ async def get_link_info(
     nodes = session.nodes
 
     if link_id is not None:
-        idx = await asyncio.to_thread(links.get_index, link_id)
+        idx = await resolve_index(links, link_id, "Link")
         if idx < 0:
             raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Link '{link_id}' not found.")
         return await _build_link_info(session, links, nodes, idx)
 
-    # Return all links — build each concurrently (each _build_link_info uses gather internally)
-    count = await asyncio.to_thread(links.count)
-    if count == 0:
-        return []
-
-    results = await asyncio.gather(
-        *[_build_link_info(session, links, nodes, i) for i in range(count)]
-    )
-    return list(results)
+    # All-links mode (Phase 4b): one ``to_thread`` that uses the Phase 3
+    # link bulks for runtime state and an in-thread scalar loop for
+    # static geometry / per-type blocks. Replaces N x ~10 ``to_thread``
+    # submissions; see ``_build_all_link_infos_sync`` for the breakdown.
+    all_infos = await asyncio.to_thread(
+        _build_all_link_infos_sync, session, links, nodes)
+    if start_index == 0 and limit is None:
+        return all_infos
+    sliced, _meta = paginate_list(all_infos, start_index=start_index, limit=limit)
+    return sliced
 
 
 @query_mcp.tool
@@ -574,7 +996,7 @@ async def get_subcatchment_info(
     subcatchments = session.subcatchments
 
     if subcatch_id is not None:
-        idx = await asyncio.to_thread(subcatchments.get_index, subcatch_id)
+        idx = await resolve_index(subcatchments, subcatch_id, "Subcatchment")
         if idx < 0:
             raise ToolError(
                 f"[{ErrorCode.ELEMENT_NOT_FOUND}] Subcatchment '{subcatch_id}' not found."
@@ -582,7 +1004,7 @@ async def get_subcatchment_info(
         return await _build_subcatch_info(session, subcatchments, idx)
 
     # Return all subcatchments
-    count = await asyncio.to_thread(subcatchments.count)
+    count = await asyncio.to_thread(lambda: len(subcatchments))
     results: list[SubcatchmentInfo] = []
     for i in range(count):
         results.append(await _build_subcatch_info(session, subcatchments, i))
@@ -607,13 +1029,13 @@ async def get_gage_info(
     gages = session.gages
 
     if gage_id is not None:
-        idx = await asyncio.to_thread(gages.get_index, gage_id)
+        idx = await resolve_index(gages, gage_id, "Gage")
         if idx < 0:
             raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Gage '{gage_id}' not found.")
         return await _build_gage_info(session, gages, idx)
 
     # Return all gages
-    count = await asyncio.to_thread(gages.count)
+    count = await asyncio.to_thread(lambda: len(gages))
     results: list[GageInfo] = []
     for i in range(count):
         results.append(await _build_gage_info(session, gages, i))
@@ -641,76 +1063,135 @@ async def get_system_summary(
     gages = session.gages
     pollutants = session.pollutants
 
-    node_count = await asyncio.to_thread(nodes.count)
-    link_count = await asyncio.to_thread(links.count)
-    subcatch_count = await asyncio.to_thread(subcatchments.count)
-    gage_count = await asyncio.to_thread(gages.count)
-    pollutant_count = await asyncio.to_thread(pollutants.count)
-
-    start_time = await asyncio.to_thread(solver.get_start_time)
-    end_time = await asyncio.to_thread(solver.get_end_time)
-    routing_step = await asyncio.to_thread(solver.get_routing_step)
-
     _FLOW_UNITS = {0: "CFS", 1: "GPM", 2: "MGD", 3: "CMS", 4: "LPS", 5: "MLD"}
     _ROUTE_MODELS = {0: "STEADY", 1: "KINWAVE", 2: "DYNWAVE"}
 
-    try:
-        raw_units = await asyncio.to_thread(solver.get_option, "FLOW_UNITS")
-        try:
-            flow_units = _FLOW_UNITS.get(int(raw_units), "UNKNOWN")
-        except (ValueError, TypeError):
-            flow_units = str(raw_units).upper() or "UNKNOWN"
-    except Exception:
-        flow_units = "UNKNOWN"
+    def _summary_static() -> dict[str, Any]:
+        """Single-thread sweep of every static field.
 
-    try:
-        raw_route = await asyncio.to_thread(solver.get_option, "FLOW_ROUTING")
-        try:
-            route_model = _ROUTE_MODELS.get(int(raw_route), "UNKNOWN")
-        except (ValueError, TypeError):
-            route_model = str(raw_route).upper() or "UNKNOWN"
-    except Exception:
-        route_model = "UNKNOWN"
+        Pulls counts, timing, and option lookups in one to_thread hop so
+        we don't pay ~12 worker submissions for what is effectively
+        constant data.
+        """
+        node_count = len(nodes)
+        link_count = len(links)
+        subcatch_count = len(subcatchments)
+        gage_count = len(gages)
+        pollutant_count = len(pollutants)
 
-    current_time: float | None = None
-    if session.state in ("running", "ended"):
+        # v1: solver.start_datetime / end_datetime / current_datetime are
+        # datetime objects; routing_step is timedelta.  The JSON wire
+        # format wants floats (days since start, seconds), so we convert
+        # here at the boundary.
+        start_dt = solver.start_datetime
+        end_dt = solver.end_datetime
+        start_time = 0.0
+        end_time = (end_dt - start_dt).total_seconds() / 86400.0
         try:
-            current_time = await asyncio.to_thread(solver.get_current_time)
-        except Exception:
+            routing_step = solver.routing_step.total_seconds()
+        except AttributeError:
+            # Defensive: should not happen given the legacy adapter shim,
+            # but keep a sane fallback.
+            routing_step = float(solver.routing_step)
+
+        # Option lookups via the v1 mapping; the legacy adapter exposes
+        # the same shape.  KeyError on unsupported keys.
+        options = solver.options
+
+        def _get_opt(key: str) -> str | None:
+            try:
+                return options[key]
+            except (KeyError, Exception):
+                return None
+
+        flow_units_name = "UNKNOWN"
+        raw_units = _get_opt("FLOW_UNITS")
+        if raw_units is not None:
+            try:
+                flow_units_name = _FLOW_UNITS.get(int(raw_units), "UNKNOWN")
+            except (ValueError, TypeError):
+                flow_units_name = str(raw_units).upper() or "UNKNOWN"
+
+        route_model_name = "UNKNOWN"
+        raw_route = _get_opt("FLOW_ROUTING")
+        if raw_route is not None:
+            try:
+                route_model_name = _ROUTE_MODELS.get(int(raw_route), "UNKNOWN")
+            except (ValueError, TypeError):
+                route_model_name = str(raw_route).upper() or "UNKNOWN"
+
+        cur_time: float | None = None
+        if session.state in ("running", "ended"):
+            try:
+                cur_time = (solver.current_datetime - start_dt).total_seconds() / 86400.0
+            except Exception:
+                pass
+
+        surcharge_method = _get_opt("SURCHARGE_METHOD")
+        dps_celerity = dps_alpha = dps_decay_time = None
+        if surcharge_method and "DYNAMIC" in str(surcharge_method).upper():
+            try:
+                dps_celerity = float(_get_opt("DPS_CELERITY"))
+                dps_alpha = float(_get_opt("DPS_ALPHA"))
+                dps_decay_time = float(_get_opt("DPS_DECAY_TIME"))
+            except (TypeError, ValueError):
+                pass
+
+        # event_count — v1 exposes solver.events as a MutableSequence.
+        event_count: int | None = None
+        events_view = getattr(solver, "events", None)
+        if events_view is not None:
+            try:
+                event_count = len(events_view)
+            except Exception:
+                pass
+
+        # steady_state_skip — v1 exposes it as a bool property.
+        steady_state_skip: bool | None = None
+        try:
+            steady_state_skip = solver.steady_state_skip
+        except AttributeError:
             pass
 
-    # Extended fields from refactored engine
-    surcharge_method: str | None = None
-    dps_celerity: float | None = None
-    dps_alpha: float | None = None
-    dps_decay_time: float | None = None
-    event_count: int | None = None
-    steady_state_skip: bool | None = None
+        return {
+            "node_count": node_count,
+            "link_count": link_count,
+            "subcatch_count": subcatch_count,
+            "gage_count": gage_count,
+            "pollutant_count": pollutant_count,
+            "start_time": start_time,
+            "end_time": end_time,
+            "routing_step": routing_step,
+            "flow_units": flow_units_name,
+            "route_model": route_model_name,
+            "current_time": cur_time,
+            "surcharge_method": surcharge_method,
+            "dps_celerity": dps_celerity,
+            "dps_alpha": dps_alpha,
+            "dps_decay_time": dps_decay_time,
+            "event_count": event_count,
+            "steady_state_skip": steady_state_skip,
+        }
 
-    try:
-        surcharge_method = await asyncio.to_thread(solver.get_option, "SURCHARGE_METHOD")
-    except Exception:
-        pass
+    static = await asyncio.to_thread(_summary_static)
 
-    if surcharge_method and "DYNAMIC" in str(surcharge_method).upper():
-        try:
-            dps_celerity = float(await asyncio.to_thread(solver.get_option, "DPS_CELERITY"))
-            dps_alpha = float(await asyncio.to_thread(solver.get_option, "DPS_ALPHA"))
-            dps_decay_time = float(await asyncio.to_thread(solver.get_option, "DPS_DECAY_TIME"))
-        except Exception:
-            pass
-
-    if hasattr(solver, "get_event_count"):
-        try:
-            event_count = await asyncio.to_thread(solver.get_event_count)
-        except Exception:
-            pass
-
-    if hasattr(solver, "get_steady_state_skip"):
-        try:
-            steady_state_skip = await asyncio.to_thread(solver.get_steady_state_skip)
-        except Exception:
-            pass
+    node_count = static["node_count"]
+    link_count = static["link_count"]
+    subcatch_count = static["subcatch_count"]
+    gage_count = static["gage_count"]
+    pollutant_count = static["pollutant_count"]
+    start_time = static["start_time"]
+    end_time = static["end_time"]
+    routing_step = static["routing_step"]
+    flow_units = static["flow_units"]
+    route_model = static["route_model"]
+    current_time = static["current_time"]
+    surcharge_method = static["surcharge_method"]
+    dps_celerity = static["dps_celerity"]
+    dps_alpha = static["dps_alpha"]
+    dps_decay_time = static["dps_decay_time"]
+    event_count = static["event_count"]
+    steady_state_skip = static["steady_state_skip"]
 
     return SystemSummary(
         session_id=session_id,
@@ -787,9 +1268,17 @@ async def find_elements(
         sources.append(("gage", session.gages))
 
     for etype, accessor in sources:
-        count = await asyncio.to_thread(accessor.count)
-        for i in range(count):
-            eid = await asyncio.to_thread(accessor.get_id, i)
+        # Single to_thread per accessor: pull every id in one worker hop
+        # via the v1 ``ids`` bulk getter, then filter in pure Python.
+        def _ids(acc=accessor) -> list[str]:
+            ids_attr = getattr(acc, "ids", None)
+            if ids_attr is not None:
+                return [str(x) for x in ids_attr]
+            n = len(acc)
+            return [acc.get_id(i) for i in range(n)]
+
+        ids = await asyncio.to_thread(_ids)
+        for i, eid in enumerate(ids):
             if regex is not None and not regex.search(eid):
                 continue
             results.append(
@@ -806,32 +1295,27 @@ async def find_elements(
 _POLLUTANT_UNITS_NAMES = {0: "MG/L", 1: "UG/L", 2: "#/L"}
 
 
-async def _build_pollutant_info(pollutants, index: int) -> PollutantInfo:
-    """Build a PollutantInfo for a single pollutant by index."""
-    (
-        poll_id,
-        units,
-        kdecay,
-        rain_conc,
-        gw_conc,
-        init_conc,
-        rdii_conc,
-        mwt,
-        snow_only,
-    ) = await asyncio.gather(
-        asyncio.to_thread(pollutants.get_id, index),
-        asyncio.to_thread(pollutants.get_units, index),
-        asyncio.to_thread(pollutants.get_kdecay, index),
-        asyncio.to_thread(pollutants.get_rain_conc, index),
-        asyncio.to_thread(pollutants.get_gw_conc, index),
-        asyncio.to_thread(pollutants.get_init_conc, index),
-        asyncio.to_thread(pollutants.get_rdii_conc, index),
-        asyncio.to_thread(pollutants.get_mwt, index),
-        asyncio.to_thread(pollutants.get_snow_only, index),
-    )
-    co_idx = co_frac = 0
+def _build_pollutant_info_sync(pollutants, index: int) -> PollutantInfo:
+    """Build PollutantInfo synchronously via v1 property access."""
+    p = pollutants[index]
+    poll_id = p.id
+    units = int(p.units)
+    kdecay = p.kdecay
+    rain_conc = p.rain_conc
+    gw_conc = p.gw_conc
+    init_conc = p.init_conc
+    rdii_conc = p.rdii_conc
+    mwt = p.mwt
+    snow_only = p.snow_only
+
+    # v1 co_pollutant returns Optional[Tuple[Pollutant, float]].
+    co_idx = 0
+    co_frac = 0.0
     try:
-        co_idx, co_frac = await asyncio.to_thread(pollutants.get_co_pollutant, index)
+        co = p.co_pollutant
+        if co is not None:
+            co_pollutant_wrap, co_frac = co
+            co_idx = co_pollutant_wrap.index
     except Exception:
         pass
 
@@ -852,6 +1336,10 @@ async def _build_pollutant_info(pollutants, index: int) -> PollutantInfo:
     )
 
 
+async def _build_pollutant_info(pollutants, index: int) -> PollutantInfo:
+    return await asyncio.to_thread(_build_pollutant_info_sync, pollutants, index)
+
+
 @query_mcp.tool
 async def get_pollutant_info(
     ctx: Context,
@@ -864,8 +1352,6 @@ async def get_pollutant_info(
     omitted, returns a list of PollutantInfo for every pollutant in the model.
     Valid in any non-closed session state.
     """
-    from openswmm.engine import Pollutants as _Pollutants
-
     sm = get_session_manager(ctx)
     session = await sm.get_session(session_id)
     require_state(session, "initialized", "running", "ended", "opened", "building")
@@ -876,17 +1362,20 @@ async def get_pollutant_info(
             raise ToolError(
                 f"[{ErrorCode.INVALID_STATE}] Session '{session_id}' has no ModelBuilder."
             )
+        # v1: construct a Pollutants collection over the ModelBuilder for
+        # property-style access pre-finalize.
+        from openswmm.engine import Pollutants as _Pollutants
         pollutants = _Pollutants(session.model_builder)
     else:
         pollutants = session.pollutants
 
     if pollutant_id is not None:
-        idx = await asyncio.to_thread(pollutants.get_index, pollutant_id)
+        idx = await resolve_index(pollutants, pollutant_id, "Pollutant")
         if idx < 0:
             raise ToolError(
                 f"[{ErrorCode.ELEMENT_NOT_FOUND}] Pollutant '{pollutant_id}' not found."
             )
         return await _build_pollutant_info(pollutants, idx)
 
-    count = await asyncio.to_thread(pollutants.count)
+    count = await asyncio.to_thread(lambda: len(pollutants))
     return [await _build_pollutant_info(pollutants, i) for i in range(count)]

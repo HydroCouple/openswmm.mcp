@@ -1,46 +1,22 @@
-name: CI
+# NOTE: This file has been superseded by separate workflows:
+#   - .github/workflows/lint.yml
+#   - .github/workflows/unit_testing.yml
+#
+# Sandbox tooling could not delete this file in place. After pulling the
+# branch, run:
+#
+#     git rm .github/workflows/ci.yml
+#
+# A no-op trigger is left here so GitHub Actions does not error out on
+# this file's presence.
+
+name: CI (deprecated — see lint / unit_testing)
 
 on:
-  push:
-    branches: [main, dev]
-  pull_request:
-    branches: [main, dev]
+  workflow_dispatch:
 
 jobs:
-  lint:
+  noop:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - run: pip install ruff==0.15.14
-
-      - run: ruff check src/ tests/
-
-      - run: ruff format --check src/ tests/
-
-  test:
-    needs: lint
-    strategy:
-      matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v5
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-
-      - run: pip install -e ".[dev]"
-
-      - run: pytest tests/unit/ -v --cov=openswmm_mcp --cov-report=xml
-
-      - uses: codecov/codecov-action@v4
-        if: matrix.python-version == '3.12' && matrix.os == 'ubuntu-latest'
-        with:
-          file: coverage.xml
+      - run: echo "This workflow has been split. See lint.yml / unit_testing.yml."

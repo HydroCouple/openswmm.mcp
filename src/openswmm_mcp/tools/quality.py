@@ -97,7 +97,7 @@ async def _resolve_landuse(session: SimSession, landuse_id: str | int) -> int:
         return landuse_id
     if not landuse_id:
         raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] landuse_id must not be empty.")
-    idx = await asyncio.to_thread(session.quality.landuse_index, landuse_id)
+    idx = await asyncio.to_thread(session.quality.landuses.get_index, landuse_id)
     if idx < 0:
         raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Landuse '{landuse_id}' not found.")
     return idx
@@ -123,7 +123,7 @@ async def _resolve_pollutant(session: SimSession, pollutant_id: str | int) -> in
 async def landuse_count(ctx: Context, session_id: str = "default") -> dict:
     """Return the number of landuses defined in the model."""
     session = await _get_session(ctx, session_id)
-    n = await asyncio.to_thread(session.quality.landuse_count)
+    n = await asyncio.to_thread(lambda: len(session.quality.landuses))
     return {"session_id": session_id, "count": n}
 
 
@@ -133,8 +133,11 @@ async def landuse_add(ctx: Context, session_id: str = "default", landuse_id: str
     if not landuse_id:
         raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] landuse_id must not be empty.")
     session = await _get_session(ctx, session_id)
-    await asyncio.to_thread(session.quality.landuse_add, landuse_id)
-    idx = await asyncio.to_thread(session.quality.landuse_index, landuse_id)
+    # v1 Landuses.add(name) returns a Landuse wrapper.
+    def _add() -> int:
+        return session.quality.landuses.add(landuse_id).index
+
+    idx = await asyncio.to_thread(_add)
     return {
         "status": "ok",
         "session_id": session_id,
@@ -147,7 +150,7 @@ async def landuse_add(ctx: Context, session_id: str = "default", landuse_id: str
 async def landuse_id(ctx: Context, session_id: str = "default", index: int = 0) -> dict:
     """Return the string id of the I{index}-th landuse."""
     session = await _get_session(ctx, session_id)
-    s = await asyncio.to_thread(session.quality.landuse_id, index)
+    s = await asyncio.to_thread(session.quality.landuses.get_id, index)
     return {"session_id": session_id, "index": index, "id": s}
 
 
@@ -155,7 +158,7 @@ async def landuse_id(ctx: Context, session_id: str = "default", index: int = 0) 
 async def landuse_index(ctx: Context, session_id: str = "default", landuse_id: str = "") -> dict:
     """Return the integer index for a landuse string id (-1 if not found)."""
     session = await _get_session(ctx, session_id)
-    idx = await asyncio.to_thread(session.quality.landuse_index, landuse_id)
+    idx = await asyncio.to_thread(session.quality.landuses.get_index, landuse_id)
     return {"session_id": session_id, "id": landuse_id, "index": idx}
 
 
@@ -166,7 +169,7 @@ async def get_sweep_interval(
     """Return the days-between-street-sweeps for a landuse."""
     session = await _get_session(ctx, session_id)
     idx = await _resolve_landuse(session, landuse_id)
-    v = await asyncio.to_thread(session.quality.landuse_get_sweep_interval, idx)
+    v = await asyncio.to_thread(lambda: session.quality.landuses[idx].sweep_interval)
     return {
         "session_id": session_id,
         "landuse_id": landuse_id,
@@ -185,7 +188,12 @@ async def set_sweep_interval(
     """Set the days-between-street-sweeps for a landuse."""
     session = await _get_session(ctx, session_id)
     idx = await _resolve_landuse(session, landuse_id)
-    await asyncio.to_thread(session.quality.landuse_set_sweep_interval, idx, float(days))
+    days_v = float(days)
+
+    def _set() -> None:
+        session.quality.landuses[idx].sweep_interval = days_v
+
+    await asyncio.to_thread(_set)
     return {
         "status": "ok",
         "session_id": session_id,
@@ -202,7 +210,7 @@ async def get_sweep_removal(
     """Return the sweep removal fraction (0..1) for a landuse."""
     session = await _get_session(ctx, session_id)
     idx = await _resolve_landuse(session, landuse_id)
-    v = await asyncio.to_thread(session.quality.landuse_get_sweep_removal, idx)
+    v = await asyncio.to_thread(lambda: session.quality.landuses[idx].sweep_removal)
     return {
         "session_id": session_id,
         "landuse_id": landuse_id,
@@ -225,7 +233,12 @@ async def set_sweep_removal(
         )
     session = await _get_session(ctx, session_id)
     idx = await _resolve_landuse(session, landuse_id)
-    await asyncio.to_thread(session.quality.landuse_set_sweep_removal, idx, float(fraction))
+    frac_v = float(fraction)
+
+    def _set() -> None:
+        session.quality.landuses[idx].sweep_removal = frac_v
+
+    await asyncio.to_thread(_set)
     return {
         "status": "ok",
         "session_id": session_id,
@@ -252,7 +265,7 @@ async def buildup_get(
     l_idx = await _resolve_landuse(session, landuse_id)
     p_idx = await _resolve_pollutant(session, pollutant_id)
     func_code, c1, c2, c3, norm_code = await asyncio.to_thread(
-        session.quality.buildup_get, l_idx, p_idx
+        session.quality.get_buildup, l_idx, p_idx
     )
     return {
         "session_id": session_id,
@@ -293,7 +306,7 @@ async def buildup_set(
     l_idx = await _resolve_landuse(session, landuse_id)
     p_idx = await _resolve_pollutant(session, pollutant_id)
     await asyncio.to_thread(
-        session.quality.buildup_set,
+        session.quality.set_buildup,
         l_idx,
         p_idx,
         func_int,
@@ -328,7 +341,7 @@ async def washoff_get(
     session = await _get_session(ctx, session_id)
     l_idx = await _resolve_landuse(session, landuse_id)
     p_idx = await _resolve_pollutant(session, pollutant_id)
-    result = await asyncio.to_thread(session.quality.washoff_get, l_idx, p_idx)
+    result = await asyncio.to_thread(session.quality.get_washoff, l_idx, p_idx)
     # washoff_get returns at least (func_code, c1, c2, sweep_eff, bmp_eff)
     # depending on engine version; serialize defensively.
     if isinstance(result, (list, tuple)):
@@ -375,7 +388,7 @@ async def washoff_set(
     l_idx = await _resolve_landuse(session, landuse_id)
     p_idx = await _resolve_pollutant(session, pollutant_id)
     await asyncio.to_thread(
-        session.quality.washoff_set,
+        session.quality.set_washoff,
         l_idx,
         p_idx,
         func_int,
@@ -419,7 +432,7 @@ async def treatment_get(
     if node_idx < 0:
         raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Node '{node_id}' not found.")
     pollut_idx = await _resolve_pollutant(session, pollutant_id)
-    expr = await asyncio.to_thread(session.quality.treatment_get, node_idx, pollut_idx)
+    expr = await asyncio.to_thread(session.quality.get_treatment, node_idx, pollut_idx)
     return {
         "session_id": session_id,
         "node_id": node_id,
@@ -445,7 +458,7 @@ async def treatment_clear(
     if node_idx < 0:
         raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Node '{node_id}' not found.")
     pollut_idx = await _resolve_pollutant(session, pollutant_id)
-    await asyncio.to_thread(session.quality.treatment_clear, node_idx, pollut_idx)
+    await asyncio.to_thread(session.quality.clear_treatment, node_idx, pollut_idx)
     return {
         "status": "ok",
         "session_id": session_id,

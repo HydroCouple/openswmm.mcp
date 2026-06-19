@@ -129,6 +129,155 @@ class TestTransects:
             assert r["status"] == "ok"
 
 
+class TestTransectEditing:
+    async def test_stations_roundtrip_and_clear(self, session_manager):
+        from openswmm_mcp.tools.infrastructure import (
+            add_transect,
+            add_transect_station,
+            clear_stations,
+            get_station,
+            station_count,
+        )
+
+        ctx = await _create_building_session(session_manager, "infra_tx_st")
+        await add_transect(ctx, session_id="infra_tx_st", transect_id="TX_ST")
+        for s, e in [(0.0, 100.0), (10.0, 95.0), (20.0, 90.0)]:
+            await add_transect_station(
+                ctx, session_id="infra_tx_st", transect_index=0, station=s, elevation=e
+            )
+
+        c = await station_count(ctx, session_id="infra_tx_st", transect_index=0)
+        assert c["count"] == 3
+
+        pt = await get_station(
+            ctx, session_id="infra_tx_st", transect_index=0, station_index=1
+        )
+        assert pt["station"] == 10.0
+        assert pt["elevation"] == 95.0
+
+        await clear_stations(ctx, session_id="infra_tx_st", transect_index=0)
+        c2 = await station_count(ctx, session_id="infra_tx_st", transect_index=0)
+        assert c2["count"] == 0
+
+    async def test_roughness_readback(self, session_manager):
+        from openswmm_mcp.tools.infrastructure import (
+            add_transect,
+            get_transect_roughness,
+            set_transect_roughness,
+        )
+
+        ctx = await _create_building_session(session_manager, "infra_tx_rn")
+        await add_transect(ctx, session_id="infra_tx_rn", transect_id="TX_RN")
+        await set_transect_roughness(
+            ctx,
+            session_id="infra_tx_rn",
+            transect_index=0,
+            n_left=0.05,
+            n_right=0.06,
+            n_channel=0.03,
+        )
+        r = await get_transect_roughness(ctx, session_id="infra_tx_rn", transect_index=0)
+        assert r["n_left"] == pytest.approx(0.05)
+        assert r["n_right"] == pytest.approx(0.06)
+        assert r["n_channel"] == pytest.approx(0.03)
+
+    async def test_bank_stations_roundtrip(self, session_manager):
+        from openswmm_mcp.tools.infrastructure import (
+            add_transect,
+            add_transect_station,
+            get_bank_stations,
+            set_bank_stations,
+        )
+
+        ctx = await _create_building_session(session_manager, "infra_tx_bk")
+        await add_transect(ctx, session_id="infra_tx_bk", transect_id="TX_BK")
+        for s, e in [(0.0, 100.0), (10.0, 90.0), (20.0, 90.0), (30.0, 100.0)]:
+            await add_transect_station(
+                ctx, session_id="infra_tx_bk", transect_index=0, station=s, elevation=e
+            )
+        await set_bank_stations(
+            ctx, session_id="infra_tx_bk", transect_index=0, left=10.0, right=20.0
+        )
+        r = await get_bank_stations(ctx, session_id="infra_tx_bk", transect_index=0)
+        assert r["left"] == pytest.approx(10.0)
+        assert r["right"] == pytest.approx(20.0)
+
+    async def test_encroachment_stations_roundtrip(self, session_manager):
+        from openswmm_mcp.tools.infrastructure import (
+            add_transect,
+            get_encroachment_stations,
+            set_encroachment_stations,
+        )
+
+        ctx = await _create_building_session(session_manager, "infra_tx_en")
+        await add_transect(ctx, session_id="infra_tx_en", transect_id="TX_EN")
+        await set_encroachment_stations(
+            ctx, session_id="infra_tx_en", transect_index=0, left=5.0, right=25.0
+        )
+        r = await get_encroachment_stations(
+            ctx, session_id="infra_tx_en", transect_index=0
+        )
+        assert r["left"] == pytest.approx(5.0)
+        assert r["right"] == pytest.approx(25.0)
+
+    async def test_modifiers_roundtrip(self, session_manager):
+        from openswmm_mcp.tools.infrastructure import (
+            add_transect,
+            get_modifiers,
+            set_modifiers,
+        )
+
+        ctx = await _create_building_session(session_manager, "infra_tx_md")
+        await add_transect(ctx, session_id="infra_tx_md", transect_id="TX_MD")
+        await set_modifiers(
+            ctx,
+            session_id="infra_tx_md",
+            transect_index=0,
+            n_factor=1.1,
+            x_factor=2.0,
+            y_factor=0.5,
+        )
+        r = await get_modifiers(ctx, session_id="infra_tx_md", transect_index=0)
+        assert r["n_factor"] == pytest.approx(1.1)
+        assert r["x_factor"] == pytest.approx(2.0)
+        assert r["y_factor"] == pytest.approx(0.5)
+
+    async def test_comments_roundtrip(self, session_manager):
+        from openswmm_mcp.tools.infrastructure import (
+            add_transect,
+            get_comments,
+            set_comments,
+        )
+
+        ctx = await _create_building_session(session_manager, "infra_tx_cm")
+        await add_transect(ctx, session_id="infra_tx_cm", transect_id="TX_CM")
+        await set_comments(
+            ctx, session_id="infra_tx_cm", transect_index=0, text="channel survey 2025"
+        )
+        r = await get_comments(ctx, session_id="infra_tx_cm", transect_index=0)
+        assert r["text"] == "channel survey 2025"
+
+    async def test_remove_transect(self, session_manager):
+        from openswmm_mcp.tools.infrastructure import (
+            add_transect,
+            remove_transect,
+            transect_count,
+        )
+
+        ctx = await _create_building_session(session_manager, "infra_tx_rm")
+        await add_transect(ctx, session_id="infra_tx_rm", transect_id="TX_RM")
+        assert (await transect_count(ctx, session_id="infra_tx_rm"))["count"] == 1
+        await remove_transect(ctx, session_id="infra_tx_rm", transect="TX_RM")
+        assert (await transect_count(ctx, session_id="infra_tx_rm"))["count"] == 0
+
+    async def test_remove_empty_transect_rejected(self, session_manager):
+        from openswmm_mcp.tools.infrastructure import remove_transect
+
+        ctx = await _create_building_session(session_manager, "infra_tx_rm_e")
+        with pytest.raises(ToolError, match="transect must not be empty"):
+            await remove_transect(ctx, session_id="infra_tx_rm_e", transect="")
+
+
 # ===========================================================================
 # [STREETS]
 # ===========================================================================
@@ -163,6 +312,37 @@ class TestStreets:
         )
         assert result["status"] == "ok"
         assert (await street_count(ctx, session_id="infra_st"))["count"] == 1
+
+    async def test_get_params_readback(self, session_manager):
+        from openswmm_mcp.tools.infrastructure import (
+            add_street,
+            get_street_params,
+            set_street_params,
+        )
+
+        ctx = await _create_building_session(session_manager, "infra_st_gp")
+        await add_street(ctx, session_id="infra_st_gp", street_id="ST_GP")
+        await set_street_params(
+            ctx,
+            session_id="infra_st_gp",
+            street_index=0,
+            t_crown=20.0,
+            h_curb=0.5,
+            sx=0.02,
+            n_road=0.016,
+            gutter_depres=0.0,
+            gutter_width=0.0,
+            sides=2,
+            back_width=0.0,
+            back_slope=0.0,
+            back_n=0.0,
+        )
+        r = await get_street_params(ctx, session_id="infra_st_gp", street_index=0)
+        params = r["params"]
+        assert params["t_crown"] == pytest.approx(20.0)
+        assert params["h_curb"] == pytest.approx(0.5)
+        assert params["sx"] == pytest.approx(0.02)
+        assert params["n_road"] == pytest.approx(0.016)
 
     async def test_invalid_sides_rejected(self, session_manager):
         from openswmm_mcp.tools.infrastructure import (

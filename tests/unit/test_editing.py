@@ -6,6 +6,8 @@ import pytest
 
 pytest.importorskip("openswmm.engine")
 
+from openswmm.engine import Links, Nodes
+
 from openswmm_mcp.errors import ToolError
 from openswmm_mcp.models import ConversionResultModel, ImpactReportModel
 
@@ -98,7 +100,7 @@ class TestAnalyzeImpact:
         await analyze_impact(ctx, session_id="ai_nodmut", object_type="node", object_id="J1")
 
         # ModelEditor wraps builder — counts shouldn't change
-        assert len(before._nodes) == 3
+        assert len(Nodes(before)) == 3
 
     async def test_analyze_unknown_type_raises(self, session_manager):
         from openswmm_mcp.tools.editing import analyze_impact
@@ -160,37 +162,37 @@ class TestDeleteObject:
         from openswmm_mcp.tools.editing import delete_object
 
         ctx = await _create_building_session(session_manager, "del_node")
-        before = len((await session_manager.get_session("del_node")).model_builder._nodes)
+        before = len(Nodes((await session_manager.get_session("del_node")).model_builder))
 
         result = await delete_object(ctx, session_id="del_node", object_type="node", object_id="J1")
 
         assert isinstance(result, ImpactReportModel)
-        after = len((await session_manager.get_session("del_node")).model_builder._nodes)
+        after = len(Nodes((await session_manager.get_session("del_node")).model_builder))
         assert after == before - 1
 
     async def test_delete_link_reduces_count(self, session_manager):
         from openswmm_mcp.tools.editing import delete_object
 
         ctx = await _create_building_session(session_manager, "del_link")
-        before = len((await session_manager.get_session("del_link")).model_builder._links)
+        before = len(Links((await session_manager.get_session("del_link")).model_builder))
 
         await delete_object(ctx, session_id="del_link", object_type="link", object_id="C1")
 
-        after = len((await session_manager.get_session("del_link")).model_builder._links)
+        after = len(Links((await session_manager.get_session("del_link")).model_builder))
         assert after == before - 1
 
     async def test_delete_dry_run_does_not_mutate(self, session_manager):
         from openswmm_mcp.tools.editing import delete_object
 
         ctx = await _create_building_session(session_manager, "del_dry")
-        before = len((await session_manager.get_session("del_dry")).model_builder._nodes)
+        before = len(Nodes((await session_manager.get_session("del_dry")).model_builder))
 
         result = await delete_object(
             ctx, session_id="del_dry", object_type="node", object_id="J1", dry_run=True
         )
 
         assert result.dry_run is True
-        after = len((await session_manager.get_session("del_dry")).model_builder._nodes)
+        after = len(Nodes((await session_manager.get_session("del_dry")).model_builder))
         assert after == before  # unchanged
 
     async def test_delete_node_not_found_raises(self, session_manager):
@@ -388,3 +390,51 @@ class TestConvertLink:
         assert result.object_id == "C1"
         assert isinstance(result.cleared_fields, list)
         assert isinstance(result.warnings, list)
+
+
+# ---------------------------------------------------------------------------
+# get_gage_scale_factor / set_gage_scale_factor
+# ---------------------------------------------------------------------------
+
+
+class TestGageScaleFactor:
+    async def _open(self, session_manager, tmp_inp, session_id):
+        from openswmm_mcp.tools.lifecycle import open_model
+
+        ctx = MockContext(session_manager)
+        await open_model(ctx, inp_path=tmp_inp, session_id=session_id)
+        return ctx
+
+    async def test_set_then_get_roundtrips(self, session_manager, tmp_inp, reference_model):
+        from openswmm_mcp.tools.editing import get_gage_scale_factor, set_gage_scale_factor
+
+        ctx = await self._open(session_manager, tmp_inp, "gsf_rt")
+        out = await set_gage_scale_factor(
+            ctx,
+            session_id="gsf_rt",
+            gage_id=reference_model.GAGE_ID,
+            scale_factor=2.5,
+        )
+        assert out["status"] == "updated"
+        assert out["scale_factor"] == 2.5
+
+        got = await get_gage_scale_factor(
+            ctx, session_id="gsf_rt", gage_id=reference_model.GAGE_ID
+        )
+        assert got["scale_factor"] == pytest.approx(2.5)
+
+    async def test_get_empty_gage_id_raises(self, session_manager, tmp_inp):
+        from openswmm_mcp.tools.editing import get_gage_scale_factor
+
+        ctx = await self._open(session_manager, tmp_inp, "gsf_noid")
+        with pytest.raises(ToolError, match="gage_id must not be empty"):
+            await get_gage_scale_factor(ctx, session_id="gsf_noid", gage_id="")
+
+    async def test_set_unknown_gage_raises(self, session_manager, tmp_inp):
+        from openswmm_mcp.tools.editing import set_gage_scale_factor
+
+        ctx = await self._open(session_manager, tmp_inp, "gsf_bad")
+        with pytest.raises(ToolError, match="not found"):
+            await set_gage_scale_factor(
+                ctx, session_id="gsf_bad", gage_id="NOPE", scale_factor=1.0
+            )

@@ -41,7 +41,7 @@ from openswmm_mcp.dependencies import (
     require_new_engine,
     require_state,
 )
-from openswmm_mcp.errors import ErrorCode, ToolError
+from openswmm_mcp.errors import ErrorCode, ToolError, resolve_index
 from openswmm_mcp.session import SimSession
 
 nodes_mcp = FastMCP("nodes")
@@ -109,10 +109,72 @@ async def _resolve_node(session: SimSession, node_id: str | int) -> int:
         return node_id
     if not node_id:
         raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] node_id must not be empty.")
-    idx = await asyncio.to_thread(session.nodes.get_index, node_id)
+    idx = await resolve_index(session.nodes, node_id, "Node")
     if idx < 0:
         raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Node '{node_id}' not found.")
     return idx
+
+
+# ===========================================================================
+# Identity: tag get/set + bulk ids
+# ===========================================================================
+
+
+@nodes_mcp.tool()
+async def get_tag(
+    ctx: Context, session_id: str = "default", node_id: str | int = ""
+) -> dict:
+    """Return the free-form tag string for a node (empty if untagged).
+
+    Tags come from the INP ``[TAGS]`` section, are keyed by index, and
+    persist across ``rename``.
+    """
+    session = await _get_session(ctx, session_id)
+    idx = await _resolve_node(session, node_id)
+    tag = await asyncio.to_thread(lambda: session.nodes[idx].tag)
+    return {
+        "session_id": session_id,
+        "node_id": node_id,
+        "node_index": idx,
+        "tag": tag,
+    }
+
+
+@nodes_mcp.tool()
+async def set_tag(
+    ctx: Context,
+    session_id: str = "default",
+    node_id: str | int = "",
+    tag: str = "",
+) -> dict:
+    """Set (or clear) the free-form tag string for a node.
+
+    An empty string clears the tag.
+    """
+    session = await _get_session(ctx, session_id)
+    idx = await _resolve_node(session, node_id)
+    tag_value = tag
+
+    def _set() -> None:
+        session.nodes[idx].tag = tag_value
+
+    await asyncio.to_thread(_set)
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "node_id": node_id,
+        "node_index": idx,
+        "tag": tag_value,
+    }
+
+
+@nodes_mcp.tool()
+async def get_ids_bulk(ctx: Context, session_id: str = "default") -> dict:
+    """Return the IDs of all nodes in storage order as ``{count, ids}``."""
+    session = await _get_session(ctx, session_id)
+    arr = await asyncio.to_thread(lambda: session.nodes.ids)
+    ids = [str(x) for x in ndarray_to_list(arr)]
+    return {"session_id": session_id, "count": len(ids), "ids": ids}
 
 
 # ===========================================================================
@@ -127,7 +189,7 @@ async def stat_max_depth(
     """Return the peak depth recorded for a node over the simulation."""
     session = await _get_session(ctx, session_id)
     idx = await _resolve_node(session, node_id)
-    value = await asyncio.to_thread(session.nodes.get_stat_max_depth, idx)
+    value = await asyncio.to_thread(lambda: session.nodes[idx].stats.max_depth)
     return {
         "session_id": session_id,
         "node_id": node_id,
@@ -143,7 +205,7 @@ async def stat_max_overflow(
     """Return the peak overflow rate for a node over the simulation."""
     session = await _get_session(ctx, session_id)
     idx = await _resolve_node(session, node_id)
-    value = await asyncio.to_thread(session.nodes.get_stat_max_overflow, idx)
+    value = await asyncio.to_thread(lambda: session.nodes[idx].stats.max_overflow)
     return {
         "session_id": session_id,
         "node_id": node_id,
@@ -159,7 +221,7 @@ async def stat_vol_flooded(
     """Return the total flooded volume for a node over the simulation."""
     session = await _get_session(ctx, session_id)
     idx = await _resolve_node(session, node_id)
-    value = await asyncio.to_thread(session.nodes.get_stat_vol_flooded, idx)
+    value = await asyncio.to_thread(lambda: session.nodes[idx].stats.vol_flooded)
     return {
         "session_id": session_id,
         "node_id": node_id,
@@ -175,7 +237,7 @@ async def stat_time_flooded(
     """Return the total flooded duration (hours) for a node."""
     session = await _get_session(ctx, session_id)
     idx = await _resolve_node(session, node_id)
-    value = await asyncio.to_thread(session.nodes.get_stat_time_flooded, idx)
+    value = await asyncio.to_thread(lambda: session.nodes[idx].stats.time_flooded)
     return {
         "session_id": session_id,
         "node_id": node_id,
@@ -191,10 +253,11 @@ async def stat_time_flooded(
 
 def _zip_node_results(session: SimSession, values: list[float]) -> list[dict[str, Any]]:
     """Build [{id, index, value}, ...] records from a bulk array."""
-    n = session.nodes.count()
+    nodes = session.nodes
+    n = len(nodes)
     return [
         {
-            "id": session.nodes.get_id(i),
+            "id": nodes.get_id(i),
             "index": i,
             "value": values[i],
         }
@@ -206,7 +269,7 @@ def _zip_node_results(session: SimSession, values: list[float]) -> list[dict[str
 async def get_depths_bulk(ctx: Context, session_id: str = "default") -> dict:
     """Return current depths for all nodes as a list of {id, index, value}."""
     session = await _get_session(ctx, session_id)
-    arr = await asyncio.to_thread(session.nodes.get_depths_bulk)
+    arr = await asyncio.to_thread(lambda: session.nodes.depths)
     values = ndarray_to_list(arr)
     records = await asyncio.to_thread(_zip_node_results, session, values)
     return {"session_id": session_id, "count": len(records), "results": records}
@@ -216,7 +279,7 @@ async def get_depths_bulk(ctx: Context, session_id: str = "default") -> dict:
 async def get_heads_bulk(ctx: Context, session_id: str = "default") -> dict:
     """Return current heads for all nodes as a list of {id, index, value}."""
     session = await _get_session(ctx, session_id)
-    arr = await asyncio.to_thread(session.nodes.get_heads_bulk)
+    arr = await asyncio.to_thread(lambda: session.nodes.heads)
     values = ndarray_to_list(arr)
     records = await asyncio.to_thread(_zip_node_results, session, values)
     return {"session_id": session_id, "count": len(records), "results": records}
@@ -226,7 +289,7 @@ async def get_heads_bulk(ctx: Context, session_id: str = "default") -> dict:
 async def get_inflows_bulk(ctx: Context, session_id: str = "default") -> dict:
     """Return current total inflows for all nodes."""
     session = await _get_session(ctx, session_id)
-    arr = await asyncio.to_thread(session.nodes.get_inflows_bulk)
+    arr = await asyncio.to_thread(lambda: session.nodes.inflows)
     values = ndarray_to_list(arr)
     records = await asyncio.to_thread(_zip_node_results, session, values)
     return {"session_id": session_id, "count": len(records), "results": records}
@@ -236,7 +299,7 @@ async def get_inflows_bulk(ctx: Context, session_id: str = "default") -> dict:
 async def get_overflows_bulk(ctx: Context, session_id: str = "default") -> dict:
     """Return current overflow rates for all nodes."""
     session = await _get_session(ctx, session_id)
-    arr = await asyncio.to_thread(session.nodes.get_overflows_bulk)
+    arr = await asyncio.to_thread(lambda: session.nodes.overflows)
     values = ndarray_to_list(arr)
     records = await asyncio.to_thread(_zip_node_results, session, values)
     return {"session_id": session_id, "count": len(records), "results": records}
@@ -252,7 +315,7 @@ async def get_quality_bulk(
     ``query.get_pollutant_info`` or ``analysis.output_pollutant_count``).
     """
     session = await _get_session(ctx, session_id)
-    arr = await asyncio.to_thread(session.nodes.get_quality_bulk, pollutant_index)
+    arr = await asyncio.to_thread(session.nodes.qualities, pollutant_index)
     values = ndarray_to_list(arr)
     records = await asyncio.to_thread(_zip_node_results, session, values)
     return {
@@ -279,7 +342,7 @@ async def set_depths_bulk(
     if not depths:
         raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] depths must be non-empty.")
     session = await _get_session(ctx, session_id)
-    n = await asyncio.to_thread(session.nodes.count)
+    n = await asyncio.to_thread(lambda: len(session.nodes))
     if len(depths) != n:
         raise ToolError(
             f"[{ErrorCode.VALIDATION_ERROR}] depths length {len(depths)} != node count {n}."
@@ -287,7 +350,11 @@ async def set_depths_bulk(
     import numpy as np
 
     arr = np.asarray(depths, dtype=np.float64)
-    await asyncio.to_thread(session.nodes.set_depths_bulk, arr)
+
+    def _set_depths() -> None:
+        session.nodes.depths = arr
+
+    await asyncio.to_thread(_set_depths)
     return {"status": "ok", "session_id": session_id, "count": len(depths)}
 
 
@@ -304,7 +371,7 @@ async def set_lat_inflows_bulk(
     if not inflows:
         raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] inflows must be non-empty.")
     session = await _get_session(ctx, session_id)
-    n = await asyncio.to_thread(session.nodes.count)
+    n = await asyncio.to_thread(lambda: len(session.nodes))
     if len(inflows) != n:
         raise ToolError(
             f"[{ErrorCode.VALIDATION_ERROR}] inflows length {len(inflows)} != node count {n}."
@@ -312,7 +379,7 @@ async def set_lat_inflows_bulk(
     import numpy as np
 
     arr = np.asarray(inflows, dtype=np.float64)
-    await asyncio.to_thread(session.nodes.set_lat_inflows_bulk, arr)
+    await asyncio.to_thread(session.nodes.set_lateral_inflows, arr)
     return {"status": "ok", "session_id": session_id, "count": len(inflows)}
 
 
@@ -328,7 +395,7 @@ async def get_storage_curve(
     """Return the storage-curve index assigned to a storage node."""
     session = await _get_session(ctx, session_id)
     idx = await _resolve_node(session, node_id)
-    curve_idx = await asyncio.to_thread(session.nodes.get_storage_curve, idx)
+    curve_idx = await asyncio.to_thread(lambda: session.nodes[idx].storage.curve)
     return {
         "session_id": session_id,
         "node_id": node_id,
@@ -351,7 +418,11 @@ async def set_storage_curve(
     """
     session = await _get_session(ctx, session_id)
     idx = await _resolve_node(session, node_id)
-    await asyncio.to_thread(session.nodes.set_storage_curve, idx, curve_index)
+
+    def _set() -> None:
+        session.nodes[idx].storage.curve = curve_index
+
+    await asyncio.to_thread(_set)
     return {
         "status": "ok",
         "session_id": session_id,
@@ -371,7 +442,7 @@ async def get_storage_functional(
     """
     session = await _get_session(ctx, session_id)
     idx = await _resolve_node(session, node_id)
-    a, b, c = await asyncio.to_thread(session.nodes.get_storage_functional, idx)
+    a, b, c = await asyncio.to_thread(lambda: session.nodes[idx].storage.functional)
     return {
         "session_id": session_id,
         "node_id": node_id,
@@ -394,7 +465,12 @@ async def set_storage_functional(
     """Set functional storage params ``area = a * depth^b + c``."""
     session = await _get_session(ctx, session_id)
     idx = await _resolve_node(session, node_id)
-    await asyncio.to_thread(session.nodes.set_storage_functional, idx, float(a), float(b), float(c))
+    coeffs = (float(a), float(b), float(c))
+
+    def _set() -> None:
+        session.nodes[idx].storage.functional = coeffs
+
+    await asyncio.to_thread(_set)
     return {
         "status": "ok",
         "session_id": session_id,
@@ -413,7 +489,7 @@ async def get_storage_seep_rate(
     """Return the seepage rate for a storage node (depth/time)."""
     session = await _get_session(ctx, session_id)
     idx = await _resolve_node(session, node_id)
-    rate = await asyncio.to_thread(session.nodes.get_storage_seep_rate, idx)
+    rate = await asyncio.to_thread(lambda: session.nodes[idx].storage.seep_rate)
     return {
         "session_id": session_id,
         "node_id": node_id,
@@ -432,7 +508,12 @@ async def set_storage_seep_rate(
     """Set the seepage rate for a storage node."""
     session = await _get_session(ctx, session_id)
     idx = await _resolve_node(session, node_id)
-    await asyncio.to_thread(session.nodes.set_storage_seep_rate, idx, float(rate))
+    rate_value = float(rate)
+
+    def _set() -> None:
+        session.nodes[idx].storage.seep_rate = rate_value
+
+    await asyncio.to_thread(_set)
     return {
         "status": "ok",
         "session_id": session_id,
@@ -449,7 +530,9 @@ async def get_exfil_params(
     """Return Green-Ampt exfiltration params ``(suction, ksat, imd)`` for a storage node."""
     session = await _get_session(ctx, session_id)
     idx = await _resolve_node(session, node_id)
-    suction, ksat, imd = await asyncio.to_thread(session.nodes.get_exfil_params, idx)
+    suction, ksat, imd = await asyncio.to_thread(
+        lambda: session.nodes[idx].storage.exfil_params
+    )
     return {
         "session_id": session_id,
         "node_id": node_id,
@@ -482,13 +565,12 @@ async def set_exfil_params(
     """
     session = await _get_session(ctx, session_id)
     idx = await _resolve_node(session, node_id)
-    await asyncio.to_thread(
-        session.nodes.set_exfil_params,
-        idx,
-        float(suction),
-        float(ksat),
-        float(imd),
-    )
+    params = (float(suction), float(ksat), float(imd))
+
+    def _set() -> None:
+        session.nodes[idx].storage.exfil_params = params
+
+    await asyncio.to_thread(_set)
     return {
         "status": "ok",
         "session_id": session_id,
@@ -515,7 +597,8 @@ async def get_outfall_type(
     """
     session = await _get_session(ctx, session_id)
     idx = await _resolve_node(session, node_id)
-    type_code = await asyncio.to_thread(session.nodes.get_outfall_type, idx)
+    # v1 OutfallView.type returns an OutfallType IntEnum; coerce to plain int.
+    type_code = await asyncio.to_thread(lambda: int(session.nodes[idx].outfall.type))
     name_map = {0: "free", 1: "normal", 2: "fixed", 3: "tidal", 4: "timeseries"}
     return {
         "session_id": session_id,
@@ -541,7 +624,11 @@ async def set_outfall_type(
     type_int = _resolve_outfall_type(outfall_type)
     session = await _get_session(ctx, session_id)
     idx = await _resolve_node(session, node_id)
-    await asyncio.to_thread(session.nodes.set_outfall_type, idx, type_int)
+
+    def _set() -> None:
+        session.nodes[idx].outfall.type = type_int
+
+    await asyncio.to_thread(_set)
     return {
         "status": "ok",
         "session_id": session_id,
@@ -562,7 +649,7 @@ async def get_outfall_param(
     """
     session = await _get_session(ctx, session_id)
     idx = await _resolve_node(session, node_id)
-    value = await asyncio.to_thread(session.nodes.get_outfall_param, idx)
+    value = await asyncio.to_thread(lambda: session.nodes[idx].outfall.param)
     return {
         "session_id": session_id,
         "node_id": node_id,
@@ -581,7 +668,10 @@ async def set_outfall_stage(
     """Set the fixed stage elevation for a FIXED outfall."""
     session = await _get_session(ctx, session_id)
     idx = await _resolve_node(session, node_id)
-    await asyncio.to_thread(session.nodes.set_outfall_stage, idx, float(stage))
+    stage_value = float(stage)
+    await asyncio.to_thread(
+        lambda: session.nodes[idx].outfall.set_stage(stage_value)
+    )
     return {
         "status": "ok",
         "session_id": session_id,
@@ -601,7 +691,9 @@ async def set_outfall_tidal(
     """Assign a tidal curve to a TIDAL outfall (hour-of-day vs stage)."""
     session = await _get_session(ctx, session_id)
     idx = await _resolve_node(session, node_id)
-    await asyncio.to_thread(session.nodes.set_outfall_tidal, idx, curve_index)
+    await asyncio.to_thread(
+        lambda: session.nodes[idx].outfall.set_tidal_curve(curve_index)
+    )
     return {
         "status": "ok",
         "session_id": session_id,
@@ -621,7 +713,9 @@ async def set_outfall_timeseries(
     """Assign a time series to a TIMESERIES outfall (time vs stage)."""
     session = await _get_session(ctx, session_id)
     idx = await _resolve_node(session, node_id)
-    await asyncio.to_thread(session.nodes.set_outfall_timeseries, idx, timeseries_index)
+    await asyncio.to_thread(
+        lambda: session.nodes[idx].outfall.set_timeseries(timeseries_index)
+    )
     return {
         "status": "ok",
         "session_id": session_id,
@@ -632,13 +726,55 @@ async def set_outfall_timeseries(
 
 
 @nodes_mcp.tool()
+async def get_outfall_tidal(
+    ctx: Context, session_id: str = "default", node_id: str | int = ""
+) -> dict:
+    """Return the tidal-curve index assigned to a TIDAL outfall.
+
+    Read-back of the curve set via ``set_outfall_tidal``.
+    """
+    session = await _get_session(ctx, session_id)
+    idx = await _resolve_node(session, node_id)
+    curve_idx = await asyncio.to_thread(
+        lambda: session.nodes[idx].outfall.get_tidal_curve()
+    )
+    return {
+        "session_id": session_id,
+        "node_id": node_id,
+        "node_index": idx,
+        "curve_index": curve_idx,
+    }
+
+
+@nodes_mcp.tool()
+async def get_outfall_timeseries(
+    ctx: Context, session_id: str = "default", node_id: str | int = ""
+) -> dict:
+    """Return the stage-time-series index assigned to a TIMESERIES outfall.
+
+    Read-back of the series set via ``set_outfall_timeseries``.
+    """
+    session = await _get_session(ctx, session_id)
+    idx = await _resolve_node(session, node_id)
+    ts_idx = await asyncio.to_thread(
+        lambda: session.nodes[idx].outfall.get_timeseries()
+    )
+    return {
+        "session_id": session_id,
+        "node_id": node_id,
+        "node_index": idx,
+        "timeseries_index": ts_idx,
+    }
+
+
+@nodes_mcp.tool()
 async def get_outfall_flap_gate(
     ctx: Context, session_id: str = "default", node_id: str | int = ""
 ) -> dict:
     """Return whether an outfall has a flap gate (prevents backflow)."""
     session = await _get_session(ctx, session_id)
     idx = await _resolve_node(session, node_id)
-    has_gate = await asyncio.to_thread(session.nodes.get_outfall_flap_gate, idx)
+    has_gate = await asyncio.to_thread(lambda: session.nodes[idx].outfall.flap_gate)
     return {
         "session_id": session_id,
         "node_id": node_id,
@@ -657,7 +793,12 @@ async def set_outfall_flap_gate(
     """Set whether an outfall has a flap gate."""
     session = await _get_session(ctx, session_id)
     idx = await _resolve_node(session, node_id)
-    await asyncio.to_thread(session.nodes.set_outfall_flap_gate, idx, has_gate)
+    gate_value = bool(has_gate)
+
+    def _set() -> None:
+        session.nodes[idx].outfall.flap_gate = gate_value
+
+    await asyncio.to_thread(_set)
     return {
         "status": "ok",
         "session_id": session_id,
@@ -674,7 +815,7 @@ async def get_outfall_route_to(
     """Return the subcatchment index outfall discharge is routed to (-1 = none)."""
     session = await _get_session(ctx, session_id)
     idx = await _resolve_node(session, node_id)
-    target = await asyncio.to_thread(session.nodes.get_outfall_route_to, idx)
+    target = await asyncio.to_thread(lambda: session.nodes[idx].outfall.route_to)
     return {
         "session_id": session_id,
         "node_id": node_id,
@@ -693,7 +834,12 @@ async def set_outfall_route_to(
     """Route outfall discharge to a subcatchment (``-1`` = none)."""
     session = await _get_session(ctx, session_id)
     idx = await _resolve_node(session, node_id)
-    await asyncio.to_thread(session.nodes.set_outfall_route_to, idx, subcatch_index)
+    target = int(subcatch_index)
+
+    def _set() -> None:
+        session.nodes[idx].outfall.route_to = target
+
+    await asyncio.to_thread(_set)
     return {
         "status": "ok",
         "session_id": session_id,
@@ -718,7 +864,7 @@ async def get_divider_type(
     """
     session = await _get_session(ctx, session_id)
     idx = await _resolve_node(session, node_id)
-    type_code = await asyncio.to_thread(session.nodes.get_divider_type, idx)
+    type_code = await asyncio.to_thread(lambda: int(session.nodes[idx].divider.type))
     name_map = {0: "cutoff", 1: "overflow", 2: "tabular", 3: "weir"}
     return {
         "session_id": session_id,
@@ -744,7 +890,11 @@ async def set_divider_type(
     type_int = _resolve_divider_type(divider_type)
     session = await _get_session(ctx, session_id)
     idx = await _resolve_node(session, node_id)
-    await asyncio.to_thread(session.nodes.set_divider_type, idx, type_int)
+
+    def _set() -> None:
+        session.nodes[idx].divider.type = type_int
+
+    await asyncio.to_thread(_set)
     return {
         "status": "ok",
         "session_id": session_id,
@@ -769,7 +919,9 @@ async def get_quality(
     """Return the current concentration of a pollutant at a node."""
     session = await _get_session(ctx, session_id)
     idx = await _resolve_node(session, node_id)
-    conc = await asyncio.to_thread(session.nodes.get_quality, idx, pollutant_index)
+    conc = await asyncio.to_thread(
+        lambda: session.nodes[idx].quality(pollutant_index)
+    )
     return {
         "session_id": session_id,
         "node_id": node_id,
@@ -794,11 +946,9 @@ async def set_quality_mass_flux(
     session = await _get_session(ctx, session_id)
     require_state(session, "running")
     idx = await _resolve_node(session, node_id)
+    flux_value = float(mass_flux)
     await asyncio.to_thread(
-        session.nodes.set_quality_mass_flux,
-        idx,
-        pollutant_index,
-        float(mass_flux),
+        lambda: session.nodes[idx].set_quality_mass_flux(pollutant_index, flux_value)
     )
     return {
         "status": "ok",
@@ -807,6 +957,34 @@ async def set_quality_mass_flux(
         "node_index": idx,
         "pollutant_index": pollutant_index,
         "mass_flux": mass_flux,
+    }
+
+
+@nodes_mcp.tool()
+async def set_head_boundary(
+    ctx: Context,
+    session_id: str = "default",
+    node_id: str | int = "",
+    head: float = 0.0,
+) -> dict:
+    """Apply a one-shot head boundary value at a node for the current step.
+
+    Runs against the running simulation; the value applies to the next
+    routing step only (it is not persistent).
+    """
+    session = await _get_session(ctx, session_id)
+    require_state(session, "running")
+    idx = await _resolve_node(session, node_id)
+    head_value = float(head)
+    await asyncio.to_thread(
+        lambda: session.nodes[idx].set_head_boundary(head_value)
+    )
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "node_id": node_id,
+        "node_index": idx,
+        "head": head,
     }
 
 
@@ -823,7 +1001,10 @@ async def depth_from_volume(
     """
     session = await _get_session(ctx, session_id)
     idx = await _resolve_node(session, node_id)
-    depth = await asyncio.to_thread(session.nodes.get_depth_from_volume, idx, float(volume))
+    volume_value = float(volume)
+    depth = await asyncio.to_thread(
+        lambda: session.nodes[idx].depth_from_volume(volume_value)
+    )
     return {
         "session_id": session_id,
         "node_id": node_id,

@@ -1,10 +1,25 @@
 """Backend protocol definition.
 
-Defines the interface every engine backend exposes to tools.  The shape
-mirrors the new ``openswmm.engine`` API (indexed-getter / domain-collection
-pattern) so existing tool code that uses ``session.nodes.get_depth(idx)``
-keeps working unchanged on the openswmm backend, and the legacy backend
-translates this shape onto the property-based ``LegacyNode.depth`` surface.
+Defines the interface every engine backend exposes to tools.  Both
+backends present the v1 Pythonic surface of :mod:`openswmm.engine`:
+
+- Container protocol on every collection: ``len(backend.nodes)``,
+  ``backend.nodes[id_or_idx]``, ``for n in backend.nodes``,
+  ``id_or_idx in backend.nodes``.
+- Item access returns wrapper objects exposing property-style attribute
+  reads/writes: ``backend.nodes["J1"].depth``,
+  ``backend.nodes["J1"].lateral_inflow = 0.5``.
+- Sub-views per type: ``node.stats``, ``node.storage``, ``node.outfall``,
+  ``link.pump``, ``link.weir``, ``subcatchment.infiltration``, etc.
+  Available only on the openswmm backend; the legacy backend raises
+  :class:`AttributeError` on these.
+
+The legacy adapter has scalar accessor methods (``get_depth(idx)``,
+``get_type(idx)``, …) on each collection — these are **not** a public
+transition shim, they are the SWMM-5-toolkit dispatch path that the
+``_LegacyNode`` / ``_LegacyLink`` / etc. wrappers call into.  Treat them
+as private implementation; the public surface is the v1 shape described
+above.
 """
 
 from __future__ import annotations
@@ -22,16 +37,17 @@ class Backend(Protocol):
         ``"openswmm"`` or ``"legacy"``.  Tools that require the new engine
         check this via :func:`openswmm_mcp.dependencies.require_new_engine`.
     solver:
-        Lifecycle-managing solver handle.  Has ``open / initialize / start /
-        step / end / report / close / destroy`` plus ``get_start_time``,
-        ``get_end_time``, ``get_current_time``, ``get_routing_step``,
-        ``get_option``, ``elapsed``, ``state``.  For the legacy backend this
-        is a thin adapter; for openswmm it is the raw new-engine ``Solver``.
+        Lifecycle-managing solver handle.  Has ``open / initialize / start
+        / step / end / report / close / destroy``, plus ``elapsed``,
+        ``state``, ``start_datetime``, ``end_datetime``,
+        ``current_datetime``, and (openswmm only) ``steps()`` /
+        ``stride(n)`` / ``until(target)``.
     nodes / links / subcatchments / gages / pollutants:
-        Domain-collection accessors with ``count()``, ``get_id(idx)``,
-        ``get_index(name)``, plus typed ``get_*`` / ``set_*`` methods.
+        v1-shape collections: ``len(...)``, ``[key]`` returning wrappers
+        with property-style attribute access, iteration, and ``in``.
     mass_balance:
-        Continuity-error queries returning fractions (0.001 = 0.1 %).
+        Continuity-error queries returning fractions (0.001 = 0.1 %),
+        accessible via property-style ``mass_balance.runoff_continuity_error``.
     forcing:
         Runtime forcing dispatcher.  On legacy a subset of methods is
         available; unsupported methods raise :class:`NotImplementedError`
@@ -42,11 +58,11 @@ class Backend(Protocol):
         ``apply(solver)``.  Legacy backend wraps ``solver.save_hotstart`` /
         ``solver.use_hotstart`` to match this shape.
 
-    New-engine-only attributes (``model_builder``, ``editor``, ``statistics``,
-    ``spatial``, ``tables``, ``controls``, ``inflows``, ``infrastructure``,
-    ``quality``, ``output_reader``) raise :class:`AttributeError` on the
-    legacy backend; tools that need them must guard with
-    :func:`openswmm_mcp.dependencies.require_new_engine`.
+    New-engine-only attributes (``editor``, ``statistics``, ``spatial``,
+    ``tables``, ``patterns``, ``controls``, ``inflows``,
+    ``infrastructure``, ``quality``, ``save_schedule``) raise
+    :class:`AttributeError` on the legacy backend; tools that need them
+    must guard with :func:`openswmm_mcp.dependencies.require_new_engine`.
     """
 
     engine_kind: str

@@ -59,7 +59,7 @@ class TestOutputMetadata:
         assert result["subcatchment_count"] == 7
         assert result["period_count"] > 0
         assert result["report_step_seconds"] > 0
-        assert result["start_date"] > 0
+        assert result["start_date"]  # ISO-8601 start datetime string
         # Version + units codes are non-negative integers.
         assert result["version"] >= 0
         assert result["flow_units_code"] >= 0
@@ -341,3 +341,71 @@ class TestOutputSubcatchResults:
         assert result["count"] == 7
         ids = [r["id"] for r in result["results"]]
         assert "S1" in ids
+
+
+# ===========================================================================
+# Post-run node statistics (output_node_stats — drift-sweep addition)
+# ===========================================================================
+
+
+class TestOutputNodeStats:
+    """The new C API surface added node-stat aggregators on the output
+    reader (``swmm_output_get_node_stat_max_depth`` and friends).  This
+    MCP tool wraps all four into one ``output_node_stats`` call so an
+    LLM consumer doesn't pay 4 thread submissions to assemble the
+    response.
+    """
+
+    async def test_returns_all_four_fields(self, session_manager, inp_path):
+        from openswmm_mcp.tools.analysis import output_node_stats
+
+        ctx = await _run_to_ended(session_manager, inp_path, "ons_fields")
+        result = await output_node_stats(
+            ctx, session_id="ons_fields", node_id="J1")
+
+        for key in (
+            "max_depth", "max_overflow",
+            "total_flood_volume",
+            "time_flooded_seconds", "time_flooded_hours",
+        ):
+            assert key in result, f"missing field: {key}"
+            assert isinstance(result[key], float)
+            assert result[key] >= 0.0
+
+    async def test_seconds_and_hours_are_consistent(
+        self, session_manager, inp_path,
+    ):
+        from openswmm_mcp.tools.analysis import output_node_stats
+
+        ctx = await _run_to_ended(session_manager, inp_path, "ons_units")
+        result = await output_node_stats(
+            ctx, session_id="ons_units", node_id="J1")
+        assert result["time_flooded_hours"] == pytest.approx(
+            result["time_flooded_seconds"] / 3600.0)
+
+    async def test_empty_node_id_rejected(self, session_manager, inp_path):
+        from openswmm_mcp.tools.analysis import output_node_stats
+
+        ctx = await _run_to_ended(session_manager, inp_path, "ons_empty")
+        with pytest.raises(ToolError, match="VALIDATION_ERROR"):
+            await output_node_stats(ctx, session_id="ons_empty", node_id="")
+
+    async def test_unknown_node_id_rejected(self, session_manager, inp_path):
+        from openswmm_mcp.tools.analysis import output_node_stats
+
+        ctx = await _run_to_ended(session_manager, inp_path, "ons_bad")
+        with pytest.raises(ToolError, match="ELEMENT_NOT_FOUND"):
+            await output_node_stats(
+                ctx, session_id="ons_bad", node_id="DOES_NOT_EXIST")
+
+    async def test_includes_node_index(self, session_manager, inp_path):
+        """Response carries both the string id and the resolved index
+        so consumers can correlate with bulk-array results."""
+        from openswmm_mcp.tools.analysis import output_node_stats
+
+        ctx = await _run_to_ended(session_manager, inp_path, "ons_idx")
+        result = await output_node_stats(
+            ctx, session_id="ons_idx", node_id="J1")
+        assert result["node_id"] == "J1"
+        assert isinstance(result["node_index"], int)
+        assert result["node_index"] >= 0

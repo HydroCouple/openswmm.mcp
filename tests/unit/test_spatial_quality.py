@@ -10,9 +10,12 @@ from openswmm_mcp.errors import ToolError
 from openswmm_mcp.models import SpatialResult
 from openswmm_mcp.tools.spatial_quality import (
     add_lid,
+    get_all_coordinates,
     get_coordinates,
     get_quality,
     set_coordinates,
+    set_gage_coord,
+    set_node_coords_bulk,
     set_treatment,
 )
 
@@ -173,6 +176,90 @@ class TestSetCoordinates:
                 element_id="",
                 x=0.0,
                 y=0.0,
+            )
+
+
+# ---------------------------------------------------------------------------
+# set_gage_coord
+# ---------------------------------------------------------------------------
+
+
+class TestSetGageCoord:
+    async def test_set_gage_coord_roundtrips(self, fake_ctx, inp_path, reference_model):
+        """set_gage_coord updates the gage's coordinates, visible via the bulk read."""
+        await _open(fake_ctx, inp_path, "gage_coord")
+        result = await set_gage_coord(
+            fake_ctx,
+            session_id="gage_coord",
+            gage_id=reference_model.GAGE_ID,
+            x=123.0,
+            y=456.0,
+        )
+        assert result["status"] == "updated"
+        assert result["gage_id"] == reference_model.GAGE_ID
+        assert result["x"] == 123.0
+        assert result["y"] == 456.0
+
+        allc = await get_all_coordinates(
+            fake_ctx, session_id="gage_coord", element_type="gage"
+        )
+        rec = next(r for r in allc["coordinates"] if r["id"] == reference_model.GAGE_ID)
+        assert rec["x"] == pytest.approx(123.0)
+        assert rec["y"] == pytest.approx(456.0)
+
+    async def test_set_gage_coord_requires_id(self, fake_ctx, inp_path):
+        await _open(fake_ctx, inp_path, "gage_coord_noid")
+        with pytest.raises(ToolError, match="gage_id is required"):
+            await set_gage_coord(fake_ctx, session_id="gage_coord_noid", gage_id="")
+
+    async def test_set_gage_coord_unknown(self, fake_ctx, inp_path):
+        await _open(fake_ctx, inp_path, "gage_coord_bad")
+        with pytest.raises(ToolError, match="not found"):
+            await set_gage_coord(
+                fake_ctx, session_id="gage_coord_bad", gage_id="NOPE", x=1.0, y=2.0
+            )
+
+
+# ---------------------------------------------------------------------------
+# set_node_coords_bulk
+# ---------------------------------------------------------------------------
+
+
+class TestSetNodeCoordsBulk:
+    async def test_bulk_roundtrips(self, fake_ctx, inp_path, reference_model):
+        """set_node_coords_bulk replaces every node coordinate at once."""
+        await _open(fake_ctx, inp_path, "bulk_coord")
+        n = reference_model.NODE_COUNT
+        coords = [[float(i), float(i) + 0.5] for i in range(n)]
+        result = await set_node_coords_bulk(
+            fake_ctx, session_id="bulk_coord", coordinates=coords
+        )
+        assert result["status"] == "updated"
+        assert result["node_count"] == n
+
+        allc = await get_all_coordinates(
+            fake_ctx, session_id="bulk_coord", element_type="node"
+        )
+        assert allc["count"] == n
+        # get_all_coordinates returns records in node-index order.
+        assert allc["coordinates"][0]["x"] == pytest.approx(0.0)
+        assert allc["coordinates"][0]["y"] == pytest.approx(0.5)
+        assert allc["coordinates"][n - 1]["x"] == pytest.approx(float(n - 1))
+
+    async def test_wrong_count_rejected(self, fake_ctx, inp_path):
+        await _open(fake_ctx, inp_path, "bulk_coord_bad")
+        with pytest.raises(ToolError, match="exactly one"):
+            await set_node_coords_bulk(
+                fake_ctx, session_id="bulk_coord_bad", coordinates=[[1.0, 2.0]]
+            )
+
+    async def test_malformed_pair_rejected(self, fake_ctx, inp_path):
+        await _open(fake_ctx, inp_path, "bulk_coord_malformed")
+        with pytest.raises(ToolError, match="two-element"):
+            await set_node_coords_bulk(
+                fake_ctx,
+                session_id="bulk_coord_malformed",
+                coordinates=[[1.0, 2.0, 3.0]],
             )
 
 

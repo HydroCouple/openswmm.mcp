@@ -86,6 +86,19 @@ class SimulationResult(BaseModel):
     runoff_continuity_error: float
     routing_continuity_error: float
     quality_continuity_error: float | None = None
+    # ------------------------------------------------------------------
+    # Phase 4d: backend-conditional discriminator.
+    #
+    # ``engine_kind`` advertises which backend produced the response
+    # ("openswmm" or "legacy"); ``unsupported_fields`` lists fields whose
+    # value is meaningless on the active backend (e.g.
+    # ``quality_continuity_error`` is silently None on legacy when there
+    # are no pollutants, but on the new engine it returns a per-pollutant
+    # error).  This lets LLM consumers distinguish "feature not supported
+    # on this backend" from "feature supported and returned None".
+    # ------------------------------------------------------------------
+    engine_kind: str | None = None
+    unsupported_fields: list[str] | None = None
 
 
 class StepResult(BaseModel):
@@ -326,6 +339,19 @@ class MassBalanceResult(BaseModel):
     routing_total: dict[str, float]
     routing_stats: dict[str, float] | None = None
     max_courant: float | None = None
+    # ------------------------------------------------------------------
+    # Phase 4d: backend-conditional discriminator.
+    #
+    # ``routing_stats`` and the per-pollutant ``quality_continuity_errors``
+    # dict are available only on the new engine (the legacy backend lacks
+    # ``get_routing_stats`` and silently ignores the ``pollutant_index``
+    # argument to ``get_quality_continuity_error``).  Without an explicit
+    # discriminator an LLM caller can't tell whether ``routing_stats``
+    # being ``None`` means "supported but no convergence issues" vs
+    # "not supported on this backend."
+    # ------------------------------------------------------------------
+    engine_kind: str | None = None
+    unsupported_fields: list[str] | None = None
 
 
 # ---------------------------------------------------------------------------

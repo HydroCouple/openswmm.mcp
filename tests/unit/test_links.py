@@ -220,6 +220,175 @@ class TestConduitDetail:
 
 
 # ===========================================================================
+# Orifice / outlet / pump-depth subtype accessors (P3)
+# ===========================================================================
+
+
+class TestOrificeAccessors:
+    async def test_open_close_rate_round_trip(self, session_manager, inp_path):
+        from openswmm_mcp.tools.links import (
+            get_orifice_open_close_rate,
+            set_orifice_open_close_rate,
+        )
+
+        ctx = await _opened(session_manager, inp_path, "l_orc")
+        # OR1 is the orifice in the reference model.
+        try:
+            await set_orifice_open_close_rate(
+                ctx, session_id="l_orc", link_id="OR1", open_close_rate=2.0
+            )
+        except (ToolError, RuntimeError) as e:
+            pytest.skip(f"set_orifice_open_close_rate not allowed/applicable: {e}")
+        r = await get_orifice_open_close_rate(ctx, session_id="l_orc", link_id="OR1")
+        assert r["open_close_rate"] == pytest.approx(2.0)
+
+
+class TestOutletAccessors:
+    async def test_expon_round_trip(self, session_manager, inp_path):
+        from openswmm_mcp.tools.links import get_outlet_expon, set_outlet_expon
+
+        ctx = await _opened(session_manager, inp_path, "l_oex")
+        try:
+            await set_outlet_expon(ctx, session_id="l_oex", link_id="OL1", expon=1.5)
+        except (ToolError, RuntimeError) as e:
+            pytest.skip(f"set_outlet_expon not allowed/applicable: {e}")
+        r = await get_outlet_expon(ctx, session_id="l_oex", link_id="OL1")
+        assert r["expon"] == pytest.approx(1.5)
+
+    async def test_rating_type_returns_code_and_name(self, session_manager, inp_path):
+        from openswmm_mcp.tools.links import get_outlet_rating_type
+
+        ctx = await _opened(session_manager, inp_path, "l_ort")
+        try:
+            r = await get_outlet_rating_type(ctx, session_id="l_ort", link_id="OL1")
+        except (ToolError, RuntimeError) as e:
+            pytest.skip(f"get_outlet_rating_type not applicable: {e}")
+        assert isinstance(r["rating_type_code"], int)
+        assert isinstance(r["rating_type"], str)
+
+    async def test_set_rating_type_round_trip(self, session_manager, inp_path):
+        from openswmm_mcp.tools.links import (
+            get_outlet_rating_type,
+            set_outlet_rating_type,
+        )
+
+        ctx = await _opened(session_manager, inp_path, "l_ort_s")
+        try:
+            await set_outlet_rating_type(
+                ctx, session_id="l_ort_s", link_id="OL1", rating_type=2
+            )
+        except (ToolError, RuntimeError) as e:
+            pytest.skip(f"set_outlet_rating_type not allowed/applicable: {e}")
+        r = await get_outlet_rating_type(ctx, session_id="l_ort_s", link_id="OL1")
+        assert r["rating_type_code"] == 2
+        assert r["rating_type"] == "tabular_head"
+
+
+class TestPumpDepthAccessors:
+    async def test_startup_depth_round_trip(self, session_manager, inp_path):
+        from openswmm_mcp.tools.links import (
+            get_pump_startup_depth,
+            set_pump_startup_depth,
+        )
+
+        ctx = await _opened(session_manager, inp_path, "l_psu")
+        try:
+            await set_pump_startup_depth(
+                ctx, session_id="l_psu", link_id="P1", startup_depth=3.0
+            )
+        except (ToolError, RuntimeError) as e:
+            pytest.skip(f"set_pump_startup_depth not allowed/applicable: {e}")
+        r = await get_pump_startup_depth(ctx, session_id="l_psu", link_id="P1")
+        assert r["startup_depth"] == pytest.approx(3.0)
+
+    async def test_shutoff_depth_round_trip(self, session_manager, inp_path):
+        from openswmm_mcp.tools.links import (
+            get_pump_shutoff_depth,
+            set_pump_shutoff_depth,
+        )
+
+        ctx = await _opened(session_manager, inp_path, "l_pso")
+        try:
+            await set_pump_shutoff_depth(
+                ctx, session_id="l_pso", link_id="P1", shutoff_depth=1.0
+            )
+        except (ToolError, RuntimeError) as e:
+            pytest.skip(f"set_pump_shutoff_depth not allowed/applicable: {e}")
+        r = await get_pump_shutoff_depth(ctx, session_id="l_pso", link_id="P1")
+        assert r["shutoff_depth"] == pytest.approx(1.0)
+
+
+# ===========================================================================
+# Tag (P3)
+# ===========================================================================
+
+
+class TestTag:
+    async def test_tag_round_trip(self, session_manager, inp_path):
+        from openswmm_mcp.tools.links import get_tag, set_tag
+
+        ctx = await _opened(session_manager, inp_path, "l_tag")
+        await set_tag(ctx, session_id="l_tag", link_id="C1", tag="trunk-main")
+        r = await get_tag(ctx, session_id="l_tag", link_id="C1")
+        assert r["tag"] == "trunk-main"
+
+    async def test_get_tag_default_is_str(self, session_manager, inp_path):
+        from openswmm_mcp.tools.links import get_tag
+
+        ctx = await _opened(session_manager, inp_path, "l_tag2")
+        r = await get_tag(ctx, session_id="l_tag2", link_id="C1")
+        assert isinstance(r["tag"], str)
+
+
+# ===========================================================================
+# Cross-section (P3)
+# ===========================================================================
+
+
+class TestXSect:
+    async def test_get_xsect_shape_and_geom(self, session_manager, inp_path):
+        from openswmm_mcp.tools.links import get_xsect
+
+        ctx = await _opened(session_manager, inp_path, "l_xs")
+        r = await get_xsect(ctx, session_id="l_xs", link_id="C1")
+        assert isinstance(r["shape"], str)
+        assert isinstance(r["shape_code"], int)
+        for k in ("g1", "g2", "g3", "g4"):
+            assert isinstance(r[k], float)
+
+
+# ===========================================================================
+# Bulk settings + ids readers (P3)
+# ===========================================================================
+
+
+class TestBulkSettingsAndIds:
+    async def test_get_control_settings_bulk_count(self, session_manager, inp_path):
+        from openswmm_mcp.tools.links import get_control_settings_bulk
+
+        ctx = await _opened(session_manager, inp_path, "l_csb")
+        r = await get_control_settings_bulk(ctx, session_id="l_csb")
+        assert r["count"] == 11
+        assert all({"id", "index", "value"} <= set(rec) for rec in r["results"])
+
+    async def test_get_target_settings_bulk_count(self, session_manager, inp_path):
+        from openswmm_mcp.tools.links import get_target_settings_bulk
+
+        ctx = await _opened(session_manager, inp_path, "l_tsb")
+        r = await get_target_settings_bulk(ctx, session_id="l_tsb")
+        assert r["count"] == 11
+
+    async def test_get_ids_bulk(self, session_manager, inp_path):
+        from openswmm_mcp.tools.links import get_ids_bulk
+
+        ctx = await _opened(session_manager, inp_path, "l_idb")
+        r = await get_ids_bulk(ctx, session_id="l_idb")
+        assert r["count"] == 11
+        assert "C1" in r["ids"]
+        assert all(isinstance(x, str) for x in r["ids"])
+
+
+# ===========================================================================
 # Backend guard
 # ===========================================================================
 

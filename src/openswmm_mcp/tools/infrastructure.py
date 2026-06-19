@@ -40,7 +40,7 @@ from fastmcp import Context, FastMCP
 from openswmm.engine import Infrastructure, Subcatchments
 
 from openswmm_mcp.dependencies import get_session_manager, require_new_engine
-from openswmm_mcp.errors import ErrorCode, ToolError
+from openswmm_mcp.errors import ErrorCode, ToolError, resolve_index
 from openswmm_mcp.session import SimSession
 
 infrastructure_mcp = FastMCP("infrastructure")
@@ -123,7 +123,7 @@ async def _resolve_subcatch_idx(subcatchments: Any, subcatch_id: str | int) -> i
         return subcatch_id
     if not subcatch_id:
         raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] subcatch_id must not be empty.")
-    idx = await asyncio.to_thread(subcatchments.get_index, subcatch_id)
+    idx = await resolve_index(subcatchments, subcatch_id, "Subcatchment")
     if idx < 0:
         raise ToolError(
             f"[{ErrorCode.ELEMENT_NOT_FOUND}] Subcatchment '{subcatch_id}' not "
@@ -141,7 +141,7 @@ async def _resolve_subcatch_idx(subcatchments: Any, subcatch_id: str | int) -> i
 async def transect_count(ctx: Context, session_id: str = "default") -> dict:
     """Return the number of transects defined in the model."""
     _, infra, _ = await _get_accessors(ctx, session_id)
-    n = await asyncio.to_thread(infra.transect_count)
+    n = await asyncio.to_thread(lambda: len(infra.transects))
     return {"session_id": session_id, "count": n}
 
 
@@ -155,7 +155,7 @@ async def add_transect(ctx: Context, session_id: str = "default", transect_id: s
     if not transect_id:
         raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] transect_id must not be empty.")
     _, infra, _ = await _get_accessors(ctx, session_id)
-    idx = await asyncio.to_thread(infra.transect_add, transect_id)
+    idx = await asyncio.to_thread(infra.transects.add, transect_id)
     return {"status": "ok", "session_id": session_id, "id": transect_id, "index": idx}
 
 
@@ -175,7 +175,7 @@ async def set_transect_roughness(
     """
     _, infra, _ = await _get_accessors(ctx, session_id)
     await asyncio.to_thread(
-        infra.transect_set_roughness,
+        infra.transects.set_roughness,
         transect_index,
         float(n_left),
         float(n_right),
@@ -202,7 +202,7 @@ async def add_transect_station(
     """Append a single (station, elevation) point to a transect's profile."""
     _, infra, _ = await _get_accessors(ctx, session_id)
     await asyncio.to_thread(
-        infra.transect_add_station,
+        infra.transects.add_station,
         transect_index,
         float(station),
         float(elevation),
@@ -216,6 +216,233 @@ async def add_transect_station(
     }
 
 
+@infrastructure_mcp.tool()
+async def clear_stations(
+    ctx: Context, session_id: str = "default", transect_index: int = 0
+) -> dict:
+    """Remove all (station, elevation) points from a transect's profile."""
+    _, infra, _ = await _get_accessors(ctx, session_id)
+    await asyncio.to_thread(infra.transects.clear_stations, transect_index)
+    return {"status": "ok", "session_id": session_id, "transect_index": transect_index}
+
+
+@infrastructure_mcp.tool()
+async def station_count(
+    ctx: Context, session_id: str = "default", transect_index: int = 0
+) -> dict:
+    """Return the number of (station, elevation) points in a transect's profile."""
+    _, infra, _ = await _get_accessors(ctx, session_id)
+    n = await asyncio.to_thread(infra.transects.station_count, transect_index)
+    return {"session_id": session_id, "transect_index": transect_index, "count": n}
+
+
+@infrastructure_mcp.tool()
+async def get_station(
+    ctx: Context, session_id: str = "default", transect_index: int = 0, station_index: int = 0
+) -> dict:
+    """Read back a single (station, elevation) point from a transect's profile."""
+    _, infra, _ = await _get_accessors(ctx, session_id)
+    station, elevation = await asyncio.to_thread(
+        infra.transects.get_station, transect_index, station_index
+    )
+    return {
+        "session_id": session_id,
+        "transect_index": transect_index,
+        "station_index": station_index,
+        "station": station,
+        "elevation": elevation,
+    }
+
+
+@infrastructure_mcp.tool()
+async def get_transect_roughness(
+    ctx: Context, session_id: str = "default", transect_index: int = 0
+) -> dict:
+    """Read back the three Manning's roughness values of a transect.
+
+    Inverse of :func:`set_transect_roughness`. Returns ``n_left`` /
+    ``n_right`` (overbank) and ``n_channel`` (main channel).
+    """
+    _, infra, _ = await _get_accessors(ctx, session_id)
+    n_left, n_right, n_channel = await asyncio.to_thread(
+        infra.transects.get_roughness, transect_index
+    )
+    return {
+        "session_id": session_id,
+        "transect_index": transect_index,
+        "n_left": n_left,
+        "n_right": n_right,
+        "n_channel": n_channel,
+    }
+
+
+@infrastructure_mcp.tool()
+async def get_bank_stations(
+    ctx: Context, session_id: str = "default", transect_index: int = 0
+) -> dict:
+    """Read back a transect's left/right bank station positions."""
+    _, infra, _ = await _get_accessors(ctx, session_id)
+    left, right = await asyncio.to_thread(infra.transects.get_bank_stations, transect_index)
+    return {
+        "session_id": session_id,
+        "transect_index": transect_index,
+        "left": left,
+        "right": right,
+    }
+
+
+@infrastructure_mcp.tool()
+async def set_bank_stations(
+    ctx: Context,
+    session_id: str = "default",
+    transect_index: int = 0,
+    left: float = 0.0,
+    right: float = 0.0,
+) -> dict:
+    """Set a transect's left/right bank station positions.
+
+    The bank stations delimit the main channel from the overbank zones
+    (which use the left/right roughness from :func:`set_transect_roughness`).
+    """
+    _, infra, _ = await _get_accessors(ctx, session_id)
+    await asyncio.to_thread(
+        infra.transects.set_bank_stations, transect_index, float(left), float(right)
+    )
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "transect_index": transect_index,
+        "left": left,
+        "right": right,
+    }
+
+
+@infrastructure_mcp.tool()
+async def get_encroachment_stations(
+    ctx: Context, session_id: str = "default", transect_index: int = 0
+) -> dict:
+    """Read back a transect's left/right encroachment station positions."""
+    _, infra, _ = await _get_accessors(ctx, session_id)
+    left, right = await asyncio.to_thread(
+        infra.transects.get_encroachment_stations, transect_index
+    )
+    return {
+        "session_id": session_id,
+        "transect_index": transect_index,
+        "left": left,
+        "right": right,
+    }
+
+
+@infrastructure_mcp.tool()
+async def set_encroachment_stations(
+    ctx: Context,
+    session_id: str = "default",
+    transect_index: int = 0,
+    left: float = 0.0,
+    right: float = 0.0,
+) -> dict:
+    """Set a transect's left/right encroachment station positions."""
+    _, infra, _ = await _get_accessors(ctx, session_id)
+    await asyncio.to_thread(
+        infra.transects.set_encroachment_stations, transect_index, float(left), float(right)
+    )
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "transect_index": transect_index,
+        "left": left,
+        "right": right,
+    }
+
+
+@infrastructure_mcp.tool()
+async def get_modifiers(
+    ctx: Context, session_id: str = "default", transect_index: int = 0
+) -> dict:
+    """Read back a transect's roughness / station / elevation modifier factors."""
+    _, infra, _ = await _get_accessors(ctx, session_id)
+    n_factor, x_factor, y_factor = await asyncio.to_thread(
+        infra.transects.get_modifiers, transect_index
+    )
+    return {
+        "session_id": session_id,
+        "transect_index": transect_index,
+        "n_factor": n_factor,
+        "x_factor": x_factor,
+        "y_factor": y_factor,
+    }
+
+
+@infrastructure_mcp.tool()
+async def set_modifiers(
+    ctx: Context,
+    session_id: str = "default",
+    transect_index: int = 0,
+    n_factor: float = 0.0,
+    x_factor: float = 0.0,
+    y_factor: float = 0.0,
+) -> dict:
+    """Set a transect's modifier factors.
+
+    ``n_factor`` scales roughness, ``x_factor`` scales station distances,
+    and ``y_factor`` scales elevations.
+    """
+    _, infra, _ = await _get_accessors(ctx, session_id)
+    await asyncio.to_thread(
+        infra.transects.set_modifiers,
+        transect_index,
+        float(n_factor),
+        float(x_factor),
+        float(y_factor),
+    )
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "transect_index": transect_index,
+        "n_factor": n_factor,
+        "x_factor": x_factor,
+        "y_factor": y_factor,
+    }
+
+
+@infrastructure_mcp.tool()
+async def get_comments(
+    ctx: Context, session_id: str = "default", transect_index: int = 0
+) -> dict:
+    """Read back the comment text attached to a transect."""
+    _, infra, _ = await _get_accessors(ctx, session_id)
+    text = await asyncio.to_thread(infra.transects.get_comments, transect_index)
+    return {"session_id": session_id, "transect_index": transect_index, "text": text}
+
+
+@infrastructure_mcp.tool()
+async def set_comments(
+    ctx: Context, session_id: str = "default", transect_index: int = 0, text: str = ""
+) -> dict:
+    """Set the comment text attached to a transect."""
+    _, infra, _ = await _get_accessors(ctx, session_id)
+    await asyncio.to_thread(infra.transects.set_comments, transect_index, text)
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "transect_index": transect_index,
+        "text": text,
+    }
+
+
+@infrastructure_mcp.tool()
+async def remove_transect(
+    ctx: Context, session_id: str = "default", transect: str | int = ""
+) -> dict:
+    """Remove a transect by string ID or integer index."""
+    if isinstance(transect, str) and not transect:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] transect must not be empty.")
+    _, infra, _ = await _get_accessors(ctx, session_id)
+    await asyncio.to_thread(infra.transects.remove, transect)
+    return {"status": "ok", "session_id": session_id, "transect": transect}
+
+
 # ===========================================================================
 # [STREETS]
 # ===========================================================================
@@ -225,7 +452,7 @@ async def add_transect_station(
 async def street_count(ctx: Context, session_id: str = "default") -> dict:
     """Return the number of street cross-sections in the model."""
     _, infra, _ = await _get_accessors(ctx, session_id)
-    n = await asyncio.to_thread(infra.street_count)
+    n = await asyncio.to_thread(lambda: len(infra.streets))
     return {"session_id": session_id, "count": n}
 
 
@@ -235,7 +462,7 @@ async def add_street(ctx: Context, session_id: str = "default", street_id: str =
     if not street_id:
         raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] street_id must not be empty.")
     _, infra, _ = await _get_accessors(ctx, session_id)
-    idx = await asyncio.to_thread(infra.street_add, street_id)
+    idx = await asyncio.to_thread(infra.streets.add, street_id)
     return {"status": "ok", "session_id": session_id, "id": street_id, "index": idx}
 
 
@@ -278,23 +505,42 @@ async def set_street_params(
         raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] sides must be 1 or 2; got {sides}.")
     _, infra, _ = await _get_accessors(ctx, session_id)
     await asyncio.to_thread(
-        infra.street_set_params,
+        infra.streets.set_params,
         street_index,
-        float(t_crown),
-        float(h_curb),
-        float(sx),
-        float(n_road),
-        float(gutter_depres),
-        float(gutter_width),
-        sides,
-        float(back_width),
-        float(back_slope),
-        float(back_n),
+        t_crown=float(t_crown),
+        h_curb=float(h_curb),
+        sx=float(sx),
+        n_road=float(n_road),
+        gutter_depres=float(gutter_depres),
+        gutter_width=float(gutter_width),
+        sides=sides,
+        back_width=float(back_width),
+        back_slope=float(back_slope),
+        back_n=float(back_n),
     )
     return {
         "status": "ok",
         "session_id": session_id,
         "street_index": street_index,
+    }
+
+
+@infrastructure_mcp.tool()
+async def get_street_params(
+    ctx: Context, session_id: str = "default", street_index: int = 0
+) -> dict:
+    """Read back a street cross-section's geometric parameters.
+
+    Inverse of :func:`set_street_params`. Returns a ``params`` dict with
+    keys ``t_crown``, ``h_curb``, ``sx``, ``n_road``, ``gutter_depres``,
+    ``gutter_width``, ``sides``, ``back_width``, ``back_slope``, ``back_n``.
+    """
+    _, infra, _ = await _get_accessors(ctx, session_id)
+    params = await asyncio.to_thread(infra.streets.get_params, street_index)
+    return {
+        "session_id": session_id,
+        "street_index": street_index,
+        "params": params,
     }
 
 
@@ -307,7 +553,7 @@ async def set_street_params(
 async def inlet_count(ctx: Context, session_id: str = "default") -> dict:
     """Return the number of inlets defined in the model."""
     _, infra, _ = await _get_accessors(ctx, session_id)
-    n = await asyncio.to_thread(infra.inlet_count)
+    n = await asyncio.to_thread(lambda: len(infra.inlets))
     return {"session_id": session_id, "count": n}
 
 
@@ -329,7 +575,7 @@ async def add_inlet(
     if not inlet_type:
         raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] inlet_type must not be empty.")
     _, infra, _ = await _get_accessors(ctx, session_id)
-    idx = await asyncio.to_thread(infra.inlet_add, inlet_id, inlet_type)
+    idx = await asyncio.to_thread(infra.inlets.add, inlet_id, inlet_type)
     return {
         "status": "ok",
         "session_id": session_id,
@@ -358,13 +604,13 @@ async def set_inlet_params(
     """
     _, infra, _ = await _get_accessors(ctx, session_id)
     await asyncio.to_thread(
-        infra.inlet_set_params,
+        infra.inlets.set_params,
         inlet_index,
-        float(length),
-        float(width),
-        grate_type,
-        float(open_area),
-        float(splash_veloc),
+        length=float(length),
+        width=float(width),
+        grate_type=grate_type,
+        open_area=float(open_area),
+        splash_veloc=float(splash_veloc),
     )
     return {
         "status": "ok",
@@ -385,7 +631,7 @@ async def set_inlet_params(
 async def lid_count(ctx: Context, session_id: str = "default") -> dict:
     """Return the number of LID controls defined in the model."""
     _, infra, _ = await _get_accessors(ctx, session_id)
-    n = await asyncio.to_thread(infra.lid_count)
+    n = await asyncio.to_thread(lambda: len(infra.lids))
     return {"session_id": session_id, "count": n}
 
 
@@ -413,7 +659,7 @@ async def add_lid(
         raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] lid_id must not be empty.")
     type_int = _resolve_lid_type(lid_type)
     _, infra, _ = await _get_accessors(ctx, session_id)
-    idx = await asyncio.to_thread(infra.lid_add, lid_id, type_int)
+    idx = await asyncio.to_thread(infra.lids.add, lid_id, type_int)
     return {
         "status": "ok",
         "session_id": session_id,
@@ -435,11 +681,11 @@ async def set_lid_surface(
     """Set LID surface-layer parameters: storage depth, roughness, slope."""
     _, infra, _ = await _get_accessors(ctx, session_id)
     await asyncio.to_thread(
-        infra.lid_set_surface,
+        infra.lids.set_surface,
         lid_index,
-        float(storage),
-        float(roughness),
-        float(slope),
+        storage=float(storage),
+        roughness=float(roughness),
+        slope=float(slope),
     )
     return {
         "status": "ok",
@@ -478,14 +724,14 @@ async def set_lid_soil(
     """
     _, infra, _ = await _get_accessors(ctx, session_id)
     await asyncio.to_thread(
-        infra.lid_set_soil,
+        infra.lids.set_soil,
         lid_index,
-        float(thick),
-        float(porosity),
-        float(fc),
-        float(wp),
-        float(ksat),
-        float(kslope),
+        thick=float(thick),
+        porosity=float(porosity),
+        fc=float(fc),
+        wp=float(wp),
+        ksat=float(ksat),
+        kslope=float(kslope),
     )
     return {
         "status": "ok",
@@ -506,11 +752,11 @@ async def set_lid_storage(
     """Set LID storage-layer parameters: thickness, void fraction, k_sat."""
     _, infra, _ = await _get_accessors(ctx, session_id)
     await asyncio.to_thread(
-        infra.lid_set_storage,
+        infra.lids.set_storage,
         lid_index,
-        float(thick),
-        float(void_frac),
-        float(ksat),
+        thick=float(thick),
+        void_frac=float(void_frac),
+        ksat=float(ksat),
     )
     return {
         "status": "ok",
@@ -534,11 +780,11 @@ async def set_lid_drain(
     """
     _, infra, _ = await _get_accessors(ctx, session_id)
     await asyncio.to_thread(
-        infra.lid_set_drain,
+        infra.lids.set_drain,
         lid_index,
-        float(coeff),
-        float(expon),
-        float(offset),
+        coeff=float(coeff),
+        expon=float(expon),
+        offset=float(offset),
     )
     return {
         "status": "ok",
@@ -601,7 +847,7 @@ async def add_lid_usage(
     _, infra, subcatchments = await _get_accessors(ctx, session_id)
     sc_idx = await _resolve_subcatch_idx(subcatchments, subcatch_id)
     await asyncio.to_thread(
-        infra.lid_usage_add,
+        infra.lids.usage_add,
         sc_idx,
         lid_index,
         number,

@@ -20,6 +20,7 @@ class ErrorCode:
     VALIDATION_ERROR: str = "VALIDATION_ERROR"
     MAX_SESSIONS_REACHED: str = "MAX_SESSIONS_REACHED"
     NOT_SUPPORTED: str = "NOT_SUPPORTED"
+    STALE_OBJECT: str = "STALE_OBJECT"
 
 
 # ---------------------------------------------------------------------------
@@ -63,3 +64,62 @@ def engine_error_response(exc: BaseException) -> dict[str, Any]:
         "message": str(exc),
         "detail": traceback.format_exception(type(exc), exc, exc.__traceback__),
     }
+
+
+# ---------------------------------------------------------------------------
+# StaleObjectError translation
+# ---------------------------------------------------------------------------
+#
+# v1 wrappers (``Node``, ``Link``, etc.) are tied to a generation counter on
+# the Solver.  Mutations like ``delete_object`` or ``rename_*`` bump the
+# generation, after which any wrapper minted earlier raises
+# ``StaleObjectError`` when its properties are accessed.  Tools that hand a
+# wrapper to a worker thread can hit this in the middle of an
+# ``asyncio.to_thread`` callable.  Without translation, the engine
+# exception escapes as a 500-shaped failure.  Wrap the engine surface with
+# this helper to surface a clean ``ToolError`` instead.
+
+try:
+    from openswmm.engine import StaleObjectError as _EngineStaleObjectError
+except ImportError:  # pragma: no cover
+    _EngineStaleObjectError = None  # type: ignore[assignment]
+
+
+def translate_stale_object(exc: BaseException) -> ToolError | None:
+    """Return a ``ToolError`` if *exc* is an engine StaleObjectError, else ``None``.
+
+    Lets tool code do::
+
+        try:
+            value = await asyncio.to_thread(lambda: session.nodes[idx].depth)
+        except Exception as e:
+            translated = translate_stale_object(e)
+            if translated is not None:
+                raise translated
+            raise
+
+    Or use :func:`raise_stale_object_as_tool_error` as a one-liner
+    re-raise inside a focused try/except.
+    """
+    if _EngineStaleObjectError is None:
+        return None
+    if not isinstance(exc, _EngineStaleObjectError):
+        return None
+    return ToolError(
+        f"[{ErrorCode.STALE_OBJECT}] {exc} "
+        "Re-look up the element from session.nodes / session.links / etc."
+    )
+
+
+def raise_stale_object_as_tool_error(exc: BaseException) -> None:
+    """Raise a translated ToolError when *exc* is a StaleObjectError.
+
+    Helper for tool authors who want a single-line re-raise inside a
+    narrow ``try/except StaleObjectError`` (or a broad ``except
+    Exception``) clause.  Returns normally — i.e. is a no-op — when the
+    exception is not a stale-object error, so the caller can ``raise`` the
+    original after this returns.
+    """
+    translated = translate_stale_object(exc)
+    if translated is not None:
+        raise translated from exc

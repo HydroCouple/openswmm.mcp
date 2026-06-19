@@ -242,6 +242,108 @@ class TestQuality:
 
 
 # ===========================================================================
+# Identity: tag get/set, bulk ids, outlet-subcatchment routing
+# ===========================================================================
+
+
+class TestSubcatchIdentity:
+    async def test_tag_round_trip(self, session_manager, inp_path):
+        from openswmm_mcp.tools.subcatchments import get_tag, set_tag
+
+        ctx = await _opened(session_manager, inp_path, "sc_tag")
+        before = await get_tag(ctx, session_id="sc_tag", subcatch_id="S1")
+        assert before["tag"] == ""
+        await set_tag(ctx, session_id="sc_tag", subcatch_id="S1", tag="Urban")
+        after = await get_tag(ctx, session_id="sc_tag", subcatch_id="S1")
+        assert after["tag"] == "Urban"
+        await set_tag(ctx, session_id="sc_tag", subcatch_id="S1", tag="")
+        cleared = await get_tag(ctx, session_id="sc_tag", subcatch_id="S1")
+        assert cleared["tag"] == ""
+
+    async def test_get_ids_bulk_shape(self, session_manager, inp_path):
+        from openswmm_mcp.tools.subcatchments import get_ids_bulk
+
+        ctx = await _opened(session_manager, inp_path, "sc_ids")
+        result = await get_ids_bulk(ctx, session_id="sc_ids")
+        assert result["count"] == 7
+        assert len(result["ids"]) == 7
+        assert "S1" in result["ids"]
+        for x in result["ids"]:
+            assert isinstance(x, str)
+
+    async def test_set_outlet_subcatchment_round_trip(self, session_manager, inp_path):
+        from openswmm_mcp.tools.subcatchments import set_outlet_subcatchment
+
+        ctx = await _opened(session_manager, inp_path, "sc_outlet")
+        try:
+            r = await set_outlet_subcatchment(
+                ctx,
+                session_id="sc_outlet",
+                subcatch_id="S1",
+                outlet_subcatch_id="S2",
+            )
+        except (ToolError, RuntimeError) as e:
+            pytest.skip(f"set_outlet_subcatchment rejected in this state: {e}")
+        assert r["status"] == "ok"
+        assert r["outlet_subcatch_index"] >= 0
+
+    async def test_set_outlet_subcatchment_unknown_target(self, session_manager, inp_path):
+        from openswmm_mcp.tools.subcatchments import set_outlet_subcatchment
+
+        ctx = await _opened(session_manager, inp_path, "sc_outlet_bad")
+        with pytest.raises(ToolError, match="ELEMENT_NOT_FOUND|not found"):
+            await set_outlet_subcatchment(
+                ctx,
+                session_id="sc_outlet_bad",
+                subcatch_id="S1",
+                outlet_subcatch_id="NOPE",
+            )
+
+
+# ===========================================================================
+# Aquifer parameters
+#
+# The reference model has no [AQUIFERS] section, so the round-trip test skips
+# cleanly when no aquifer exists; the validation test pins the param-token
+# resolver without needing an aquifer.
+# ===========================================================================
+
+
+class TestAquiferParams:
+    async def test_unknown_param_rejected(self, session_manager, inp_path):
+        from openswmm_mcp.tools.subcatchments import aquifer_get_param
+
+        ctx = await _opened(session_manager, inp_path, "aq_bad")
+        with pytest.raises(ToolError, match="Unknown aquifer param"):
+            await aquifer_get_param(
+                ctx, session_id="aq_bad", aquifer_id=0, param="bogus"
+            )
+
+    async def test_param_round_trip(self, session_manager, inp_path):
+        from openswmm_mcp.tools.subcatchments import (
+            aquifer_get_param,
+            aquifer_set_param,
+        )
+
+        ctx = await _opened(session_manager, inp_path, "aq_rt")
+        try:
+            await aquifer_set_param(
+                ctx,
+                session_id="aq_rt",
+                aquifer_id=0,
+                param="porosity",
+                value=0.45,
+            )
+            r = await aquifer_get_param(
+                ctx, session_id="aq_rt", aquifer_id=0, param="porosity"
+            )
+        except (ToolError, RuntimeError, Exception) as e:
+            pytest.skip(f"Reference model has no aquifer: {e}")
+        assert r["value"] == pytest.approx(0.45)
+        assert r["param_code"] == 0
+
+
+# ===========================================================================
 # Backend guard
 # ===========================================================================
 
@@ -261,3 +363,31 @@ class TestLegacyGuard:
         ctx = MockContext(session_manager)
         with pytest.raises(ToolError, match="not supported|legacy"):
             await stat_max_runoff(ctx, session_id="legacy_sc", subcatch_id="S1")
+
+
+# ===========================================================================
+# Groundwater / snow state injection (running-only gating)
+#
+# The deep round-trip behaviour (warm-start values surviving a step) is owned
+# and tested by the engine suite (test_state_injection.py S1/S2); the model
+# fixtures here have no aquifer/snowpack, so these tests pin the MCP layer's
+# contract: the tools are rejected outside the running state.
+# ===========================================================================
+
+
+class TestStateInjectionGating:
+    async def test_set_gw_state_requires_running(self, session_manager, inp_path):
+        from openswmm_mcp.tools.subcatchments import set_gw_state
+
+        ctx = await _opened(session_manager, inp_path, "sc_gw_gate")
+        with pytest.raises(ToolError, match="running"):
+            await set_gw_state(ctx, session_id="sc_gw_gate", subcatch_id="S1", theta=0.3)
+
+    async def test_set_snow_state_requires_running(self, session_manager, inp_path):
+        from openswmm_mcp.tools.subcatchments import set_snow_state
+
+        ctx = await _opened(session_manager, inp_path, "sc_snow_gate")
+        with pytest.raises(ToolError, match="running"):
+            await set_snow_state(
+                ctx, session_id="sc_snow_gate", subcatch_id="S1", surface=2, swe=1.0
+            )

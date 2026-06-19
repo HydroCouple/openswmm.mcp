@@ -173,6 +173,138 @@ class TestGetLinkInfo:
         with pytest.raises(ToolError, match="ELEMENT_NOT_FOUND"):
             await get_link_info(ctx, session_id="ql_bad", link_id="BOGUS")
 
+    # ------------------------------------------------------------------
+    # Phase 4b: all-mode now uses _build_all_link_infos_sync. Verify that
+    # the bulk path produces records equivalent to the per-link path.
+    # ------------------------------------------------------------------
+
+    async def test_get_link_info_all_matches_per_link_path(
+        self, session_manager, tmp_inp, reference_model,
+    ):
+        """All-mode (bulk path) must produce the same LinkInfo records as
+        calling the per-link path for each id. A regression where a bulk
+        getter reads the wrong column would show up here as a per-field
+        mismatch."""
+        from openswmm_mcp.tools.query import get_link_info
+
+        ctx = await _open(session_manager, tmp_inp, "ql_eq")
+        all_links = await get_link_info(ctx, session_id="ql_eq")
+        assert isinstance(all_links, list)
+        assert len(all_links) == reference_model.LINK_COUNT
+
+        # Per-link spot check on every link in the fixture.
+        for record in all_links:
+            single = await get_link_info(
+                ctx, session_id="ql_eq", link_id=record.link_id)
+            assert isinstance(single, LinkInfo)
+            # Static identity / topology — must match exactly.
+            assert single.link_id == record.link_id
+            assert single.index == record.index
+            assert single.link_type == record.link_type
+            assert single.from_node == record.from_node
+            assert single.to_node == record.to_node
+            # Static geometry — match to numeric tolerance.
+            assert single.length == pytest.approx(record.length)
+            assert single.roughness == pytest.approx(record.roughness)
+            assert single.slope == pytest.approx(record.slope)
+
+    async def test_get_link_info_all_preserves_index_order(
+        self, session_manager, tmp_inp, reference_model,
+    ):
+        """The bulk all-mode loop iterates links in index order; the
+        returned list must reflect that contract."""
+        from openswmm_mcp.tools.query import get_link_info
+
+        ctx = await _open(session_manager, tmp_inp, "ql_idx")
+        result = await get_link_info(ctx, session_id="ql_idx")
+        indices = [li.index for li in result]
+        assert indices == list(range(reference_model.LINK_COUNT))
+
+
+# ---------------------------------------------------------------------------
+# Phase 4d: pagination on get_node_info / get_link_info
+# ---------------------------------------------------------------------------
+
+
+class TestPagination:
+    """``start_index`` / ``limit`` semantics for the all-mode list tools.
+
+    Pagination is applied **after** the bulk fetch (the engine still
+    walks the whole network); these tests verify the slice math and the
+    "no pagination" default.
+    """
+
+    async def test_node_info_default_returns_all(
+        self, session_manager, tmp_inp, reference_model,
+    ):
+        from openswmm_mcp.tools.query import get_node_info
+
+        ctx = await _open(session_manager, tmp_inp, "pg_node_all")
+        result = await get_node_info(ctx, session_id="pg_node_all")
+        assert isinstance(result, list)
+        assert len(result) == reference_model.NODE_COUNT
+
+    async def test_node_info_start_index_slices_correctly(
+        self, session_manager, tmp_inp, reference_model,
+    ):
+        from openswmm_mcp.tools.query import get_node_info
+
+        ctx = await _open(session_manager, tmp_inp, "pg_node_start")
+        full = await get_node_info(ctx, session_id="pg_node_start")
+        sliced = await get_node_info(ctx, session_id="pg_node_start", start_index=2)
+        # Same identity tail, just shifted.
+        assert len(sliced) == reference_model.NODE_COUNT - 2
+        assert sliced[0].node_id == full[2].node_id
+        assert sliced[-1].node_id == full[-1].node_id
+
+    async def test_node_info_limit_caps_returned_count(
+        self, session_manager, tmp_inp,
+    ):
+        from openswmm_mcp.tools.query import get_node_info
+
+        ctx = await _open(session_manager, tmp_inp, "pg_node_limit")
+        sliced = await get_node_info(ctx, session_id="pg_node_limit", limit=3)
+        assert len(sliced) == 3
+
+    async def test_node_info_start_plus_limit(
+        self, session_manager, tmp_inp,
+    ):
+        from openswmm_mcp.tools.query import get_node_info
+
+        ctx = await _open(session_manager, tmp_inp, "pg_node_both")
+        full = await get_node_info(ctx, session_id="pg_node_both")
+        page = await get_node_info(
+            ctx, session_id="pg_node_both", start_index=4, limit=3)
+        assert len(page) == 3
+        assert page[0].node_id == full[4].node_id
+        assert page[1].node_id == full[5].node_id
+        assert page[2].node_id == full[6].node_id
+
+    async def test_node_info_oversized_start_returns_empty(
+        self, session_manager, tmp_inp, reference_model,
+    ):
+        from openswmm_mcp.tools.query import get_node_info
+
+        ctx = await _open(session_manager, tmp_inp, "pg_node_over")
+        over = await get_node_info(
+            ctx, session_id="pg_node_over",
+            start_index=reference_model.NODE_COUNT + 5)
+        assert over == []
+
+    async def test_link_info_pagination_matches_node_pattern(
+        self, session_manager, tmp_inp,
+    ):
+        """Same pagination semantics for links."""
+        from openswmm_mcp.tools.query import get_link_info
+
+        ctx = await _open(session_manager, tmp_inp, "pg_link")
+        full = await get_link_info(ctx, session_id="pg_link")
+        page = await get_link_info(
+            ctx, session_id="pg_link", start_index=1, limit=2)
+        assert len(page) == 2
+        assert page[0].link_id == full[1].link_id
+        assert page[1].link_id == full[2].link_id
+
 
 # ---------------------------------------------------------------------------
 # get_subcatchment_info

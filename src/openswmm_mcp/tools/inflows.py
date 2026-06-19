@@ -38,7 +38,7 @@ from fastmcp import Context, FastMCP
 from openswmm.engine import Inflows, Nodes
 
 from openswmm_mcp.dependencies import get_session_manager, require_new_engine
-from openswmm_mcp.errors import ErrorCode, ToolError
+from openswmm_mcp.errors import ErrorCode, ToolError, resolve_index
 from openswmm_mcp.session import SimSession
 
 inflows_mcp = FastMCP("inflows")
@@ -145,15 +145,7 @@ async def _get_inflows_accessor(ctx: Context, session_id: str) -> tuple[SimSessi
 
 async def _resolve_node_idx(nodes: Any, node_id: str | int) -> int:
     """Translate a string node ID to integer index; pass through ints."""
-    if isinstance(node_id, int):
-        return node_id
-    if not node_id:
-        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] node_id must not be empty.")
-    idx = await asyncio.to_thread(nodes.get_index, node_id)
-    if idx < 0:
-        raise ToolError(
-            f"[{ErrorCode.ELEMENT_NOT_FOUND}] Node '{node_id}' not found in this session."
-        )
+    return await resolve_index(nodes, node_id, "Node")
     return idx
 
 
@@ -187,12 +179,12 @@ async def add_external(
         inflows.add_external,
         idx,
         constituent,
-        ts_name,
-        inflow_type,
-        float(m_factor),
-        float(s_factor),
-        float(baseline),
-        pattern,
+        ts_name=ts_name,
+        type=inflow_type,
+        m_factor=float(m_factor),
+        s_factor=float(s_factor),
+        baseline=float(baseline),
+        pattern=pattern,
     )
     return {
         "status": "ok",
@@ -208,8 +200,77 @@ async def add_external(
 async def ext_inflow_count(ctx: Context, session_id: str = "default") -> dict:
     """Return the number of external inflow rows in the model."""
     _, inflows, _ = await _get_inflows_accessor(ctx, session_id)
-    n = await asyncio.to_thread(inflows.ext_inflow_count)
+    # v1: renamed ext_inflow_count → external_count, and it's now a property.
+    n = await asyncio.to_thread(lambda: inflows.external_count)
     return {"session_id": session_id, "count": n}
+
+
+@inflows_mcp.tool()
+async def get_external(ctx: Context, session_id: str = "default", entry_index: int = 0) -> dict:
+    """Read back the I{entry_index}-th external inflow row as a dict.
+
+    Returns the persisted ``[INFLOWS]`` row: node, constituent, time-series
+    name, inflow type, scale (``m_factor``), unit conversion (``s_factor``),
+    baseline, and baseline pattern.
+    """
+    _, inflows, _ = await _get_inflows_accessor(ctx, session_id)
+    (node_idx, constituent, ts_name, inflow_type, m_factor, s_factor,
+     baseline, pattern) = await asyncio.to_thread(inflows.get_external, entry_index)
+    return {
+        "session_id": session_id,
+        "entry_index": entry_index,
+        "node_index": node_idx,
+        "constituent": constituent,
+        "ts_name": ts_name,
+        "type": inflow_type,
+        "m_factor": m_factor,
+        "s_factor": s_factor,
+        "baseline": baseline,
+        "pattern": pattern,
+    }
+
+
+@inflows_mcp.tool()
+async def remove_external(ctx: Context, session_id: str = "default", entry_index: int = 0) -> dict:
+    """Remove the I{entry_index}-th external inflow row."""
+    _, inflows, _ = await _get_inflows_accessor(ctx, session_id)
+    await asyncio.to_thread(inflows.remove_external, entry_index)
+    return {"status": "ok", "session_id": session_id, "entry_index": entry_index}
+
+
+@inflows_mcp.tool()
+async def set_external_baseline(
+    ctx: Context, session_id: str = "default", entry_index: int = 0, baseline: float = 0.0
+) -> dict:
+    """Set the baseline (constant) value of the I{entry_index}-th external inflow."""
+    _, inflows, _ = await _get_inflows_accessor(ctx, session_id)
+    await asyncio.to_thread(inflows.set_external_baseline, entry_index, float(baseline))
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "entry_index": entry_index,
+        "baseline": baseline,
+    }
+
+
+@inflows_mcp.tool()
+async def set_external_scale(
+    ctx: Context, session_id: str = "default", entry_index: int = 0, scale: float = 1.0
+) -> dict:
+    """Set the time-series scale factor (``s_factor``) of the I{entry_index}-th external inflow.
+
+    Note: this sets ``s_factor`` (the engine's only runtime "scale" setter),
+    not the ``m_factor`` multiplier — ``m_factor`` is set only at
+    :func:`add_external` time.
+    """
+    _, inflows, _ = await _get_inflows_accessor(ctx, session_id)
+    await asyncio.to_thread(inflows.set_external_scale, entry_index, float(scale))
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "entry_index": entry_index,
+        "scale": scale,
+    }
 
 
 # ===========================================================================
@@ -245,11 +306,11 @@ async def add_dwf(
         inflows.add_dwf,
         idx,
         constituent,
-        float(avg_value),
-        monthly_pattern,
-        daily_pattern,
-        hourly_pattern,
-        weekend_pattern,
+        avg_value=float(avg_value),
+        monthly_pattern=monthly_pattern,
+        daily_pattern=daily_pattern,
+        hourly_pattern=hourly_pattern,
+        weekend_pattern=weekend_pattern,
     )
     return {
         "status": "ok",
@@ -266,8 +327,51 @@ async def add_dwf(
 async def dwf_count(ctx: Context, session_id: str = "default") -> dict:
     """Return the number of dry-weather-flow rows in the model."""
     _, inflows, _ = await _get_inflows_accessor(ctx, session_id)
-    n = await asyncio.to_thread(inflows.dwf_count)
+    n = await asyncio.to_thread(lambda: inflows.dwf_count)
     return {"session_id": session_id, "count": n}
+
+
+@inflows_mcp.tool()
+async def get_dwf(ctx: Context, session_id: str = "default", entry_index: int = 0) -> dict:
+    """Read back the I{entry_index}-th dry-weather-flow row as a dict.
+
+    Returns the persisted ``[DWF]`` row: node, constituent, average value,
+    and the four pattern IDs (monthly / daily / hourly / weekend).
+    """
+    _, inflows, _ = await _get_inflows_accessor(ctx, session_id)
+    (node_idx, constituent, avg_value, monthly_pattern, daily_pattern,
+     hourly_pattern, weekend_pattern) = await asyncio.to_thread(inflows.get_dwf, entry_index)
+    return {
+        "session_id": session_id,
+        "entry_index": entry_index,
+        "node_index": node_idx,
+        "constituent": constituent,
+        "avg_value": avg_value,
+        "patterns": [monthly_pattern, daily_pattern, hourly_pattern, weekend_pattern],
+    }
+
+
+@inflows_mcp.tool()
+async def remove_dwf(ctx: Context, session_id: str = "default", entry_index: int = 0) -> dict:
+    """Remove the I{entry_index}-th dry-weather-flow row."""
+    _, inflows, _ = await _get_inflows_accessor(ctx, session_id)
+    await asyncio.to_thread(inflows.remove_dwf, entry_index)
+    return {"status": "ok", "session_id": session_id, "entry_index": entry_index}
+
+
+@inflows_mcp.tool()
+async def set_dwf_baseline(
+    ctx: Context, session_id: str = "default", entry_index: int = 0, avg_value: float = 0.0
+) -> dict:
+    """Set the average (baseline) value of the I{entry_index}-th DWF row."""
+    _, inflows, _ = await _get_inflows_accessor(ctx, session_id)
+    await asyncio.to_thread(inflows.set_dwf_baseline, entry_index, float(avg_value))
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "entry_index": entry_index,
+        "avg_value": avg_value,
+    }
 
 
 # ===========================================================================
@@ -322,8 +426,16 @@ async def get_rdii(ctx: Context, session_id: str = "default", entry_index: int =
 async def rdii_count(ctx: Context, session_id: str = "default") -> dict:
     """Return the number of RDII inflow rows in the model."""
     _, inflows, _ = await _get_inflows_accessor(ctx, session_id)
-    n = await asyncio.to_thread(inflows.rdii_count)
+    n = await asyncio.to_thread(lambda: inflows.rdii_count)
     return {"session_id": session_id, "count": n}
+
+
+@inflows_mcp.tool()
+async def remove_rdii(ctx: Context, session_id: str = "default", entry_index: int = 0) -> dict:
+    """Remove the I{entry_index}-th RDII assignment."""
+    _, inflows, _ = await _get_inflows_accessor(ctx, session_id)
+    await asyncio.to_thread(inflows.remove_rdii, entry_index)
+    return {"status": "ok", "session_id": session_id, "entry_index": entry_index}
 
 
 # ===========================================================================
@@ -385,9 +497,9 @@ async def add_hydrograph(
         float(r),
         float(t),
         float(k),
-        float(dmax),
-        float(drecov),
-        float(dinit),
+        dmax=float(dmax),
+        drecov=float(drecov),
+        dinit=float(dinit),
     )
     return {
         "status": "ok",
@@ -403,15 +515,187 @@ async def get_hydrograph(ctx: Context, session_id: str = "default", entry_index:
     """Read back the I{entry_index}-th hydrograph row as a dict."""
     _, inflows, _ = await _get_inflows_accessor(ctx, session_id)
     entry = await asyncio.to_thread(inflows.get_hydrograph, entry_index)
-    return {"session_id": session_id, "entry_index": entry_index, "entry": dict(entry)}
+    # v1 returns a HydrographEntry NamedTuple; project to a plain dict.
+    return {"session_id": session_id, "entry_index": entry_index, "entry": entry._asdict()}
 
 
 @inflows_mcp.tool()
 async def hydrograph_count(ctx: Context, session_id: str = "default") -> dict:
     """Return the number of hydrograph parameter rows in the model."""
     _, inflows, _ = await _get_inflows_accessor(ctx, session_id)
-    n = await asyncio.to_thread(inflows.hydrograph_count)
+    n = await asyncio.to_thread(lambda: inflows.hydrograph_count)
     return {"session_id": session_id, "count": n}
+
+
+@inflows_mcp.tool()
+async def set_hydrograph_rtk(
+    ctx: Context,
+    session_id: str = "default",
+    uh_name: str = "",
+    month: str | int = "all",
+    response: str | int = "short",
+    r: float = 0.0,
+    t: float = 0.0,
+    k: float = 1.0,
+) -> dict:
+    """Update the R/T/K parameters of an existing ``(uh_name, month, response)`` row.
+
+    Unlike :func:`add_hydrograph`, this edits the row in place and leaves its
+    IA parameters (``dmax``/``drecov``/``dinit``) untouched. The row must
+    already exist. ``month``/``response`` accept the same tokens as
+    :func:`add_hydrograph`.
+    """
+    if not uh_name:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] uh_name must not be empty.")
+    if k < 1.0:
+        raise ToolError(
+            f"[{ErrorCode.VALIDATION_ERROR}] k (base/peak time ratio) must be >= 1.0; got {k}."
+        )
+    m_int = _resolve_month(month)
+    r_int = _resolve_response(response)
+    _, inflows, _ = await _get_inflows_accessor(ctx, session_id)
+    await asyncio.to_thread(
+        inflows.set_hydrograph_rtk, uh_name, m_int, r_int, float(r), float(t), float(k)
+    )
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "uh_name": uh_name,
+        "month": m_int,
+        "response": r_int,
+    }
+
+
+@inflows_mcp.tool()
+async def set_hydrograph_ia(
+    ctx: Context,
+    session_id: str = "default",
+    uh_name: str = "",
+    month: str | int = "all",
+    response: str | int = "short",
+    dmax: float = 0.0,
+    drecov: float = 0.0,
+    dinit: float = 0.0,
+) -> dict:
+    """Update the initial-abstraction parameters of an existing UH row.
+
+    Edits ``dmax``/``drecov``/``dinit`` in place, leaving R/T/K untouched.
+    The ``(uh_name, month, response)`` row must already exist. ``drecov`` is
+    ignored at runtime when an exponential-decay row exists for the same
+    ``(uh_name, response)`` pair (see :func:`add_rdii_decay`).
+    """
+    if not uh_name:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] uh_name must not be empty.")
+    m_int = _resolve_month(month)
+    r_int = _resolve_response(response)
+    _, inflows, _ = await _get_inflows_accessor(ctx, session_id)
+    await asyncio.to_thread(
+        inflows.set_hydrograph_ia,
+        uh_name,
+        m_int,
+        r_int,
+        float(dmax),
+        float(drecov),
+        float(dinit),
+    )
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "uh_name": uh_name,
+        "month": m_int,
+        "response": r_int,
+    }
+
+
+@inflows_mcp.tool()
+async def remove_hydrograph_entry(
+    ctx: Context,
+    session_id: str = "default",
+    uh_name: str = "",
+    month: str | int = "all",
+    response: str | int = "short",
+) -> dict:
+    """Remove a single ``(uh_name, month, response)`` hydrograph parameter row."""
+    if not uh_name:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] uh_name must not be empty.")
+    m_int = _resolve_month(month)
+    r_int = _resolve_response(response)
+    _, inflows, _ = await _get_inflows_accessor(ctx, session_id)
+    await asyncio.to_thread(inflows.remove_hydrograph_entry, uh_name, m_int, r_int)
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "uh_name": uh_name,
+        "month": m_int,
+        "response": r_int,
+    }
+
+
+@inflows_mcp.tool()
+async def remove_hydrograph_group(
+    ctx: Context, session_id: str = "default", uh_name: str = ""
+) -> dict:
+    """Remove an entire unit-hydrograph group (all rows + its gage assignment)."""
+    if not uh_name:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] uh_name must not be empty.")
+    _, inflows, _ = await _get_inflows_accessor(ctx, session_id)
+    await asyncio.to_thread(inflows.remove_hydrograph_group, uh_name)
+    return {"status": "ok", "session_id": session_id, "uh_name": uh_name}
+
+
+@inflows_mcp.tool()
+async def clear_hydrograph_group_months(
+    ctx: Context, session_id: str = "default", uh_name: str = ""
+) -> dict:
+    """Clear the month-specific rows of a UH group, keeping the ALL-months row."""
+    if not uh_name:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] uh_name must not be empty.")
+    _, inflows, _ = await _get_inflows_accessor(ctx, session_id)
+    await asyncio.to_thread(inflows.clear_hydrograph_group_months, uh_name)
+    return {"status": "ok", "session_id": session_id, "uh_name": uh_name}
+
+
+@inflows_mcp.tool()
+async def rename_hydrograph_group(
+    ctx: Context, session_id: str = "default", group_index: int = 0, new_id: str = ""
+) -> dict:
+    """Rename the I{group_index}-th unit-hydrograph group.
+
+    ``group_index`` is the position from :func:`list_hydrograph_groups`.
+    """
+    if not new_id:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] new_id must not be empty.")
+    _, inflows, _ = await _get_inflows_accessor(ctx, session_id)
+    await asyncio.to_thread(inflows.rename_hydrograph_group, group_index, new_id)
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "group_index": group_index,
+        "new_id": new_id,
+    }
+
+
+@inflows_mcp.tool()
+async def set_hydrograph_gage(
+    ctx: Context, session_id: str = "default", uh_name: str = "", gage_name: str = ""
+) -> dict:
+    """Set (replace) the rain gage assigned to an existing UH group.
+
+    Unlike :func:`add_hydrograph_gage` (which appends a new assignment row),
+    this updates the gage of a group that already has one.
+    """
+    if not uh_name:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] uh_name must not be empty.")
+    if not gage_name:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] gage_name must not be empty.")
+    _, inflows, _ = await _get_inflows_accessor(ctx, session_id)
+    await asyncio.to_thread(inflows.set_hydrograph_gage, uh_name, gage_name)
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "uh_name": uh_name,
+        "gage_name": gage_name,
+    }
 
 
 @inflows_mcp.tool()
@@ -459,7 +743,7 @@ async def get_hydrograph_gage(
 async def hydrograph_gage_count(ctx: Context, session_id: str = "default") -> dict:
     """Return the number of UH-to-gage assignments in the model."""
     _, inflows, _ = await _get_inflows_accessor(ctx, session_id)
-    n = await asyncio.to_thread(inflows.hydrograph_gage_count)
+    n = await asyncio.to_thread(lambda: inflows.hydrograph_gage_count)
     return {"session_id": session_id, "count": n}
 
 
@@ -473,7 +757,7 @@ async def hydrograph_group_count(ctx: Context, session_id: str = "default") -> d
     figure a GUI Object Browser needs for the Unit Hydrographs section.
     """
     _, inflows, _ = await _get_inflows_accessor(ctx, session_id)
-    n = await asyncio.to_thread(inflows.hydrograph_group_count)
+    n = await asyncio.to_thread(lambda: inflows.hydrograph_group_count)
     return {"session_id": session_id, "count": n}
 
 
@@ -491,7 +775,7 @@ async def list_hydrograph_groups(ctx: Context, session_id: str = "default") -> d
     _, inflows, _ = await _get_inflows_accessor(ctx, session_id)
 
     def _read_all() -> list[dict[str, Any]]:
-        n = inflows.hydrograph_group_count()
+        n = inflows.hydrograph_group_count  # v1: property, no parens.
         return [{"index": i, "name": inflows.get_hydrograph_group_id(i)} for i in range(n)]
 
     groups = await asyncio.to_thread(_read_all)
@@ -555,12 +839,72 @@ async def get_rdii_decay(ctx: Context, session_id: str = "default", entry_index:
     """Read back the I{entry_index}-th exponential-decay row as a dict."""
     _, inflows, _ = await _get_inflows_accessor(ctx, session_id)
     entry = await asyncio.to_thread(inflows.get_rdii_decay, entry_index)
-    return {"session_id": session_id, "entry_index": entry_index, "entry": dict(entry)}
+    # v1 returns an RDIIDecayEntry NamedTuple; project to a plain dict.
+    return {"session_id": session_id, "entry_index": entry_index, "entry": entry._asdict()}
 
 
 @inflows_mcp.tool()
 async def rdii_decay_count(ctx: Context, session_id: str = "default") -> dict:
     """Return the number of exponential IA-decay rows in the model."""
     _, inflows, _ = await _get_inflows_accessor(ctx, session_id)
-    n = await asyncio.to_thread(inflows.rdii_decay_count)
+    n = await asyncio.to_thread(lambda: inflows.rdii_decay_count)
     return {"session_id": session_id, "count": n}
+
+
+@inflows_mcp.tool()
+async def set_rdii_decay(
+    ctx: Context,
+    session_id: str = "default",
+    uh_name: str = "",
+    response: str | int = "short",
+    k_dep: float = 0.0,
+    k_0: float = 0.0,
+    k_T: float = 0.0,
+    T_ref: float = 10.0,
+    theta_rec: float = 0.0,
+    T_freeze: float = 0.0,
+) -> dict:
+    """Update an existing exponential IA-decay row in place.
+
+    Same parameter meaning as :func:`add_rdii_decay`; the
+    ``(uh_name, response)`` decay row must already exist.
+    """
+    if not uh_name:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] uh_name must not be empty.")
+    r_int = _resolve_response(response)
+    _, inflows, _ = await _get_inflows_accessor(ctx, session_id)
+    await asyncio.to_thread(
+        inflows.set_rdii_decay,
+        uh_name,
+        r_int,
+        float(k_dep),
+        float(k_0),
+        float(k_T),
+        float(T_ref),
+        float(theta_rec),
+        float(T_freeze),
+    )
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "uh_name": uh_name,
+        "response": r_int,
+    }
+
+
+@inflows_mcp.tool()
+async def remove_rdii_decay(
+    ctx: Context, session_id: str = "default", uh_name: str = "", response: str | int = "short"
+) -> dict:
+    """Remove the exponential IA-decay row for a ``(uh_name, response)`` pair."""
+    if not uh_name:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] uh_name must not be empty.")
+    r_int = _resolve_response(response)
+    _, inflows, _ = await _get_inflows_accessor(ctx, session_id)
+    await asyncio.to_thread(inflows.remove_rdii_decay, uh_name, r_int)
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "uh_name": uh_name,
+        "response": r_int,
+    }

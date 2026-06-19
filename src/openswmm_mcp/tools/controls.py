@@ -29,14 +29,14 @@ import asyncio
 from typing import Any
 
 from fastmcp import Context, FastMCP
-from openswmm.engine import Controls
+from openswmm.engine import BadParamError, Controls
 
 from openswmm_mcp.dependencies import (
     get_session_manager,
     require_new_engine,
     require_state,
 )
-from openswmm_mcp.errors import ErrorCode, ToolError
+from openswmm_mcp.errors import ErrorCode, ToolError, resolve_index
 from openswmm_mcp.session import SimSession
 
 controls_mcp = FastMCP("controls")
@@ -91,7 +91,7 @@ async def _resolve_link_idx(links: Any, link_id: str | int) -> int:
         return link_id
     if not link_id:
         raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] link_id must not be empty.")
-    idx = await asyncio.to_thread(links.get_index, link_id)
+    idx = await resolve_index(links, link_id, "Link")
     if idx < 0:
         raise ToolError(
             f"[{ErrorCode.ELEMENT_NOT_FOUND}] Link '{link_id}' not found in this session."
@@ -108,7 +108,7 @@ async def _resolve_link_idx(links: Any, link_id: str | int) -> int:
 async def count(ctx: Context, session_id: str = "default") -> dict:
     """Return the number of control rules defined in the model."""
     _, controls, _ = await _get_controls_accessor(ctx, session_id)
-    n = await asyncio.to_thread(controls.count)
+    n = await asyncio.to_thread(lambda: len(controls))
     return {"session_id": session_id, "count": n}
 
 
@@ -120,7 +120,8 @@ async def get_rule(ctx: Context, session_id: str = "default", rule_index: int = 
     / ``AND`` / ``OR`` clauses and a ``THEN`` action block.
     """
     _, controls, _ = await _get_controls_accessor(ctx, session_id)
-    text = await asyncio.to_thread(controls.get_rule, rule_index)
+    # v1: Controls[idx] returns a ControlRule NamedTuple with .id / .text.
+    text = await asyncio.to_thread(lambda: controls[rule_index].text)
     return {
         "session_id": session_id,
         "rule_index": rule_index,
@@ -139,7 +140,13 @@ async def get_id(ctx: Context, session_id: str = "default", rule_index: int = 0)
     display label like ``Rule N [unnamed]`` without catching exceptions.
     """
     _, controls, _ = await _get_controls_accessor(ctx, session_id)
-    name = await asyncio.to_thread(controls.get_id, rule_index)
+    def _read_id():
+        try:
+            return controls[rule_index].id or None
+        except ValueError:
+            return None
+
+    name = await asyncio.to_thread(_read_id)
     return {
         "session_id": session_id,
         "rule_index": rule_index,
@@ -149,25 +156,24 @@ async def get_id(ctx: Context, session_id: str = "default", rule_index: int = 0)
 
 @controls_mcp.tool()
 async def list_rules(ctx: Context, session_id: str = "default") -> dict:
-    """Return all control rules as a list of ``{index, name, text}`` dicts.
-
-    Convenience wrapper that batches ``count`` + N x ``(get_id, get_rule)``
-    so an LLM (or GUI Object Browser) can audit the full rule set in one
-    call. ``name`` is the parsed rule identifier (``None`` for malformed
-    rules); ``text`` is the full rule body.
-    """
+    """Return all control rules as a list of ``{index, name, text}`` dicts."""
     _, controls, _ = await _get_controls_accessor(ctx, session_id)
 
     def _read_all() -> list[dict[str, Any]]:
-        n = controls.count()
-        return [
-            {
-                "index": i,
-                "name": controls.get_id(i),
-                "text": controls.get_rule(i),
-            }
-            for i in range(n)
-        ]
+        out: list[dict[str, Any]] = []
+        for i in range(len(controls)):
+            # A nameless rule cannot be materialised: ``controls[i]`` calls
+            # ``swmm_control_get_id`` which returns BADPARAM when the rule has
+            # no ``RULE <name>`` header. Surface it as a name=None placeholder
+            # instead of letting the whole listing fail.
+            try:
+                rule = controls[i]
+                name = rule.id or None
+                text = rule.text
+            except (ValueError, BadParamError):
+                name, text = None, None
+            out.append({"index": i, "name": name, "text": text})
+        return out
 
     rules = await asyncio.to_thread(_read_all)
     return {"session_id": session_id, "count": len(rules), "rules": rules}
@@ -197,9 +203,14 @@ async def add_rule(ctx: Context, session_id: str = "default", rule_text: str = "
     if not rule_text.strip():
         raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] rule_text must not be empty.")
     _, controls, _ = await _get_controls_accessor(ctx, session_id)
-    await asyncio.to_thread(controls.add_rule, rule_text)
-    # Engine returns 1-based count after add; we report the new index.
-    new_count = await asyncio.to_thread(controls.count)
+
+    def _append() -> int:
+        # v1: Controls.append accepts a rule text string, ControlRule, or
+        # dict with a 'text' key.  Returns nothing; new index is len()-1.
+        controls.append(rule_text)
+        return len(controls)
+
+    new_count = await asyncio.to_thread(_append)
     return {
         "status": "ok",
         "session_id": session_id,
@@ -209,10 +220,37 @@ async def add_rule(ctx: Context, session_id: str = "default", rule_text: str = "
 
 
 @controls_mcp.tool()
+async def validate_rule(ctx: Context, session_id: str = "default", rule_text: str = "") -> dict:
+    """Validate control-rule text WITHOUT adding it to the model.
+
+    Parses *rule_text* through the engine's rule compiler and reports
+    whether it is syntactically valid. On failure ``message`` carries the
+    engine's diagnostic string; on success it is empty. Use this to
+    pre-flight a rule before committing it via :func:`add_rule` (or the
+    runtime ``forcing.add_control_rule``).
+
+    Accepts the full SWMM rule text (the ``RULE <id>`` header, ``IF`` /
+    ``AND`` / ``OR`` clauses, and a ``THEN`` action block). Works in any
+    non-closed state and never mutates the model.
+    """
+    if not rule_text.strip():
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] rule_text must not be empty.")
+    _, controls, _ = await _get_controls_accessor(ctx, session_id)
+
+    # v1: Controls.validate_message(rule_text) -> (valid: bool, message: str).
+    valid, message = await asyncio.to_thread(controls.validate_message, rule_text)
+    return {
+        "session_id": session_id,
+        "valid": bool(valid),
+        "message": message,
+    }
+
+
+@controls_mcp.tool()
 async def clear_rules(ctx: Context, session_id: str = "default") -> dict:
     """Remove every control rule from the model."""
     _, controls, _ = await _get_controls_accessor(ctx, session_id)
-    await asyncio.to_thread(controls.clear_rules)
+    await asyncio.to_thread(lambda: controls.clear())
     return {"status": "ok", "session_id": session_id, "remaining": 0}
 
 
@@ -247,7 +285,9 @@ async def set_link_setting(
     require_state(session, "running")
     link_idx = await _resolve_link_idx(session.links, link_id)
     controls = session.controls
-    await asyncio.to_thread(controls.set_link_setting, link_idx, float(setting))
+    value = float(setting)
+    # v1 set_link_setting takes (link_key, setting) — accepts int or str.
+    await asyncio.to_thread(controls.set_link_setting, link_idx, value)
     return {
         "status": "ok",
         "session_id": session_id,
@@ -267,7 +307,7 @@ async def set_link_status(
     """Set the discrete OPEN/CLOSED status of a link (RUNNING state only).
 
     Maps to ``swmm_control_set_link_status``. The boolean ``open`` is
-    converted to ``1`` for OPEN and ``0`` for CLOSED before forwarding.
+    forwarded as the inverse to v1's keyword-only ``closed`` argument.
 
     For continuous control settings (pump speed, orifice opening),
     use :func:`set_link_setting`.
@@ -276,8 +316,9 @@ async def set_link_status(
     require_state(session, "running")
     link_idx = await _resolve_link_idx(session.links, link_id)
     controls = session.controls
-    status_int = 1 if open else 0
-    await asyncio.to_thread(controls.set_link_status, link_idx, status_int)
+    closed = not bool(open)
+    # v1: set_link_status(link, *, closed=bool) — note keyword-only arg.
+    await asyncio.to_thread(lambda: controls.set_link_status(link_idx, closed=closed))
     return {
         "status": "ok",
         "session_id": session_id,

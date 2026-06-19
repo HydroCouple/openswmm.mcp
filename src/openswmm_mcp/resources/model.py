@@ -120,18 +120,25 @@ async def session_summary(session_id: str, ctx: Context) -> str:
 
 @resources_mcp.resource("swmm://session/{session_id}/nodes")
 async def list_nodes(session_id: str, ctx: Context) -> str:
-    """Return a JSON array of all node IDs with their types."""
+    """Return a JSON array of all node IDs with their types.
+
+    Phase 4: ids come from ``session.meta.node_ids`` (cached on first
+    access via the Phase 3 ``get_ids_bulk`` accessor); the type field
+    still goes through the per-element scalar accessor but the entire
+    loop runs in a single worker thread instead of N round-trips.
+    """
     sm = _get_session_manager(ctx)
     session = await sm.get_session(session_id)
     nodes = session.nodes
 
-    count = await asyncio.to_thread(nodes.count)
-    result = []
-    for i in range(count):
-        node_id = await asyncio.to_thread(nodes.get_id, i)
-        node_type_code = await asyncio.to_thread(nodes.get_type, i)
-        result.append({"node_id": node_id, "type": _node_type_name(node_type_code), "index": i})
+    def _build_sync() -> list[dict]:
+        ids = session.meta.node_ids
+        return [
+            {"node_id": ids[i], "type": _node_type_name(nodes.get_type(i)), "index": i}
+            for i in range(len(ids))
+        ]
 
+    result = await asyncio.to_thread(_build_sync)
     return json.dumps(result, indent=2)
 
 
@@ -167,18 +174,22 @@ async def node_detail(session_id: str, node_id: str, ctx: Context) -> str:
 
 @resources_mcp.resource("swmm://session/{session_id}/links")
 async def list_links(session_id: str, ctx: Context) -> str:
-    """Return a JSON array of all link IDs with their types."""
+    """Return a JSON array of all link IDs with their types.
+
+    Phase 4: same bulk pattern as ``list_nodes``.
+    """
     sm = _get_session_manager(ctx)
     session = await sm.get_session(session_id)
     links = session.links
 
-    count = await asyncio.to_thread(links.count)
-    result = []
-    for i in range(count):
-        link_id = await asyncio.to_thread(links.get_id, i)
-        link_type_code = await asyncio.to_thread(links.get_type, i)
-        result.append({"link_id": link_id, "type": _link_type_name(link_type_code), "index": i})
+    def _build_sync() -> list[dict]:
+        ids = session.meta.link_ids
+        return [
+            {"link_id": ids[i], "type": _link_type_name(links.get_type(i)), "index": i}
+            for i in range(len(ids))
+        ]
 
+    result = await asyncio.to_thread(_build_sync)
     return json.dumps(result, indent=2)
 
 
@@ -220,17 +231,21 @@ async def link_detail(session_id: str, link_id: str, ctx: Context) -> str:
 
 @resources_mcp.resource("swmm://session/{session_id}/subcatchments")
 async def list_subcatchments(session_id: str, ctx: Context) -> str:
-    """Return a JSON array of all subcatchment IDs."""
+    """Return a JSON array of all subcatchment IDs.
+
+    Phase 4: ids come from ``session.meta.subcatch_ids`` — a single C
+    call via the Phase 3 ``get_ids_bulk`` accessor (cached for the
+    session's lifetime).  The previous implementation issued N
+    ``asyncio.to_thread`` calls.
+    """
     sm = _get_session_manager(ctx)
     session = await sm.get_session(session_id)
-    subcatchments = session.subcatchments
 
-    count = await asyncio.to_thread(subcatchments.count)
-    result = []
-    for i in range(count):
-        sc_id = await asyncio.to_thread(subcatchments.get_id, i)
-        result.append({"subcatch_id": sc_id, "index": i})
+    def _build_sync() -> list[dict]:
+        ids = session.meta.subcatch_ids
+        return [{"subcatch_id": ids[i], "index": i} for i in range(len(ids))]
 
+    result = await asyncio.to_thread(_build_sync)
     return json.dumps(result, indent=2)
 
 

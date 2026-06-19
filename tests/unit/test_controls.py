@@ -325,6 +325,49 @@ class TestListRulesWithNames:
 
 
 # ===========================================================================
+# validate_rule — pre-flight rule validation without adding it
+# ===========================================================================
+
+
+class TestValidateRule:
+    async def test_valid_rule_reports_valid(self, session_manager, inp_path):
+        from openswmm_mcp.tools.controls import count, validate_rule
+
+        ctx = await _opened_session(session_manager, inp_path, "ctl_val_ok")
+        # validate_rule resolves element references (unlike add_rule, which
+        # just stores the text), so the rule must reference elements that
+        # exist in the reference model: node J1 and conduit C1 (no pumps).
+        result = await validate_rule(
+            ctx,
+            session_id="ctl_val_ok",
+            rule_text="RULE OK_R1\nIF NODE J1 DEPTH > 5.0\nTHEN CONDUIT C1 STATUS = CLOSED",
+        )
+        assert result["valid"] is True
+        assert "message" in result
+        # Validation must NOT add the rule to the model.
+        assert (await count(ctx, session_id="ctl_val_ok"))["count"] == 0
+
+    async def test_invalid_rule_reports_message(self, session_manager, inp_path):
+        from openswmm_mcp.tools.controls import validate_rule
+
+        ctx = await _opened_session(session_manager, inp_path, "ctl_val_bad")
+        result = await validate_rule(
+            ctx,
+            session_id="ctl_val_bad",
+            rule_text="RULE BAD\nIF NODE J1 BANANA > 5\nTHEN GLORP",
+        )
+        assert result["valid"] is False
+        assert result["message"]
+
+    async def test_empty_text_rejected(self, session_manager, inp_path):
+        from openswmm_mcp.tools.controls import validate_rule
+
+        ctx = await _opened_session(session_manager, inp_path, "ctl_val_empty")
+        with pytest.raises(ToolError, match="rule_text must not be empty"):
+            await validate_rule(ctx, session_id="ctl_val_empty", rule_text="  ")
+
+
+# ===========================================================================
 # Backend guard
 # ===========================================================================
 

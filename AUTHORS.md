@@ -4,7 +4,7 @@ OpenSWMM MCP Server is built on the [openswmm.engine](https://github.com/HydroCo
 
 ## Project Lead
 
-- **Caleb Buahin** <caleb.buahin@gmail.com> -- Project lead, architect, and primary developer of the OpenSWMM MCP server (FastMCP integration, tool design, session management, authentication, CI/CD).
+- **Caleb Buahin** @cbuahin -- Project lead, architect, and primary developer of the OpenSWMM MCP server (FastMCP integration, tool design, session management, authentication, CI/CD).
 
 ## Contributors
 

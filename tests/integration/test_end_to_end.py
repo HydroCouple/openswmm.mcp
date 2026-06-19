@@ -20,15 +20,19 @@ openswmm = pytest.importorskip("openswmm.engine")
 @pytest.fixture
 def inp_path():
     """Locate the site_drainage_example.inp test fixture."""
+    # Prefer the in-tree copy first so the test runs without an external
+    # repository checkout.
+    here = os.path.dirname(os.path.abspath(__file__))
     candidates = [
+        os.path.join(here, os.pardir, "data", "site_drainage_example.inp"),
         os.path.expanduser(
-            "~/Documents/Projects/cbuahin_github/OpenSWMMCore/"
+            "~/Documents/Projects/cbuahin_github/openswmm.engine/"
             "python/tests/data/solver/site_drainage_example.inp"
         ),
     ]
     for p in candidates:
         if os.path.exists(p):
-            return p
+            return os.path.abspath(p)
     pytest.skip("site_drainage_example.inp not found")
 
 
@@ -53,24 +57,27 @@ class TestEndToEnd:
         session.state = "initialized"
 
         # ------------------------------------------------------------------
-        # Verify node count is > 0
+        # Verify node count is > 0 (v1 container protocol)
         # ------------------------------------------------------------------
-        assert session.nodes.count() > 0
+        assert len(session.nodes) > 0
 
         # ------------------------------------------------------------------
-        # Step a few times
+        # Step a few times.  v1 ``Solver.step()`` returns the elapsed
+        # ``timedelta``; check ``solver.state`` (an EngineState IntEnum,
+        # value 5 == RUNNING) to detect end-of-simulation.
         # ------------------------------------------------------------------
         session.solver.start()
         session.state = "running"
+        RUNNING = 5
         for _ in range(10):
-            running = session.solver.step()
-            if not running:
+            session.solver.step()
+            if int(session.solver.state) != RUNNING:
                 break
 
         # ------------------------------------------------------------------
-        # Query some state
+        # Query some state via v1 property access on the Node wrapper.
         # ------------------------------------------------------------------
-        depth = session.nodes.get_depth(0)
+        depth = session.nodes[0].depth
         assert isinstance(depth, float)
 
         # ------------------------------------------------------------------

@@ -300,6 +300,167 @@ async def compare_sim_vs_observed(
 
 
 @geopackage_mcp.tool()
+async def is_registered(ctx: Context) -> dict:
+    """Check whether the GeoPackage plugin is registered.
+
+    :returns: Dict with the boolean ``registered`` flag.
+    """
+    from openswmm.engine import _geopackage
+
+    registered = await asyncio.to_thread(_geopackage.is_registered)
+    return {"registered": bool(registered)}
+
+
+@geopackage_mcp.tool()
+async def register(
+    ctx: Context,
+    key: str = "",
+    org: str = "",
+    email: str = "",
+    deploy: str = "",
+) -> dict:
+    """Register the GeoPackage plugin.
+
+    :param key: License key, or "" if not required.
+    :param org: Organisation name, or "".
+    :param email: Contact e-mail, or "".
+    :param deploy: Deployment identifier, or "".
+    :returns: Dict with the boolean ``registered`` result.
+    """
+    from openswmm.engine import _geopackage
+
+    ok = await asyncio.to_thread(_geopackage.register, key, org, email, deploy)
+    return {"registered": bool(ok)}
+
+
+@geopackage_mcp.tool()
+async def last_error(
+    ctx: Context,
+    session_id: str = "gpkg_default",
+) -> dict:
+    """Return the most recent error message from the GeoPackage library.
+
+    :param session_id: GeoPackage session identifier.
+    :returns: Dict with the ``last_error`` string ("" if none).
+    """
+    gpkg = _gpkg_sessions.get(session_id)
+    if gpkg is None:
+        raise ToolError(ErrorCode.NOT_FOUND, f"GeoPackage session '{session_id}' not found")
+
+    message = await asyncio.to_thread(lambda: gpkg.last_error)
+    return {"session_id": session_id, "last_error": message}
+
+
+@geopackage_mcp.tool()
+async def query_int(
+    ctx: Context,
+    session_id: str = "gpkg_default",
+    sql: str = "",
+) -> dict:
+    """Run a read-only SQL query and return the first integer result.
+
+    :param session_id: GeoPackage session identifier.
+    :param sql: SELECT query string.
+    :returns: Dict with the integer ``value``.
+    """
+    if not sql:
+        raise ToolError(ErrorCode.BAD_PARAM, "sql is required")
+    gpkg = _gpkg_sessions.get(session_id)
+    if gpkg is None:
+        raise ToolError(ErrorCode.NOT_FOUND, f"GeoPackage session '{session_id}' not found")
+
+    value = await asyncio.to_thread(gpkg.query_int, sql)
+    return {"session_id": session_id, "value": int(value)}
+
+
+@geopackage_mcp.tool()
+async def query_double(
+    ctx: Context,
+    session_id: str = "gpkg_default",
+    sql: str = "",
+) -> dict:
+    """Run a read-only SQL query and return the first double result.
+
+    :param session_id: GeoPackage session identifier.
+    :param sql: SELECT query string.
+    :returns: Dict with the float ``value``.
+    """
+    if not sql:
+        raise ToolError(ErrorCode.BAD_PARAM, "sql is required")
+    gpkg = _gpkg_sessions.get(session_id)
+    if gpkg is None:
+        raise ToolError(ErrorCode.NOT_FOUND, f"GeoPackage session '{session_id}' not found")
+
+    value = await asyncio.to_thread(gpkg.query_double, sql)
+    return {"session_id": session_id, "value": float(value)}
+
+
+@geopackage_mcp.tool()
+async def topology_edge_count(
+    ctx: Context,
+    session_id: str = "gpkg_default",
+    simulation_id: str = "",
+) -> dict:
+    """Return the number of topology edges for a simulation.
+
+    :param session_id: GeoPackage session identifier.
+    :param simulation_id: Simulation run ID.
+    :returns: Dict with the integer ``edge_count``.
+    """
+    if not simulation_id:
+        raise ToolError(ErrorCode.BAD_PARAM, "simulation_id is required")
+    gpkg = _gpkg_sessions.get(session_id)
+    if gpkg is None:
+        raise ToolError(ErrorCode.NOT_FOUND, f"GeoPackage session '{session_id}' not found")
+
+    count = await asyncio.to_thread(gpkg.topology_edge_count, simulation_id)
+    return {
+        "session_id": session_id,
+        "simulation_id": simulation_id,
+        "edge_count": int(count),
+    }
+
+
+@geopackage_mcp.tool()
+async def write_observed_value(
+    ctx: Context,
+    session_id: str = "gpkg_default",
+    series_id: int = 0,
+    timestamp: str = "",
+    value: float = 0.0,
+    flag: str = "",
+) -> dict:
+    """Write a single observed data point to an existing series.
+
+    Use ``import_observed_data`` to create a series and bulk-load points;
+    this tool appends one point to a series that already exists.
+
+    :param session_id: GeoPackage session identifier.
+    :param series_id: Series ID returned by import_observed_data.
+    :param timestamp: ISO 8601 timestamp string.
+    :param value: Measured value.
+    :param flag: Quality flag (e.g. "A", "P"), or "" for none.
+    :returns: Dict confirming the write.
+    """
+    if not timestamp:
+        raise ToolError(ErrorCode.BAD_PARAM, "timestamp is required")
+    gpkg = _gpkg_sessions.get(session_id)
+    if gpkg is None:
+        raise ToolError(ErrorCode.NOT_FOUND, f"GeoPackage session '{session_id}' not found")
+
+    await asyncio.to_thread(
+        gpkg.write_observed_value, int(series_id), timestamp, float(value), flag
+    )
+    return {
+        "session_id": session_id,
+        "series_id": int(series_id),
+        "timestamp": timestamp,
+        "value": float(value),
+        "status": "ok",
+    }
+
+
+@geopackage_mcp.tool()
 async def close_geopackage(
     ctx: Context,
     session_id: str = "gpkg_default",

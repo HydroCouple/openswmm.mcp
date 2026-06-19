@@ -39,6 +39,27 @@ class TestGeoPackageToolsImport:
         assert hasattr(geopackage, "compare_sim_vs_observed")
         assert hasattr(geopackage, "close_geopackage")
 
+    def test_new_tool_functions_exist(self):
+        from openswmm_mcp.tools import geopackage
+
+        assert hasattr(geopackage, "is_registered")
+        assert hasattr(geopackage, "register")
+        assert hasattr(geopackage, "last_error")
+        assert hasattr(geopackage, "query_int")
+        assert hasattr(geopackage, "query_double")
+        assert hasattr(geopackage, "topology_edge_count")
+        assert hasattr(geopackage, "write_observed_value")
+
+
+class TestGeoPackageRegistration:
+    """Module-level registration query (no open .gpkg required)."""
+
+    async def test_is_registered_returns_bool(self):
+        from openswmm_mcp.tools.geopackage import is_registered
+
+        result = await is_registered(ctx=None)
+        assert isinstance(result["registered"], bool)
+
 
 class TestGeoPackageServerMount:
     """Verify geopackage sub-server is mounted."""

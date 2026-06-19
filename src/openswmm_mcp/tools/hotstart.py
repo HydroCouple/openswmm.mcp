@@ -167,6 +167,26 @@ async def seed_hotstart_state(
         "subcatchment_runoffs": subcatchment_runoffs or {},
     }
 
+    # ``HotStart.apply`` requires an INITIALIZED solver (post-initialize,
+    # pre-start). The session may be in any other state (e.g. "ended" after a
+    # run), so re-open and initialize a fresh solver on the same model first.
+    if session.state != "initialized" and session.backend is not None:
+        from openswmm_mcp.backends import make_backend
+
+        engine_kind = session.engine_kind
+
+        def _reopen_initialized() -> None:
+            backend = make_backend(
+                engine_kind, session.inp_path, session.rpt_path, session.out_path
+            )
+            backend.solver.open()
+            backend.solver.initialize()
+            session.backend = backend
+            session.state = "initialized"
+            session._meta = None
+
+        await asyncio.to_thread(_reopen_initialized)
+
     def _seed():
         hotstart = session.hotstart.open(str(resolved))
         for nid, v in overrides["node_depths"].items():

@@ -98,6 +98,26 @@ class TestSetForcing:
         assert result.mode == "replace"
         assert result.persist is True
 
+    async def test_set_forcing_subcatchment_snowfall(self, session_manager, tmp_inp):
+        from openswmm_mcp.tools.forcing import set_forcing
+
+        ctx = await _open_and_run(session_manager, tmp_inp, "f_snow")
+        result = await set_forcing(
+            ctx,
+            session_id="f_snow",
+            target_type="subcatchment",
+            element_id="S1",
+            variable="snowfall",
+            value=0.3,
+            persist=True,
+        )
+
+        assert isinstance(result, ForcingResult)
+        assert result.status == "applied"
+        assert result.target_type == "subcatchment"
+        assert result.variable == "snowfall"
+        assert result.value == 0.3
+
     async def test_set_forcing_requires_running_state(self, session_manager, tmp_inp):
         from openswmm_mcp.tools.forcing import set_forcing
         from openswmm_mcp.tools.lifecycle import open_model
@@ -236,6 +256,86 @@ class TestSetLinkControl:
         assert result["status"] == "applied"
         assert result["link_id"] == "C1"
         assert result["setting"] == 0.75
+
+
+# ---------------------------------------------------------------------------
+# Tests: set_link_quality
+# ---------------------------------------------------------------------------
+
+
+class TestSetLinkQuality:
+    async def test_set_link_quality(self, session_manager, tmp_inp, reference_model):
+        from openswmm_mcp.tools.forcing import set_link_quality
+
+        ctx = await _open_and_run(session_manager, tmp_inp, "f_lqual")
+        result = await set_link_quality(
+            ctx,
+            session_id="f_lqual",
+            link_id=reference_model.FIRST_LINK_ID,
+            pollutant=reference_model.POLLUTANT_ID,
+            value=12.5,
+            persist=True,
+        )
+        assert result["status"] == "applied"
+        assert result["link_id"] == reference_model.FIRST_LINK_ID
+        assert result["pollutant"] == reference_model.POLLUTANT_ID
+        assert result["value"] == 12.5
+        assert result["persist"] is True
+
+    async def test_set_link_quality_requires_running(self, session_manager, tmp_inp, reference_model):
+        from openswmm_mcp.tools.forcing import set_link_quality
+        from openswmm_mcp.tools.lifecycle import open_model
+
+        ctx = MockContext(session_manager)
+        await open_model(ctx, inp_path=tmp_inp, session_id="f_lqual_state")
+        with pytest.raises(ToolError, match="running"):
+            await set_link_quality(
+                ctx,
+                session_id="f_lqual_state",
+                link_id=reference_model.FIRST_LINK_ID,
+                pollutant=reference_model.POLLUTANT_ID,
+                value=1.0,
+            )
+
+    async def test_set_link_quality_unknown_link(self, session_manager, tmp_inp, reference_model):
+        from openswmm_mcp.tools.forcing import set_link_quality
+
+        ctx = await _open_and_run(session_manager, tmp_inp, "f_lqual_bad")
+        with pytest.raises(ToolError, match="not found"):
+            await set_link_quality(
+                ctx,
+                session_id="f_lqual_bad",
+                link_id="NOPE",
+                pollutant=reference_model.POLLUTANT_ID,
+                value=1.0,
+            )
+
+    async def test_set_link_quality_unknown_pollutant(self, session_manager, tmp_inp, reference_model):
+        from openswmm_mcp.tools.forcing import set_link_quality
+
+        ctx = await _open_and_run(session_manager, tmp_inp, "f_lqual_badp")
+        with pytest.raises(ToolError, match="not found"):
+            await set_link_quality(
+                ctx,
+                session_id="f_lqual_badp",
+                link_id=reference_model.FIRST_LINK_ID,
+                pollutant="GLORP",
+                value=1.0,
+            )
+
+    async def test_set_link_quality_invalid_mode(self, session_manager, tmp_inp, reference_model):
+        from openswmm_mcp.tools.forcing import set_link_quality
+
+        ctx = await _open_and_run(session_manager, tmp_inp, "f_lqual_mode")
+        with pytest.raises(ToolError, match="Invalid forcing mode"):
+            await set_link_quality(
+                ctx,
+                session_id="f_lqual_mode",
+                link_id=reference_model.FIRST_LINK_ID,
+                pollutant=reference_model.POLLUTANT_ID,
+                value=1.0,
+                mode="multiply",
+            )
 
 
 # ---------------------------------------------------------------------------

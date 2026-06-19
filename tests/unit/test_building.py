@@ -177,7 +177,7 @@ class TestPopLastNode:
         # rather than the (no-longer-existent) builder._nodes mock attr.
         session = await session_manager.get_session("bld_pln_ok")
         nodes = Nodes(session.model_builder)
-        assert nodes.count() == 1
+        assert len(nodes) == 1
         assert nodes.get_id(0) == "J1"
 
     async def test_pop_last_node_wrong_tail_raises(self, session_manager):
@@ -196,7 +196,7 @@ class TestPopLastNode:
         # The list is unchanged on failure.
         session = await session_manager.get_session("bld_pln_wt")
         nodes = Nodes(session.model_builder)
-        assert nodes.count() == 2
+        assert len(nodes) == 2
         assert nodes.get_id(0) == "J1"
         assert nodes.get_id(1) == "J2"
 
@@ -314,7 +314,7 @@ class TestPopLastLink:
         # After popping C1, no links should remain. Use the public Links API.
         session = await session_manager.get_session("bld_pll_ok")
         links = Links(session.model_builder)
-        assert links.count() == 0
+        assert len(links) == 0
 
     async def test_pop_last_link_wrong_tail_raises(self, session_manager):
         from openswmm_mcp.tools.building import add_link, add_node, pop_last_link

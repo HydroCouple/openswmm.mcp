@@ -7,7 +7,7 @@ import asyncio
 from fastmcp import Context, FastMCP
 
 from openswmm_mcp.dependencies import require_new_engine
-from openswmm_mcp.errors import ToolError
+from openswmm_mcp.errors import ToolError, resolve_index
 from openswmm_mcp.models import SpatialResult
 
 spatial_quality_mcp = FastMCP("spatial_quality")
@@ -92,8 +92,8 @@ async def get_coordinates(
     spatial = session.spatial
 
     if etype == "node":
-        idx = await asyncio.to_thread(session.nodes.get_index, element_id)
-        coord = await asyncio.to_thread(spatial.get_node_coord, idx)
+        idx = await resolve_index(session.nodes, element_id, "Node")
+        coord = await asyncio.to_thread(spatial.node_coord, idx)
         return SpatialResult(
             element_type=etype,
             element_id=element_id,
@@ -101,8 +101,8 @@ async def get_coordinates(
             y=coord[1],
         )
     elif etype == "link":
-        idx = await asyncio.to_thread(session.links.get_index, element_id)
-        coord = await asyncio.to_thread(spatial.get_link_coord, idx)
+        idx = await resolve_index(session.links, element_id, "Link")
+        coord = await asyncio.to_thread(spatial.link_coord, idx)
         return SpatialResult(
             element_type=etype,
             element_id=element_id,
@@ -110,8 +110,8 @@ async def get_coordinates(
             y=coord[1],
         )
     else:  # subcatchment
-        idx = await asyncio.to_thread(session.subcatchments.get_index, element_id)
-        coord = await asyncio.to_thread(spatial.get_subcatch_coord, idx)
+        idx = await resolve_index(session.subcatchments, element_id, "Subcatchment")
+        coord = await asyncio.to_thread(spatial.subcatchment_coord, idx)
         return SpatialResult(
             element_type=etype,
             element_id=element_id,
@@ -154,14 +154,14 @@ async def set_coordinates(
     spatial = session.spatial
 
     if etype == "node":
-        idx = await asyncio.to_thread(session.nodes.get_index, element_id)
+        idx = await resolve_index(session.nodes, element_id, "Node")
         await asyncio.to_thread(spatial.set_node_coord, idx, x, y)
     elif etype == "link":
-        idx = await asyncio.to_thread(session.links.get_index, element_id)
+        idx = await resolve_index(session.links, element_id, "Link")
         await asyncio.to_thread(spatial.set_link_coord, idx, x, y)
     else:
-        idx = await asyncio.to_thread(session.subcatchments.get_index, element_id)
-        await asyncio.to_thread(spatial.set_subcatch_coord, idx, x, y)
+        idx = await resolve_index(session.subcatchments, element_id, "Subcatchment")
+        await asyncio.to_thread(spatial.set_subcatchment_coord, idx, x, y)
 
     return {
         "status": "updated",
@@ -170,6 +170,111 @@ async def set_coordinates(
         "x": x,
         "y": y,
         "message": (f"Coordinates for {etype} '{element_id}' set to ({x}, {y})."),
+    }
+
+
+@spatial_quality_mcp.tool()
+async def set_gage_coord(
+    ctx: Context,
+    session_id: str = "default",
+    gage_id: str = "",
+    x: float = 0.0,
+    y: float = 0.0,
+) -> dict:
+    """Set the (x, y) symbol coordinates of a rain gage.
+
+    Complements :func:`get_all_coordinates` (which reads gage coordinates
+    via ``element_type="gage"``).  The element-keyed :func:`set_coordinates`
+    tool handles nodes / links / subcatchments only; this is the dedicated
+    gage-coordinate setter.
+
+    Parameters
+    ----------
+    session_id:
+        Identifier of the session.  Defaults to ``"default"``.
+    gage_id:
+        The identifier of the rain gage to update.
+    x:
+        The new X coordinate.
+    y:
+        The new Y coordinate.
+    """
+    if not gage_id:
+        raise ToolError("gage_id is required.")
+
+    sm = _get_session_manager(ctx)
+    session = await sm.get_session(session_id)
+    require_new_engine(session, "Gage coordinate updates")
+    spatial = session.spatial
+
+    idx = await resolve_index(session.gages, gage_id, "Gage")
+    if idx < 0:
+        raise ToolError(f"Gage '{gage_id}' not found.")
+
+    # v1: spatial.set_gage_coord(gage, x, y) — accepts int index or str id.
+    await asyncio.to_thread(spatial.set_gage_coord, idx, x, y)
+
+    return {
+        "status": "updated",
+        "session_id": session_id,
+        "gage_id": gage_id,
+        "x": x,
+        "y": y,
+        "message": f"Coordinates for gage '{gage_id}' set to ({x}, {y}).",
+    }
+
+
+@spatial_quality_mcp.tool()
+async def set_node_coords_bulk(
+    ctx: Context,
+    session_id: str = "default",
+    coordinates: list[list[float]] = [],
+) -> dict:
+    """Set **all** node coordinates in one bulk call.
+
+    The inverse of reading node coordinates via :func:`get_all_coordinates`
+    (``element_type="node"``).  *coordinates* must be a list of ``[x, y]``
+    pairs in node-index order, one per node in the model; a single C-level
+    bulk write (memcpy) replaces every node's coordinates at once.
+
+    Parameters
+    ----------
+    session_id:
+        Identifier of the session.  Defaults to ``"default"``.
+    coordinates:
+        List of ``[x, y]`` pairs, one per node, in index order.
+    """
+    for i, pt in enumerate(coordinates):
+        if len(pt) != 2:
+            raise ToolError(f"coordinates[{i}] must be a two-element [x, y] list, got {pt!r}.")
+
+    sm = _get_session_manager(ctx)
+    session = await sm.get_session(session_id)
+    require_new_engine(session, "Bulk node coordinate updates")
+
+    spatial = session.spatial
+    nodes = session.nodes
+
+    node_count = await asyncio.to_thread(lambda: len(nodes))
+    if len(coordinates) != node_count:
+        raise ToolError(
+            f"coordinates has {len(coordinates)} rows but the model has "
+            f"{node_count} node(s); supply exactly one [x, y] pair per node."
+        )
+
+    import numpy as np
+
+    # v1 set_node_coords accepts one (n, 2) ndarray in node-index order.
+    arr = np.asarray(coordinates, dtype=np.float64)
+    if arr.size == 0:
+        arr = arr.reshape(0, 2)
+    await asyncio.to_thread(spatial.set_node_coords, arr)
+
+    return {
+        "status": "updated",
+        "session_id": session_id,
+        "node_count": node_count,
+        "message": f"Set coordinates for {node_count} node(s).",
     }
 
 
@@ -200,11 +305,13 @@ async def get_vertices(
     require_new_engine(session, "Link vertex queries")
 
     spatial = session.spatial
-    idx = await asyncio.to_thread(session.links.get_index, link_id)
+    idx = await resolve_index(session.links, link_id, "Link")
     if idx < 0:
         raise ToolError(f"Link '{link_id}' not found.")
 
-    count = await asyncio.to_thread(spatial.get_link_vertex_count, idx)
+    # v1: spatial.link_vertices(idx) returns one np.ndarray of shape (n, 2).
+    verts = await asyncio.to_thread(spatial.link_vertices, idx)
+    count = int(len(verts))
     if count == 0:
         return {
             "session_id": session_id,
@@ -212,9 +319,7 @@ async def get_vertices(
             "vertex_count": 0,
             "vertices": [],
         }
-
-    x_arr, y_arr = await asyncio.to_thread(spatial.get_link_vertices, idx)
-    vertices = [[float(x_arr[i]), float(y_arr[i])] for i in range(len(x_arr))]
+    vertices = [[float(row[0]), float(row[1])] for row in verts]
 
     return {
         "session_id": session_id,
@@ -258,15 +363,17 @@ async def set_vertices(
     require_new_engine(session, "Link vertex updates")
 
     spatial = session.spatial
-    idx = await asyncio.to_thread(session.links.get_index, link_id)
+    idx = await resolve_index(session.links, link_id, "Link")
     if idx < 0:
         raise ToolError(f"Link '{link_id}' not found.")
 
     import numpy as np
 
-    x_arr = np.array([pt[0] for pt in vertices], dtype=np.float64)
-    y_arr = np.array([pt[1] for pt in vertices], dtype=np.float64)
-    await asyncio.to_thread(spatial.set_link_vertices, idx, x_arr, y_arr)
+    # v1 set_link_vertices accepts an (n, 2) ndarray.
+    arr = np.asarray(vertices, dtype=np.float64)
+    if arr.size == 0:
+        arr = arr.reshape(0, 2)
+    await asyncio.to_thread(spatial.set_link_vertices, idx, arr)
 
     return {
         "status": "updated",
@@ -303,11 +410,13 @@ async def get_polygon(
     require_new_engine(session, "Subcatchment polygon queries")
 
     spatial = session.spatial
-    idx = await asyncio.to_thread(session.subcatchments.get_index, subcatch_id)
+    idx = await resolve_index(session.subcatchments, subcatch_id, "Subcatchment")
     if idx < 0:
         raise ToolError(f"Subcatchment '{subcatch_id}' not found.")
 
-    count = await asyncio.to_thread(spatial.get_subcatch_polygon_count, idx)
+    # v1: spatial.subcatchment_polygon(idx) returns one np.ndarray (n, 2).
+    poly = await asyncio.to_thread(spatial.subcatchment_polygon, idx)
+    count = int(len(poly))
     if count == 0:
         return {
             "session_id": session_id,
@@ -315,9 +424,7 @@ async def get_polygon(
             "vertex_count": 0,
             "polygon": [],
         }
-
-    x_arr, y_arr = await asyncio.to_thread(spatial.get_subcatch_polygon, idx)
-    polygon = [[float(x_arr[i]), float(y_arr[i])] for i in range(len(x_arr))]
+    polygon = [[float(row[0]), float(row[1])] for row in poly]
 
     return {
         "session_id": session_id,
@@ -360,15 +467,17 @@ async def set_polygon(
     require_new_engine(session, "Subcatchment polygon updates")
 
     spatial = session.spatial
-    idx = await asyncio.to_thread(session.subcatchments.get_index, subcatch_id)
+    idx = await resolve_index(session.subcatchments, subcatch_id, "Subcatchment")
     if idx < 0:
         raise ToolError(f"Subcatchment '{subcatch_id}' not found.")
 
     import numpy as np
 
-    x_arr = np.array([pt[0] for pt in polygon], dtype=np.float64)
-    y_arr = np.array([pt[1] for pt in polygon], dtype=np.float64)
-    await asyncio.to_thread(spatial.set_subcatch_polygon, idx, x_arr, y_arr)
+    # v1 set_subcatchment_polygon accepts an (n, 2) ndarray.
+    arr = np.asarray(polygon, dtype=np.float64)
+    if arr.size == 0:
+        arr = arr.reshape(0, 2)
+    await asyncio.to_thread(spatial.set_subcatchment_polygon, idx, arr)
 
     return {
         "status": "updated",
@@ -412,25 +521,25 @@ async def get_quality(
     require_new_engine(session, "Water-quality queries")
 
     pollutants = session.pollutants
-    pollut_count = await asyncio.to_thread(pollutants.count)
+    pollut_count = await asyncio.to_thread(len, pollutants)
 
     if etype == "node":
-        elem_idx = await asyncio.to_thread(session.nodes.get_index, element_id)
+        elem_idx = await resolve_index(session.nodes, element_id, "Node")
 
         def _get_conc(p_idx: int) -> float:
-            return session.nodes.get_quality(elem_idx, p_idx)
+            return session.nodes[elem_idx].quality(p_idx)
 
     elif etype == "link":
-        elem_idx = await asyncio.to_thread(session.links.get_index, element_id)
+        elem_idx = await resolve_index(session.links, element_id, "Link")
 
         def _get_conc(p_idx: int) -> float:
-            return session.links.get_quality(elem_idx, p_idx)
+            return session.links[elem_idx].quality(p_idx)
 
     else:
-        elem_idx = await asyncio.to_thread(session.subcatchments.get_index, element_id)
+        elem_idx = await resolve_index(session.subcatchments, element_id, "Subcatchment")
 
         def _get_conc(p_idx: int) -> float:
-            return session.subcatchments.get_quality(elem_idx, p_idx)
+            return session.subcatchments[elem_idx].quality(p_idx)
 
     data: dict[str, float] = {}
     for p_idx in range(pollut_count):
@@ -490,13 +599,13 @@ async def set_treatment(
     session = await sm.get_session(session_id)
     require_new_engine(session, "Treatment assignments")
 
-    node_idx = await asyncio.to_thread(session.nodes.get_index, node_id)
-    pollut_idx = await asyncio.to_thread(session.pollutants.get_index, pollutant)
+    node_idx = await resolve_index(session.nodes, node_id, "Node")
+    pollut_idx = await resolve_index(session.pollutants, pollutant, "Pollutant")
     if pollut_idx < 0:
         raise ToolError(f"Pollutant '{pollutant}' not found in model.")
 
     await asyncio.to_thread(
-        session.quality.treatment_set,
+        session.quality.set_treatment,
         node_idx,
         pollut_idx,
         expression,
@@ -544,54 +653,61 @@ async def get_all_coordinates(
 
     if etype == "node":
         nodes = session.nodes
-        count = await asyncio.to_thread(nodes.count)
+
+        def _fetch_node_coords() -> tuple[int, list[dict]]:
+            count = len(nodes)
+            if count == 0:
+                return 0, []
+            # v1: spatial.node_coords() returns one ndarray shape (n, 2).
+            arr = spatial.node_coords()
+            return count, [
+                {"id": nodes.get_id(i), "x": float(arr[i, 0]), "y": float(arr[i, 1])}
+                for i in range(count)
+            ]
+
+        count, coords = await asyncio.to_thread(_fetch_node_coords)
         if count == 0:
             return {"session_id": session_id, "element_type": etype, "count": 0, "coordinates": []}
-
-        # Single bulk C call for node coordinates (numpy memcpy)
-        x_arr, y_arr = await asyncio.to_thread(spatial.get_node_coords_bulk)
-        ids = await asyncio.to_thread(lambda: [nodes.get_id(i) for i in range(count)])
-        coords = [{"id": ids[i], "x": float(x_arr[i]), "y": float(y_arr[i])} for i in range(count)]
 
     elif etype == "link":
         links = session.links
-        count = await asyncio.to_thread(links.count)
-        if count == 0:
-            return {"session_id": session_id, "element_type": etype, "count": 0, "coordinates": []}
 
         def _fetch_all_link_coords():
-            return [
+            count = len(links)
+            return count, [
                 {
                     "id": links.get_id(i),
-                    "x": float(spatial.get_link_coord(i)[0]),
-                    "y": float(spatial.get_link_coord(i)[1]),
+                    "x": float(spatial.link_coord(i)[0]),
+                    "y": float(spatial.link_coord(i)[1]),
                 }
                 for i in range(count)
             ]
 
-        coords = await asyncio.to_thread(_fetch_all_link_coords)
+        count, coords = await asyncio.to_thread(_fetch_all_link_coords)
+        if count == 0:
+            return {"session_id": session_id, "element_type": etype, "count": 0, "coordinates": []}
 
     elif etype == "subcatchment":
         subcatchments = session.subcatchments
-        count = await asyncio.to_thread(subcatchments.count)
-        if count == 0:
-            return {"session_id": session_id, "element_type": etype, "count": 0, "coordinates": []}
 
         def _fetch_all_subcatch_coords():
-            return [
+            count = len(subcatchments)
+            return count, [
                 {
                     "id": subcatchments.get_id(i),
-                    "x": float(spatial.get_subcatch_coord(i)[0]),
-                    "y": float(spatial.get_subcatch_coord(i)[1]),
+                    "x": float(spatial.subcatchment_coord(i)[0]),
+                    "y": float(spatial.subcatchment_coord(i)[1]),
                 }
                 for i in range(count)
             ]
 
-        coords = await asyncio.to_thread(_fetch_all_subcatch_coords)
+        count, coords = await asyncio.to_thread(_fetch_all_subcatch_coords)
+        if count == 0:
+            return {"session_id": session_id, "element_type": etype, "count": 0, "coordinates": []}
 
     else:  # gage
         gages = session.gages
-        count = await asyncio.to_thread(gages.count)
+        count = await asyncio.to_thread(lambda: len(gages))
         if count == 0:
             return {"session_id": session_id, "element_type": etype, "count": 0, "coordinates": []}
 
@@ -599,8 +715,8 @@ async def get_all_coordinates(
             return [
                 {
                     "id": gages.get_id(i),
-                    "x": float(spatial.get_gage_coord(i)[0]),
-                    "y": float(spatial.get_gage_coord(i)[1]),
+                    "x": float(spatial.gage_coord(i)[0]),
+                    "y": float(spatial.gage_coord(i)[1]),
                 }
                 for i in range(count)
             ]
@@ -634,7 +750,7 @@ async def get_crs(
     sm = _get_session_manager(ctx)
     session = await sm.get_session(session_id)
     require_new_engine(session, "CRS queries")
-    crs = await asyncio.to_thread(session.spatial.get_crs)
+    crs = await asyncio.to_thread(lambda: session.spatial.crs)
     return {"session_id": session_id, "crs": crs}
 
 
@@ -656,7 +772,13 @@ async def set_crs(
     sm = _get_session_manager(ctx)
     session = await sm.get_session(session_id)
     require_new_engine(session, "CRS updates")
-    await asyncio.to_thread(session.spatial.set_crs, crs)
+    crs_value = crs
+
+    def _set_crs() -> None:
+        # v1: spatial.crs is a settable property.
+        session.spatial.crs = crs_value
+
+    await asyncio.to_thread(_set_crs)
     return {"status": "updated", "session_id": session_id, "crs": crs}
 
 
@@ -688,24 +810,26 @@ async def get_all_vertices(
 
     spatial = session.spatial
     links = session.links
-    count = await asyncio.to_thread(links.count)
-    if count == 0:
-        return {"session_id": session_id, "link_count": 0, "links": []}
 
     def _fetch_all():
+        count = len(links)
+        if count == 0:
+            return 0, []
         result = []
         for i in range(count):
             lid = links.get_id(i)
-            n = spatial.get_link_vertex_count(i)
-            if n > 0:
-                x_arr, y_arr = spatial.get_link_vertices(i)
-                verts = [[float(x_arr[j]), float(y_arr[j])] for j in range(len(x_arr))]
+            # v1: spatial.link_vertices(i) returns ndarray shape (n, 2).
+            arr = spatial.link_vertices(i)
+            if len(arr) > 0:
+                verts = [[float(row[0]), float(row[1])] for row in arr]
             else:
                 verts = []
             result.append({"id": lid, "vertex_count": len(verts), "vertices": verts})
-        return result
+        return count, result
 
-    links_data = await asyncio.to_thread(_fetch_all)
+    count, links_data = await asyncio.to_thread(_fetch_all)
+    if count == 0:
+        return {"session_id": session_id, "link_count": 0, "links": []}
     return {"session_id": session_id, "link_count": len(links_data), "links": links_data}
 
 
@@ -738,19 +862,18 @@ async def get_all_polygons(
 
     spatial = session.spatial
     subcatchments = session.subcatchments
-    count = await asyncio.to_thread(subcatchments.count)
-    if count == 0:
-        return {"session_id": session_id, "subcatchment_count": 0, "subcatchments": []}
 
     def _fetch_all():
+        count = len(subcatchments)
+        if count == 0:
+            return 0, []
         result = []
         for i in range(count):
             sid = subcatchments.get_id(i)
-            cx, cy = spatial.get_subcatch_coord(i)
-            n = spatial.get_subcatch_polygon_count(i)
-            if n > 0:
-                x_arr, y_arr = spatial.get_subcatch_polygon(i)
-                poly = [[float(x_arr[j]), float(y_arr[j])] for j in range(len(x_arr))]
+            cx, cy = spatial.subcatchment_coord(i)
+            arr = spatial.subcatchment_polygon(i)
+            if len(arr) > 0:
+                poly = [[float(row[0]), float(row[1])] for row in arr]
             else:
                 poly = []
             result.append(
@@ -761,9 +884,11 @@ async def get_all_polygons(
                     "polygon": poly,
                 }
             )
-        return result
+        return count, result
 
-    sc_data = await asyncio.to_thread(_fetch_all)
+    count, sc_data = await asyncio.to_thread(_fetch_all)
+    if count == 0:
+        return {"session_id": session_id, "subcatchment_count": 0, "subcatchments": []}
     return {"session_id": session_id, "subcatchment_count": len(sc_data), "subcatchments": sc_data}
 
 
@@ -825,115 +950,113 @@ async def get_model_geometry(
     gages_acc = session.gages
 
     # ---- CRS ----------------------------------------------------------------
-    crs = await asyncio.to_thread(spatial.get_crs)
+    crs = await asyncio.to_thread(lambda: spatial.crs)
 
     # ---- Nodes (bulk coord memcpy + batched property reads) -----------------
-    node_count = await asyncio.to_thread(nodes_acc.count)
+    def _fetch_nodes() -> tuple[int, list[dict], "np.ndarray"]:
+        count = len(nodes_acc)
+        if count == 0:
+            return 0, [], np.zeros((0, 2))
+        # v1: spatial.node_coords() returns one ndarray shape (n, 2).
+        arr = spatial.node_coords()
+        recs = [
+            {
+                "id": nodes_acc.get_id(i),
+                "type": int(nodes_acc[i].type),
+                "type_name": _NODE_TYPE_NAMES.get(int(nodes_acc[i].type), "UNKNOWN"),
+                "x": float(arr[i, 0]),
+                "y": float(arr[i, 1]),
+            }
+            for i in range(count)
+        ]
+        return count, recs, arr
 
-    if node_count > 0:
-        node_x, node_y = await asyncio.to_thread(spatial.get_node_coords_bulk)
-
-        def _fetch_node_props():
-            return [
-                {
-                    "id": nodes_acc.get_id(i),
-                    "type": nodes_acc.get_type(i),
-                    "type_name": _NODE_TYPE_NAMES.get(nodes_acc.get_type(i), "UNKNOWN"),
-                    "x": float(node_x[i]),
-                    "y": float(node_y[i]),
-                }
-                for i in range(node_count)
-            ]
-
-        nodes_data = await asyncio.to_thread(_fetch_node_props)
-    else:
-        node_x = node_y = np.array([])
-        nodes_data = []
+    node_count, nodes_data, node_xy = await asyncio.to_thread(_fetch_nodes)
 
     # ---- Links (batched per-link reads in one thread) -----------------------
-    link_count = await asyncio.to_thread(links_acc.count)
+    def _fetch_links():
+        count = len(links_acc)
+        if count == 0:
+            return 0, []
+        result = []
+        for i in range(count):
+            link = links_acc[i]
+            ltype = int(link.type)
+            fn_wrap = link.from_node
+            tn_wrap = link.to_node
+            verts_arr = spatial.link_vertices(i)
+            verts = (
+                [[float(row[0]), float(row[1])] for row in verts_arr]
+                if len(verts_arr) > 0
+                else []
+            )
+            result.append(
+                {
+                    "id": links_acc.get_id(i),
+                    "type": ltype,
+                    "type_name": _LINK_TYPE_NAMES.get(ltype, "UNKNOWN"),
+                    "from_node": fn_wrap.id,
+                    "to_node": tn_wrap.id,
+                    "vertices": verts,
+                }
+            )
+        return count, result
 
-    if link_count > 0:
-
-        def _fetch_links():
-            result = []
-            for i in range(link_count):
-                ltype = links_acc.get_type(i)
-                fn_idx = links_acc.get_from_node(i)
-                tn_idx = links_acc.get_to_node(i)
-                n = spatial.get_link_vertex_count(i)
-                if n > 0:
-                    xv, yv = spatial.get_link_vertices(i)
-                    verts = [[float(xv[j]), float(yv[j])] for j in range(len(xv))]
-                else:
-                    verts = []
-                result.append(
-                    {
-                        "id": links_acc.get_id(i),
-                        "type": ltype,
-                        "type_name": _LINK_TYPE_NAMES.get(ltype, "UNKNOWN"),
-                        "from_node": nodes_acc.get_id(fn_idx),
-                        "to_node": nodes_acc.get_id(tn_idx),
-                        "vertices": verts,
-                    }
-                )
-            return result
-
-        links_data = await asyncio.to_thread(_fetch_links)
-    else:
-        links_data = []
+    link_count, links_data = await asyncio.to_thread(_fetch_links)
 
     # ---- Subcatchments (batched per-subcatchment reads in one thread) --------
-    sc_count = await asyncio.to_thread(subcatch_acc.count)
+    def _fetch_subcatchments():
+        count = len(subcatch_acc)
+        if count == 0:
+            return 0, []
+        result = []
+        for i in range(count):
+            sub = subcatch_acc[i]
+            cx, cy = spatial.subcatchment_coord(i)
+            poly_arr = spatial.subcatchment_polygon(i)
+            poly = (
+                [[float(row[0]), float(row[1])] for row in poly_arr]
+                if len(poly_arr) > 0
+                else []
+            )
+            # v1: subcatchment.outlet returns Union[Node, Subcatchment, None]
+            outlet = sub.outlet
+            outlet_idx = -1
+            try:
+                outlet_idx = int(outlet.index) if outlet is not None else -1
+            except AttributeError:
+                outlet_idx = -1
+            result.append(
+                {
+                    "id": subcatch_acc.get_id(i),
+                    "centroid": [float(cx), float(cy)],
+                    "polygon": poly,
+                    "outlet_node_idx": outlet_idx,
+                }
+            )
+        return count, result
 
-    if sc_count > 0:
-
-        def _fetch_subcatchments():
-            result = []
-            for i in range(sc_count):
-                cx, cy = spatial.get_subcatch_coord(i)
-                n = spatial.get_subcatch_polygon_count(i)
-                if n > 0:
-                    px, py = spatial.get_subcatch_polygon(i)
-                    poly = [[float(px[j]), float(py[j])] for j in range(len(px))]
-                else:
-                    poly = []
-                result.append(
-                    {
-                        "id": subcatch_acc.get_id(i),
-                        "centroid": [float(cx), float(cy)],
-                        "polygon": poly,
-                        "outlet_node_idx": subcatch_acc.get_outlet(i),
-                    }
-                )
-            return result
-
-        sc_data = await asyncio.to_thread(_fetch_subcatchments)
-    else:
-        sc_data = []
+    sc_count, sc_data = await asyncio.to_thread(_fetch_subcatchments)
 
     # ---- Gages (batched per-gage reads in one thread) -----------------------
-    gage_count = await asyncio.to_thread(gages_acc.count)
+    def _fetch_gages():
+        count = len(gages_acc)
+        return count, [
+            {
+                "id": gages_acc.get_id(i),
+                "x": float(spatial.gage_coord(i)[0]),
+                "y": float(spatial.gage_coord(i)[1]),
+            }
+            for i in range(count)
+        ]
 
-    if gage_count > 0:
-
-        def _fetch_gages():
-            return [
-                {
-                    "id": gages_acc.get_id(i),
-                    "x": float(spatial.get_gage_coord(i)[0]),
-                    "y": float(spatial.get_gage_coord(i)[1]),
-                }
-                for i in range(gage_count)
-            ]
-
-        gages_data = await asyncio.to_thread(_fetch_gages)
-    else:
-        gages_data = []
+    gage_count, gages_data = await asyncio.to_thread(_fetch_gages)
 
     # ---- Bounding box (from node coords) ------------------------------------
     bounds: dict = {}
-    if len(node_x) > 0:
+    if node_count > 0:
+        node_x = node_xy[:, 0]
+        node_y = node_xy[:, 1]
         valid_x = node_x[np.isfinite(node_x)]
         valid_y = node_y[np.isfinite(node_y)]
         if len(valid_x) > 0:
@@ -1001,7 +1124,7 @@ async def add_lid(
     session = await sm.get_session(session_id)
     require_new_engine(session, "LID controls")
 
-    subcatch_idx = await asyncio.to_thread(session.subcatchments.get_index, subcatch_id)
+    subcatch_idx = await resolve_index(session.subcatchments, subcatch_id, "Subcatchment")
     await asyncio.to_thread(
         session.infrastructure.lid_usage_add,
         subcatch_idx,

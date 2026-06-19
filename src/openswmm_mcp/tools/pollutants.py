@@ -23,7 +23,7 @@ from openswmm_mcp.dependencies import (
     require_new_engine,
     require_state,
 )
-from openswmm_mcp.errors import ErrorCode, ToolError
+from openswmm_mcp.errors import ErrorCode, ToolError, resolve_index
 from openswmm_mcp.session import SimSession
 
 pollutants_mcp = FastMCP("pollutants")
@@ -86,14 +86,10 @@ def _links_accessor(session: SimSession):
 
 
 async def _resolve_pollutant(session: SimSession, pollutant_id: str | int) -> int:
-    if isinstance(pollutant_id, int):
-        return pollutant_id
-    if not pollutant_id:
-        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] pollutant_id must not be empty.")
-    idx = await asyncio.to_thread(_pollutants_accessor(session).get_index, pollutant_id)
-    if idx < 0:
-        raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Pollutant '{pollutant_id}' not found.")
-    return idx
+    # ``get_index`` raises ElementNotFoundError (a KeyError subclass) for an
+    # unknown id rather than returning a -1 sentinel; ``resolve_index``
+    # handles int passthrough, the empty-string guard, and that translation.
+    return await resolve_index(_pollutants_accessor(session), pollutant_id, "Pollutant")
 
 
 # ===========================================================================
@@ -105,7 +101,8 @@ async def _resolve_pollutant(session: SimSession, pollutant_id: str | int) -> in
 async def count(ctx: Context, session_id: str = "default") -> dict:
     """Return the number of pollutants defined in the model."""
     session = await _get_session(ctx, session_id)
-    n = await asyncio.to_thread(_pollutants_accessor(session).count)
+    accessor = _pollutants_accessor(session)
+    n = await asyncio.to_thread(lambda: len(accessor))
     return {"session_id": session_id, "count": n}
 
 
@@ -124,18 +121,14 @@ async def add(
         raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] pollutant_id must not be empty.")
     units_int = _resolve_units(units)
     session = await _get_session(ctx, session_id)
-    # Pollutants.add works in building state via the ModelBuilder accessor.
-    # Use the accessor on whatever the session exposes (ModelBuilder or solver).
-    from openswmm.engine import Pollutants
+    accessor = _pollutants_accessor(session)
 
-    if session.state == "building":
-        if session.model_builder is None:
-            raise ToolError(f"[{ErrorCode.INVALID_STATE}] Building session has no ModelBuilder.")
-        accessor = Pollutants(session.model_builder)
-    else:
-        accessor = session.pollutants
-    await asyncio.to_thread(accessor.add, pollutant_id, units_int)
-    idx = await asyncio.to_thread(accessor.get_index, pollutant_id)
+    def _add() -> int:
+        # v1: Pollutants.add(name, units) returns a Pollutant wrapper.
+        new_p = accessor.add(pollutant_id, units_int)
+        return new_p.index
+
+    idx = await asyncio.to_thread(_add)
     return {
         "status": "ok",
         "session_id": session_id,
@@ -150,11 +143,12 @@ async def add(
 # ===========================================================================
 
 
-async def _scalar_get(ctx, session_id, pollutant_id, attr, key, value_type):
+async def _attr_get(ctx, session_id, pollutant_id, attr, key, value_type):
+    """Read a v1 property off the Pollutant wrapper."""
     session = await _get_session(ctx, session_id)
     idx = await _resolve_pollutant(session, pollutant_id)
     accessor = _pollutants_accessor(session)
-    v = await asyncio.to_thread(getattr(accessor, attr), idx)
+    v = await asyncio.to_thread(lambda: getattr(accessor[idx], attr))
     return {
         "session_id": session_id,
         "pollutant_id": pollutant_id,
@@ -163,19 +157,25 @@ async def _scalar_get(ctx, session_id, pollutant_id, attr, key, value_type):
     }
 
 
-async def _scalar_set(ctx, session_id, pollutant_id, attr, value, key, value_type):
+async def _attr_set(ctx, session_id, pollutant_id, attr, value, key, value_type):
+    """Write a v1 property on the Pollutant wrapper."""
     if value is None:
         raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] {key} is required.")
     session = await _get_session(ctx, session_id)
     idx = await _resolve_pollutant(session, pollutant_id)
     accessor = _pollutants_accessor(session)
-    await asyncio.to_thread(getattr(accessor, attr), idx, value_type(value))
+    typed = value_type(value)
+
+    def _set() -> None:
+        setattr(accessor[idx], attr, typed)
+
+    await asyncio.to_thread(_set)
     return {
         "status": "ok",
         "session_id": session_id,
         "pollutant_id": pollutant_id,
         "pollutant_index": idx,
-        key: value_type(value),
+        key: typed,
     }
 
 
@@ -186,13 +186,15 @@ async def get_units(
     """Return the concentration units for a pollutant (mg/L / ug/L / #/L)."""
     session = await _get_session(ctx, session_id)
     idx = await _resolve_pollutant(session, pollutant_id)
-    code = await asyncio.to_thread(_pollutants_accessor(session).get_units, idx)
+    accessor = _pollutants_accessor(session)
+    # v1 Pollutant.units returns a ConcentrationUnits IntEnum.
+    code = await asyncio.to_thread(lambda: int(accessor[idx].units))
     return {
         "session_id": session_id,
         "pollutant_id": pollutant_id,
         "pollutant_index": idx,
-        "units_code": int(code),
-        "units": _POLLUT_UNITS.get(int(code), "unknown"),
+        "units_code": code,
+        "units": _POLLUT_UNITS.get(code, "unknown"),
     }
 
 
@@ -201,7 +203,7 @@ async def get_kdecay(
     ctx: Context, session_id: str = "default", pollutant_id: str | int = ""
 ) -> dict:
     """Return the first-order decay coefficient (1/day) for a pollutant."""
-    return await _scalar_get(ctx, session_id, pollutant_id, "get_kdecay", "kdecay", float)
+    return await _attr_get(ctx, session_id, pollutant_id, "kdecay", "kdecay", float)
 
 
 @pollutants_mcp.tool()
@@ -212,7 +214,7 @@ async def set_kdecay(
     kdecay: float = 0.0,
 ) -> dict:
     """Set the first-order decay coefficient (1/day)."""
-    return await _scalar_set(ctx, session_id, pollutant_id, "set_kdecay", kdecay, "kdecay", float)
+    return await _attr_set(ctx, session_id, pollutant_id, "kdecay", kdecay, "kdecay", float)
 
 
 @pollutants_mcp.tool()
@@ -220,7 +222,7 @@ async def get_rain_conc(
     ctx: Context, session_id: str = "default", pollutant_id: str | int = ""
 ) -> dict:
     """Return the concentration of this pollutant in rainfall."""
-    return await _scalar_get(ctx, session_id, pollutant_id, "get_rain_conc", "rain_conc", float)
+    return await _attr_get(ctx, session_id, pollutant_id, "rain_conc", "rain_conc", float)
 
 
 @pollutants_mcp.tool()
@@ -231,14 +233,8 @@ async def set_rain_conc(
     rain_conc: float = 0.0,
 ) -> dict:
     """Set the rainfall concentration."""
-    return await _scalar_set(
-        ctx,
-        session_id,
-        pollutant_id,
-        "set_rain_conc",
-        rain_conc,
-        "rain_conc",
-        float,
+    return await _attr_set(
+        ctx, session_id, pollutant_id, "rain_conc", rain_conc, "rain_conc", float
     )
 
 
@@ -247,7 +243,7 @@ async def get_gw_conc(
     ctx: Context, session_id: str = "default", pollutant_id: str | int = ""
 ) -> dict:
     """Return the concentration of this pollutant in groundwater."""
-    return await _scalar_get(ctx, session_id, pollutant_id, "get_gw_conc", "gw_conc", float)
+    return await _attr_get(ctx, session_id, pollutant_id, "gw_conc", "gw_conc", float)
 
 
 @pollutants_mcp.tool()
@@ -258,14 +254,8 @@ async def set_gw_conc(
     gw_conc: float = 0.0,
 ) -> dict:
     """Set the groundwater concentration."""
-    return await _scalar_set(
-        ctx,
-        session_id,
-        pollutant_id,
-        "set_gw_conc",
-        gw_conc,
-        "gw_conc",
-        float,
+    return await _attr_set(
+        ctx, session_id, pollutant_id, "gw_conc", gw_conc, "gw_conc", float
     )
 
 
@@ -274,7 +264,7 @@ async def get_rdii_conc(
     ctx: Context, session_id: str = "default", pollutant_id: str | int = ""
 ) -> dict:
     """Return the concentration of this pollutant in RDII."""
-    return await _scalar_get(ctx, session_id, pollutant_id, "get_rdii_conc", "rdii_conc", float)
+    return await _attr_get(ctx, session_id, pollutant_id, "rdii_conc", "rdii_conc", float)
 
 
 @pollutants_mcp.tool()
@@ -285,14 +275,29 @@ async def set_rdii_conc(
     rdii_conc: float = 0.0,
 ) -> dict:
     """Set the RDII concentration."""
-    return await _scalar_set(
-        ctx,
-        session_id,
-        pollutant_id,
-        "set_rdii_conc",
-        rdii_conc,
-        "rdii_conc",
-        float,
+    return await _attr_set(
+        ctx, session_id, pollutant_id, "rdii_conc", rdii_conc, "rdii_conc", float
+    )
+
+
+@pollutants_mcp.tool()
+async def get_dwf_conc(
+    ctx: Context, session_id: str = "default", pollutant_id: str | int = ""
+) -> dict:
+    """Return the concentration of this pollutant in dry-weather flow."""
+    return await _attr_get(ctx, session_id, pollutant_id, "dwf_conc", "dwf_conc", float)
+
+
+@pollutants_mcp.tool()
+async def set_dwf_conc(
+    ctx: Context,
+    session_id: str = "default",
+    pollutant_id: str | int = "",
+    dwf_conc: float = 0.0,
+) -> dict:
+    """Set the dry-weather-flow concentration."""
+    return await _attr_set(
+        ctx, session_id, pollutant_id, "dwf_conc", dwf_conc, "dwf_conc", float
     )
 
 
@@ -301,7 +306,7 @@ async def get_init_conc(
     ctx: Context, session_id: str = "default", pollutant_id: str | int = ""
 ) -> dict:
     """Return the initial concentration throughout the system."""
-    return await _scalar_get(ctx, session_id, pollutant_id, "get_init_conc", "init_conc", float)
+    return await _attr_get(ctx, session_id, pollutant_id, "init_conc", "init_conc", float)
 
 
 @pollutants_mcp.tool()
@@ -312,21 +317,15 @@ async def set_init_conc(
     init_conc: float = 0.0,
 ) -> dict:
     """Set the initial system-wide concentration."""
-    return await _scalar_set(
-        ctx,
-        session_id,
-        pollutant_id,
-        "set_init_conc",
-        init_conc,
-        "init_conc",
-        float,
+    return await _attr_set(
+        ctx, session_id, pollutant_id, "init_conc", init_conc, "init_conc", float
     )
 
 
 @pollutants_mcp.tool()
 async def get_mwt(ctx: Context, session_id: str = "default", pollutant_id: str | int = "") -> dict:
     """Return the molecular weight of a pollutant (g/mol)."""
-    return await _scalar_get(ctx, session_id, pollutant_id, "get_mwt", "molecular_weight", float)
+    return await _attr_get(ctx, session_id, pollutant_id, "mwt", "molecular_weight", float)
 
 
 @pollutants_mcp.tool()
@@ -337,11 +336,11 @@ async def set_mwt(
     molecular_weight: float = 0.0,
 ) -> dict:
     """Set the molecular weight (g/mol)."""
-    return await _scalar_set(
+    return await _attr_set(
         ctx,
         session_id,
         pollutant_id,
-        "set_mwt",
+        "mwt",
         molecular_weight,
         "molecular_weight",
         float,
@@ -353,15 +352,7 @@ async def get_snow_only(
     ctx: Context, session_id: str = "default", pollutant_id: str | int = ""
 ) -> dict:
     """Return the snow-only flag for a pollutant (True = transported only in snow)."""
-    session = await _get_session(ctx, session_id)
-    idx = await _resolve_pollutant(session, pollutant_id)
-    flag = await asyncio.to_thread(_pollutants_accessor(session).get_snow_only, idx)
-    return {
-        "session_id": session_id,
-        "pollutant_id": pollutant_id,
-        "pollutant_index": idx,
-        "snow_only": bool(flag),
-    }
+    return await _attr_get(ctx, session_id, pollutant_id, "snow_only", "snow_only", bool)
 
 
 @pollutants_mcp.tool()
@@ -372,31 +363,40 @@ async def set_snow_only(
     snow_only: bool = False,
 ) -> dict:
     """Set the snow-only flag for a pollutant."""
-    session = await _get_session(ctx, session_id)
-    idx = await _resolve_pollutant(session, pollutant_id)
-    await asyncio.to_thread(_pollutants_accessor(session).set_snow_only, idx, bool(snow_only))
-    return {
-        "status": "ok",
-        "session_id": session_id,
-        "pollutant_id": pollutant_id,
-        "pollutant_index": idx,
-        "snow_only": snow_only,
-    }
+    return await _attr_set(
+        ctx, session_id, pollutant_id, "snow_only", snow_only, "snow_only", bool
+    )
 
 
 @pollutants_mcp.tool()
 async def get_co_pollutant(
     ctx: Context, session_id: str = "default", pollutant_id: str | int = ""
 ) -> dict:
-    """Return the co-pollutant index assigned to this pollutant (-1 = none)."""
-    return await _scalar_get(
-        ctx,
-        session_id,
-        pollutant_id,
-        "get_co_pollutant",
-        "co_pollutant_index",
-        int,
-    )
+    """Return the co-pollutant index assigned to this pollutant (-1 = none).
+
+    v1 surfaces co-pollutant as an optional ``(Pollutant, fraction)`` tuple;
+    we project that down to the legacy ``(index, fraction)`` shape so the
+    JSON contract is preserved (with ``fraction`` exposed as a new field).
+    """
+    session = await _get_session(ctx, session_id)
+    idx = await _resolve_pollutant(session, pollutant_id)
+    accessor = _pollutants_accessor(session)
+
+    def _read() -> tuple[int, float]:
+        co = accessor[idx].co_pollutant
+        if co is None:
+            return -1, 0.0
+        co_p, frac = co
+        return int(co_p.index), float(frac)
+
+    co_idx, frac = await asyncio.to_thread(_read)
+    return {
+        "session_id": session_id,
+        "pollutant_id": pollutant_id,
+        "pollutant_index": idx,
+        "co_pollutant_index": co_idx,
+        "fraction": frac,
+    }
 
 
 @pollutants_mcp.tool()
@@ -405,21 +405,32 @@ async def set_co_pollutant(
     session_id: str = "default",
     pollutant_id: str | int = "",
     co_pollutant_index: int = -1,
+    fraction: float = 1.0,
 ) -> dict:
-    """Assign a co-pollutant (set to -1 to clear).
+    """Assign a co-pollutant (set ``co_pollutant_index`` to ``-1`` to clear).
 
-    Co-pollutants link two pollutants for coupled transport; useful for
-    decay products or pollutant pairs that move together in the system.
+    v1 requires a fraction alongside the co-pollutant.  Defaults to ``1.0``
+    so callers that previously only supplied an index see the same effective
+    behaviour.
     """
-    return await _scalar_set(
-        ctx,
-        session_id,
-        pollutant_id,
-        "set_co_pollutant",
-        co_pollutant_index,
-        "co_pollutant_index",
-        int,
-    )
+    session = await _get_session(ctx, session_id)
+    idx = await _resolve_pollutant(session, pollutant_id)
+    accessor = _pollutants_accessor(session)
+    co_idx = int(co_pollutant_index)
+    frac = float(fraction)
+
+    def _set() -> None:
+        accessor[idx].set_co_pollutant(co_idx, frac)
+
+    await asyncio.to_thread(_set)
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "pollutant_id": pollutant_id,
+        "pollutant_index": idx,
+        "co_pollutant_index": co_idx,
+        "fraction": frac,
+    }
 
 
 # ===========================================================================
@@ -449,11 +460,12 @@ async def set_node_quality(
     if node_idx < 0:
         raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Node '{node_id}' not found.")
     pollut_idx = await _resolve_pollutant(session, pollutant_id)
+    accessor = _pollutants_accessor(session)
+    conc = float(concentration)
+    # v1 keeps set_node_quality on the Pollutants collection (it's a
+    # cross-domain operation, not on a single Pollutant wrapper).
     await asyncio.to_thread(
-        _pollutants_accessor(session).set_node_quality,
-        node_idx,
-        pollut_idx,
-        float(concentration),
+        accessor.set_node_quality, node_idx, pollut_idx, conc
     )
     return {
         "status": "ok",
@@ -483,11 +495,10 @@ async def set_link_quality(
     if link_idx < 0:
         raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Link '{link_id}' not found.")
     pollut_idx = await _resolve_pollutant(session, pollutant_id)
+    accessor = _pollutants_accessor(session)
+    conc = float(concentration)
     await asyncio.to_thread(
-        _pollutants_accessor(session).set_link_quality,
-        link_idx,
-        pollut_idx,
-        float(concentration),
+        accessor.set_link_quality, link_idx, pollut_idx, conc
     )
     return {
         "status": "ok",

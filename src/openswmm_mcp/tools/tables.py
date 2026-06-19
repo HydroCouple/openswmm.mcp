@@ -24,7 +24,7 @@ import asyncio
 from typing import Any
 
 from fastmcp import Context, FastMCP
-from openswmm.engine import Tables
+from openswmm.engine import Patterns, Tables
 
 from openswmm_mcp.dependencies import get_session_manager, require_new_engine
 from openswmm_mcp.errors import ErrorCode, ToolError
@@ -150,7 +150,7 @@ async def count(ctx: Context, session_id: str = "default") -> dict:
     namespace. Patterns are counted separately; see ``pattern_count``.
     """
     _, tables = await _get_tables_accessor(ctx, session_id)
-    n = await asyncio.to_thread(tables.count)
+    n = await asyncio.to_thread(lambda: len(tables))
     return {"session_id": session_id, "count": n}
 
 
@@ -173,6 +173,28 @@ async def get_index(ctx: Context, session_id: str = "default", table_id: str = "
     _, tables = await _get_tables_accessor(ctx, session_id)
     idx = await asyncio.to_thread(tables.get_index, table_id)
     return {"session_id": session_id, "id": table_id, "index": idx}
+
+
+@tables_mcp.tool()
+async def get_type(ctx: Context, session_id: str = "default", table_id: str | int = "") -> dict:
+    """Return the type of a table (curve kind or time series).
+
+    Surfaces ``Tables.get_type`` — a ``TableType`` enum identifying the
+    table (e.g. ``STORAGE``, ``RATING``, ``PUMP1`` for curves, or the
+    time-series kind). ``table_id`` is a string ID or integer index.
+    Reports both the enum ``type`` name and its integer ``type_code``.
+    """
+    if isinstance(table_id, str) and not table_id:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] table_id must not be empty.")
+    _, tables = await _get_tables_accessor(ctx, session_id)
+    # v1 Tables.get_type returns a TableType IntEnum.
+    ttype = await asyncio.to_thread(tables.get_type, table_id)
+    return {
+        "session_id": session_id,
+        "id": table_id,
+        "type": getattr(ttype, "name", str(ttype)),
+        "type_code": int(ttype),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -207,10 +229,13 @@ async def add_timeseries(
     _, tables = await _get_tables_accessor(ctx, session_id, require_building=True)
 
     def _create_and_populate() -> int:
-        idx = tables.timeseries_add(ts_id)
+        # v1 Tables.add_timeseries(name) returns a TimeSeries wrapper.
+        ts = tables.add_timeseries(ts_id)
         for x, y in zip(times, values):
-            tables.add_point(idx, float(x), float(y))
-        return idx
+            # TimeSeries.add accepts a float (interpreted as hours-from-start
+            # by the engine) or a datetime; keep the legacy float semantic.
+            ts.add(float(x), float(y))
+        return ts.index
 
     idx = await asyncio.to_thread(_create_and_populate)
     return {
@@ -253,10 +278,11 @@ async def add_curve(
     _, tables = await _get_tables_accessor(ctx, session_id, require_building=True)
 
     def _create_and_populate() -> int:
-        idx = tables.curve_add(curve_id, ctype)
+        # v1 Tables.add_curve(name, type_int) returns a Curve wrapper.
+        curve = tables.add_curve(curve_id, ctype)
         for x, y in zip(x_values, y_values):
-            tables.add_point(idx, float(x), float(y))
-        return idx
+            curve.add_point(float(x), float(y))
+        return curve.index
 
     idx = await asyncio.to_thread(_create_and_populate)
     return {
@@ -286,7 +312,13 @@ async def add_point(
     if isinstance(table_id, str) and not table_id:
         raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] table_id must not be empty.")
     _, tables = await _get_tables_accessor(ctx, session_id)
-    await asyncio.to_thread(tables.add_point, table_id, float(x), float(y))
+    x_val, y_val = float(x), float(y)
+
+    def _add() -> None:
+        # v1: point ops live on the per-table wrapper.
+        tables[table_id].add_point(x_val, y_val)
+
+    await asyncio.to_thread(_add)
     return {"status": "ok", "session_id": session_id, "id": table_id, "x": x, "y": y}
 
 
@@ -301,7 +333,19 @@ async def get_point(
     if isinstance(table_id, str) and not table_id:
         raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] table_id must not be empty.")
     _, tables = await _get_tables_accessor(ctx, session_id)
-    x, y = await asyncio.to_thread(tables.get_point, table_id, point_index)
+
+    def _read() -> tuple[float, float]:
+        # v1 _PointTable doesn't expose a get_point(idx) — read via .points
+        # array, which is contiguous (TimeSeries: structured; Curve: float).
+        pts = tables[table_id].points
+        row = pts[point_index]
+        # TimeSeries has named fields (time, value); Curve has [x, y].
+        try:
+            return float(row["time"].astype("float64") / 1e9), float(row["value"])
+        except (IndexError, ValueError, TypeError, KeyError):
+            return float(row[0]), float(row[1])
+
+    x, y = await asyncio.to_thread(_read)
     return {
         "session_id": session_id,
         "id": table_id,
@@ -321,7 +365,7 @@ async def get_point_count(
     if isinstance(table_id, str) and not table_id:
         raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] table_id must not be empty.")
     _, tables = await _get_tables_accessor(ctx, session_id)
-    n = await asyncio.to_thread(tables.get_point_count, table_id)
+    n = await asyncio.to_thread(lambda: len(tables[table_id]))
     return {"session_id": session_id, "id": table_id, "count": n}
 
 
@@ -333,17 +377,25 @@ async def get_points(
 ) -> dict:
     """Return all data points in a table as a list of ``[x, y]`` pairs.
 
-    Convenience wrapper that batches ``get_point_count`` + N x ``get_point``
-    into a single tool call so an LLM can read a whole curve / time series
-    without iterating.
+    Reads ``table.points`` (a NumPy array) in a single C call and projects
+    each row to ``[x, y]`` floats for the JSON wire format.
     """
     if isinstance(table_id, str) and not table_id:
         raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] table_id must not be empty.")
     _, tables = await _get_tables_accessor(ctx, session_id)
 
     def _read_all() -> list[list[float]]:
-        n = tables.get_point_count(table_id)
-        return [list(tables.get_point(table_id, i)) for i in range(n)]
+        pts = tables[table_id].points
+        result: list[list[float]] = []
+        for row in pts:
+            try:
+                x = float(row["time"].astype("float64") / 1e9)
+                y = float(row["value"])
+            except (IndexError, ValueError, TypeError, KeyError):
+                x = float(row[0])
+                y = float(row[1])
+            result.append([x, y])
+        return result
 
     points = await asyncio.to_thread(_read_all)
     return {
@@ -364,7 +416,7 @@ async def clear_points(
     if isinstance(table_id, str) and not table_id:
         raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] table_id must not be empty.")
     _, tables = await _get_tables_accessor(ctx, session_id)
-    await asyncio.to_thread(tables.clear, table_id)
+    await asyncio.to_thread(lambda: tables[table_id].clear())
     return {"status": "ok", "session_id": session_id, "id": table_id}
 
 
@@ -383,7 +435,8 @@ async def lookup(
     if isinstance(table_id, str) and not table_id:
         raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] table_id must not be empty.")
     _, tables = await _get_tables_accessor(ctx, session_id)
-    y = await asyncio.to_thread(tables.lookup, table_id, float(x))
+    x_val = float(x)
+    y = await asyncio.to_thread(lambda: tables[table_id].lookup(x_val))
     return {"session_id": session_id, "id": table_id, "x": x, "y": y}
 
 
@@ -392,11 +445,28 @@ async def lookup(
 # ---------------------------------------------------------------------------
 
 
+def _patterns_accessor(session: SimSession):
+    """Return the right Patterns accessor for the session's state.
+
+    Patterns are a separate v1 collection from Tables.  In ``building``
+    state construct against the ModelBuilder; otherwise pull from the
+    Solver via the session pass-through.
+    """
+    if session.state == "building":
+        if session.model_builder is None:
+            raise ToolError(
+                f"[{ErrorCode.INVALID_STATE}] Building session has no ModelBuilder."
+            )
+        return Patterns(session.model_builder)
+    return session.patterns
+
+
 @tables_mcp.tool()
 async def pattern_count(ctx: Context, session_id: str = "default") -> dict:
     """Return the number of time patterns in the model."""
-    _, tables = await _get_tables_accessor(ctx, session_id)
-    n = await asyncio.to_thread(tables.pattern_count)
+    session = await _get_session(ctx, session_id)
+    patterns = _patterns_accessor(session)
+    n = await asyncio.to_thread(lambda: len(patterns))
     return {"session_id": session_id, "count": n}
 
 
@@ -412,23 +482,28 @@ async def pattern_add(
 
     ``pattern_type`` accepts a string (``monthly``, ``daily``, ``hourly``,
     ``weekend``) or the integer engine code. When ``factors`` is supplied,
-    it is applied via ``pattern_set_factors`` immediately after creation.
+    it is applied via ``pattern.set_factors`` immediately after creation.
     Expected factor counts: 12 for monthly, 7 for daily, 24 for hourly /
     weekend.
     """
     if not pattern_id:
         raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] pattern_id must not be empty.")
     ptype = _resolve_pattern_type(pattern_type)
-    _, tables = await _get_tables_accessor(ctx, session_id, require_building=True)
-
-    import numpy as np
+    session = await _get_session(ctx, session_id)
+    if session.state != "building":
+        raise ToolError(
+            f"[{ErrorCode.INVALID_STATE}] Session '{session_id}' is in state "
+            f"'{session.state}'; pattern_add requires 'building' state."
+        )
+    patterns = _patterns_accessor(session)
 
     def _create_and_seed() -> int:
-        idx = tables.pattern_add(pattern_id, ptype)
+        # v1 Patterns.add(name, type) returns a Pattern wrapper that
+        # accepts ``set_factors(values, type)``.
+        p = patterns.add(pattern_id, ptype)
         if factors:
-            arr = np.asarray(factors, dtype=np.float64)
-            tables.pattern_set_factors(idx, arr)
-        return idx
+            p.set_factors(factors, ptype)
+        return p.index
 
     idx = await asyncio.to_thread(_create_and_seed)
     return {
@@ -442,28 +517,64 @@ async def pattern_add(
 
 
 @tables_mcp.tool()
+async def pattern_remove(
+    ctx: Context,
+    session_id: str = "default",
+    pattern_id: str | int = "",
+) -> dict:
+    """Remove a time pattern by string ID or integer index (BUILDING state).
+
+    Mutation; requires the session to be in the ``building`` state (mirrors
+    ``pattern_add``).
+    """
+    if isinstance(pattern_id, str) and not pattern_id:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] pattern_id must not be empty.")
+    session = await _get_session(ctx, session_id)
+    if session.state != "building":
+        raise ToolError(
+            f"[{ErrorCode.INVALID_STATE}] Session '{session_id}' is in state "
+            f"'{session.state}'; pattern_remove requires 'building' state."
+        )
+    patterns = _patterns_accessor(session)
+    await asyncio.to_thread(patterns.remove, pattern_id)
+    return {"status": "ok", "session_id": session_id, "id": pattern_id}
+
+
+@tables_mcp.tool()
 async def pattern_set_factors(
     ctx: Context,
     session_id: str = "default",
     pattern_index: int = 0,
+    pattern_type: str = "monthly",
     factors: list[float] | None = None,
 ) -> dict:
     """Replace the multiplier factors of an existing time pattern.
 
-    Pattern length is fixed by ``pattern_type`` at creation; supplying a
-    factor count that does not match will raise an engine error.
+    Pattern length is determined by ``pattern_type``; supplying a factor
+    count that does not match will raise an engine error.  The
+    ``pattern_type`` argument was added in v1 — it tells the engine which
+    block (monthly / daily / hourly / weekend) the factors apply to.
     """
     if not factors:
         raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] 'factors' must be non-empty.")
-    _, tables = await _get_tables_accessor(ctx, session_id, require_building=True)
+    ptype = _resolve_pattern_type(pattern_type)
+    session = await _get_session(ctx, session_id)
+    if session.state != "building":
+        raise ToolError(
+            f"[{ErrorCode.INVALID_STATE}] Session '{session_id}' is in state "
+            f"'{session.state}'; pattern_set_factors requires 'building' state."
+        )
+    patterns = _patterns_accessor(session)
+    idx = int(pattern_index)
+    values = list(factors)
 
-    import numpy as np
+    def _set() -> None:
+        patterns[idx].set_factors(values, ptype)
 
-    arr = np.asarray(factors, dtype=np.float64)
-    await asyncio.to_thread(tables.pattern_set_factors, pattern_index, arr)
+    await asyncio.to_thread(_set)
     return {
         "status": "ok",
         "session_id": session_id,
-        "pattern_index": pattern_index,
-        "factors": len(factors),
+        "pattern_index": idx,
+        "factors": len(values),
     }

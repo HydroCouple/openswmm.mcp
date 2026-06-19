@@ -2,50 +2,32 @@
 
 Covers creation (timeseries / curves / patterns), point operations, lookup,
 and the state/backend guards. Mirrors the pattern used by
-``tests/unit/test_building.py``: a ``MockContext`` plus the ``session_manager``
-fixture, with a building-state session set up via ``building.create_model``.
+``tests/unit/test_building.py``: a ``MockContext`` plus a ``SessionManager``,
+with a building-state session set up via ``building.create_model``.
 """
 
 from __future__ import annotations
 
-import pytest
-
-pytest.importorskip("openswmm.engine")
+import unittest
 
 from openswmm_mcp.errors import ToolError
 
-# ---------------------------------------------------------------------------
-# Mock MCP Context
-# ---------------------------------------------------------------------------
-
-
-class MockContext:
-    def __init__(self, session_manager):
-        self.lifespan_context = {"session_manager": session_manager}
-
-    async def report_progress(self, current, total):  # noqa: ARG002
-        pass
+from tests.unit._base import EngineToolTestCase, MockContext
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Base with building-session helper
 # ---------------------------------------------------------------------------
 
 
-async def _create_building_session(session_manager, session_id: str = "tbl"):
-    """Create a building session and return the ctx."""
-    from openswmm_mcp.tools.building import create_model
+class _TableToolTestCase(EngineToolTestCase):
+    async def _building(self, session_id: str = "tbl"):
+        """Create a building session and return the ctx."""
+        from openswmm_mcp.tools.building import create_model
 
-    ctx = MockContext(session_manager)
-    await create_model(ctx, session_id=session_id)
-    return ctx
-
-
-async def _opened_session(fake_ctx, inp_path: str, session_id: str = "opened"):
-    """Open a real .inp session via lifecycle.open_model."""
-    from openswmm_mcp.tools.lifecycle import open_model
-
-    await open_model(fake_ctx, inp_path=inp_path, session_id=session_id)
+        ctx = MockContext(self.session_manager)
+        await create_model(ctx, session_id=session_id)
+        return ctx
 
 
 # ===========================================================================
@@ -53,21 +35,21 @@ async def _opened_session(fake_ctx, inp_path: str, session_id: str = "opened"):
 # ===========================================================================
 
 
-class TestCounts:
-    async def test_count_empty_building(self, session_manager):
+class TestCounts(_TableToolTestCase):
+    async def test_count_empty_building(self):
         from openswmm_mcp.tools.tables import count
 
-        ctx = await _create_building_session(session_manager, "tbl_count")
+        ctx = await self._building("tbl_count")
         result = await count(ctx, session_id="tbl_count")
-        assert result["session_id"] == "tbl_count"
-        assert result["count"] == 0
+        self.assertEqual(result["session_id"], "tbl_count")
+        self.assertEqual(result["count"], 0)
 
-    async def test_pattern_count_empty_building(self, session_manager):
+    async def test_pattern_count_empty_building(self):
         from openswmm_mcp.tools.tables import pattern_count
 
-        ctx = await _create_building_session(session_manager, "tbl_pcount")
+        ctx = await self._building("tbl_pcount")
         result = await pattern_count(ctx, session_id="tbl_pcount")
-        assert result["count"] == 0
+        self.assertEqual(result["count"], 0)
 
 
 # ===========================================================================
@@ -75,11 +57,11 @@ class TestCounts:
 # ===========================================================================
 
 
-class TestAddTimeseries:
-    async def test_creates_and_populates(self, session_manager):
+class TestAddTimeseries(_TableToolTestCase):
+    async def test_creates_and_populates(self):
         from openswmm_mcp.tools.tables import add_timeseries, count, get_point_count
 
-        ctx = await _create_building_session(session_manager, "tbl_ts")
+        ctx = await self._building("tbl_ts")
         result = await add_timeseries(
             ctx,
             session_id="tbl_ts",
@@ -87,19 +69,22 @@ class TestAddTimeseries:
             times=[0.0, 0.5, 1.0, 1.5],
             values=[0.1, 0.4, 0.8, 0.2],
         )
-        assert result["status"] == "ok"
-        assert result["id"] == "RainTS"
-        assert result["points"] == 4
-        assert result["index"] >= 0
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["id"], "RainTS")
+        self.assertEqual(result["points"], 4)
+        self.assertGreaterEqual(result["index"], 0)
 
-        assert (await count(ctx, session_id="tbl_ts"))["count"] == 1
-        assert (await get_point_count(ctx, session_id="tbl_ts", table_id="RainTS"))["count"] == 4
+        self.assertEqual((await count(ctx, session_id="tbl_ts"))["count"], 1)
+        self.assertEqual(
+            (await get_point_count(ctx, session_id="tbl_ts", table_id="RainTS"))["count"],
+            4,
+        )
 
-    async def test_empty_id_rejected(self, session_manager):
+    async def test_empty_id_rejected(self):
         from openswmm_mcp.tools.tables import add_timeseries
 
-        ctx = await _create_building_session(session_manager, "tbl_ts_empty")
-        with pytest.raises(ToolError, match="ts_id must not be empty"):
+        ctx = await self._building("tbl_ts_empty")
+        with self.assertRaisesRegex(ToolError, "ts_id must not be empty"):
             await add_timeseries(
                 ctx,
                 session_id="tbl_ts_empty",
@@ -108,11 +93,11 @@ class TestAddTimeseries:
                 values=[1.0],
             )
 
-    async def test_mismatched_lengths_rejected(self, session_manager):
+    async def test_mismatched_lengths_rejected(self):
         from openswmm_mcp.tools.tables import add_timeseries
 
-        ctx = await _create_building_session(session_manager, "tbl_ts_mis")
-        with pytest.raises(ToolError, match="len\\(times\\)"):
+        ctx = await self._building("tbl_ts_mis")
+        with self.assertRaisesRegex(ToolError, r"len\(times\)"):
             await add_timeseries(
                 ctx,
                 session_id="tbl_ts_mis",
@@ -121,11 +106,11 @@ class TestAddTimeseries:
                 values=[0.1, 0.2, 0.3],
             )
 
-    async def test_empty_data_rejected(self, session_manager):
+    async def test_empty_data_rejected(self):
         from openswmm_mcp.tools.tables import add_timeseries
 
-        ctx = await _create_building_session(session_manager, "tbl_ts_emp")
-        with pytest.raises(ToolError, match="must both be non-empty"):
+        ctx = await self._building("tbl_ts_emp")
+        with self.assertRaisesRegex(ToolError, "must both be non-empty"):
             await add_timeseries(
                 ctx,
                 session_id="tbl_ts_emp",
@@ -140,11 +125,11 @@ class TestAddTimeseries:
 # ===========================================================================
 
 
-class TestAddCurve:
-    async def test_creates_storage_curve(self, session_manager):
+class TestAddCurve(_TableToolTestCase):
+    async def test_creates_storage_curve(self):
         from openswmm_mcp.tools.tables import add_curve, count
 
-        ctx = await _create_building_session(session_manager, "tbl_curve")
+        ctx = await self._building("tbl_curve")
         result = await add_curve(
             ctx,
             session_id="tbl_curve",
@@ -153,15 +138,15 @@ class TestAddCurve:
             x_values=[0.0, 1.0, 2.0],
             y_values=[0.0, 1.0, 4.0],
         )
-        assert result["status"] == "ok"
-        assert result["points"] == 3
-        assert (await count(ctx, session_id="tbl_curve"))["count"] == 1
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["points"], 3)
+        self.assertEqual((await count(ctx, session_id="tbl_curve"))["count"], 1)
 
-    async def test_invalid_curve_type_rejected(self, session_manager):
+    async def test_invalid_curve_type_rejected(self):
         from openswmm_mcp.tools.tables import add_curve
 
-        ctx = await _create_building_session(session_manager, "tbl_bad_ct")
-        with pytest.raises(ToolError, match="Unknown curve_type"):
+        ctx = await self._building("tbl_bad_ct")
+        with self.assertRaisesRegex(ToolError, "Unknown curve_type"):
             await add_curve(
                 ctx,
                 session_id="tbl_bad_ct",
@@ -171,10 +156,10 @@ class TestAddCurve:
                 y_values=[0.0],
             )
 
-    async def test_curve_type_accepts_int(self, session_manager):
+    async def test_curve_type_accepts_int(self):
         from openswmm_mcp.tools.tables import add_curve
 
-        ctx = await _create_building_session(session_manager, "tbl_int_ct")
+        ctx = await self._building("tbl_int_ct")
         result = await add_curve(
             ctx,
             session_id="tbl_int_ct",
@@ -183,12 +168,12 @@ class TestAddCurve:
             x_values=[0.0, 1.0],
             y_values=[0.0, 2.0],
         )
-        assert result["status"] == "ok"
+        self.assertEqual(result["status"], "ok")
 
-    async def test_curve_lookup_linear_interp(self, session_manager):
+    async def test_curve_lookup_linear_interp(self):
         from openswmm_mcp.tools.tables import add_curve, lookup
 
-        ctx = await _create_building_session(session_manager, "tbl_lookup")
+        ctx = await self._building("tbl_lookup")
         await add_curve(
             ctx,
             session_id="tbl_lookup",
@@ -203,8 +188,39 @@ class TestAddCurve:
             table_id="LinearCurve",
             x=0.5,
         )
-        assert result["x"] == 0.5
-        assert result["y"] == pytest.approx(0.5)
+        self.assertEqual(result["x"], 0.5)
+        self.assertAlmostEqual(result["y"], 0.5)
+
+
+# ===========================================================================
+# Table type
+# ===========================================================================
+
+
+class TestGetType(_TableToolTestCase):
+    async def test_storage_curve_type(self):
+        from openswmm_mcp.tools.tables import add_curve, get_type
+
+        ctx = await self._building("tbl_type")
+        await add_curve(
+            ctx,
+            session_id="tbl_type",
+            curve_id="StorageCurve",
+            curve_type="storage",
+            x_values=[0.0, 1.0, 2.0],
+            y_values=[0.0, 1.0, 4.0],
+        )
+        result = await get_type(ctx, session_id="tbl_type", table_id="StorageCurve")
+        self.assertEqual(result["id"], "StorageCurve")
+        self.assertIn("type", result)
+        self.assertIsInstance(result["type_code"], int)
+
+    async def test_empty_id_rejected(self):
+        from openswmm_mcp.tools.tables import get_type
+
+        ctx = await self._building("tbl_type_empty")
+        with self.assertRaisesRegex(ToolError, "table_id must not be empty"):
+            await get_type(ctx, session_id="tbl_type_empty", table_id="")
 
 
 # ===========================================================================
@@ -212,11 +228,11 @@ class TestAddCurve:
 # ===========================================================================
 
 
-class TestPointOps:
-    async def test_get_points_returns_all(self, session_manager):
+class TestPointOps(_TableToolTestCase):
+    async def test_get_points_returns_all(self):
         from openswmm_mcp.tools.tables import add_curve, get_points
 
-        ctx = await _create_building_session(session_manager, "tbl_gp")
+        ctx = await self._building("tbl_gp")
         await add_curve(
             ctx,
             session_id="tbl_gp",
@@ -226,13 +242,13 @@ class TestPointOps:
             y_values=[5.0, 6.0, 7.0],
         )
         result = await get_points(ctx, session_id="tbl_gp", table_id="C")
-        assert result["count"] == 3
-        assert result["points"] == [[0.0, 5.0], [1.0, 6.0], [2.0, 7.0]]
+        self.assertEqual(result["count"], 3)
+        self.assertEqual(result["points"], [[0.0, 5.0], [1.0, 6.0], [2.0, 7.0]])
 
-    async def test_get_point_single(self, session_manager):
+    async def test_get_point_single(self):
         from openswmm_mcp.tools.tables import add_curve, get_point
 
-        ctx = await _create_building_session(session_manager, "tbl_gp1")
+        ctx = await self._building("tbl_gp1")
         await add_curve(
             ctx,
             session_id="tbl_gp1",
@@ -242,17 +258,17 @@ class TestPointOps:
             y_values=[10.0, 20.0],
         )
         result = await get_point(ctx, session_id="tbl_gp1", table_id="C", point_index=1)
-        assert result["x"] == pytest.approx(1.0)
-        assert result["y"] == pytest.approx(20.0)
+        self.assertAlmostEqual(result["x"], 1.0)
+        self.assertAlmostEqual(result["y"], 20.0)
 
-    async def test_add_point_appends(self, session_manager):
+    async def test_add_point_appends(self):
         from openswmm_mcp.tools.tables import (
             add_curve,
             add_point,
             get_point_count,
         )
 
-        ctx = await _create_building_session(session_manager, "tbl_ap")
+        ctx = await self._building("tbl_ap")
         await add_curve(
             ctx,
             session_id="tbl_ap",
@@ -263,16 +279,16 @@ class TestPointOps:
         )
         await add_point(ctx, session_id="tbl_ap", table_id="C", x=1.0, y=2.0)
         result = await get_point_count(ctx, session_id="tbl_ap", table_id="C")
-        assert result["count"] == 2
+        self.assertEqual(result["count"], 2)
 
-    async def test_clear_points_empties_table(self, session_manager):
+    async def test_clear_points_empties_table(self):
         from openswmm_mcp.tools.tables import (
             add_curve,
             clear_points,
             get_point_count,
         )
 
-        ctx = await _create_building_session(session_manager, "tbl_clr")
+        ctx = await self._building("tbl_clr")
         await add_curve(
             ctx,
             session_id="tbl_clr",
@@ -283,7 +299,7 @@ class TestPointOps:
         )
         await clear_points(ctx, session_id="tbl_clr", table_id="C")
         result = await get_point_count(ctx, session_id="tbl_clr", table_id="C")
-        assert result["count"] == 0
+        self.assertEqual(result["count"], 0)
 
 
 # ===========================================================================
@@ -291,11 +307,11 @@ class TestPointOps:
 # ===========================================================================
 
 
-class TestPatterns:
-    async def test_pattern_add_monthly_with_factors(self, session_manager):
+class TestPatterns(_TableToolTestCase):
+    async def test_pattern_add_monthly_with_factors(self):
         from openswmm_mcp.tools.tables import pattern_add, pattern_count
 
-        ctx = await _create_building_session(session_manager, "tbl_pat")
+        ctx = await self._building("tbl_pat")
         factors = [1.0, 1.1, 0.9, 1.0, 1.0, 1.2, 1.3, 1.2, 1.0, 0.95, 0.9, 1.0]
         result = await pattern_add(
             ctx,
@@ -304,15 +320,15 @@ class TestPatterns:
             pattern_type="monthly",
             factors=factors,
         )
-        assert result["status"] == "ok"
-        assert result["factors"] == 12
-        assert (await pattern_count(ctx, session_id="tbl_pat"))["count"] == 1
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["factors"], 12)
+        self.assertEqual((await pattern_count(ctx, session_id="tbl_pat"))["count"], 1)
 
-    async def test_pattern_type_invalid(self, session_manager):
+    async def test_pattern_type_invalid(self):
         from openswmm_mcp.tools.tables import pattern_add
 
-        ctx = await _create_building_session(session_manager, "tbl_pat_bad")
-        with pytest.raises(ToolError, match="Unknown pattern_type"):
+        ctx = await self._building("tbl_pat_bad")
+        with self.assertRaisesRegex(ToolError, "Unknown pattern_type"):
             await pattern_add(
                 ctx,
                 session_id="tbl_pat_bad",
@@ -320,10 +336,35 @@ class TestPatterns:
                 pattern_type="annually",
             )
 
-    async def test_pattern_set_factors_replaces(self, session_manager):
+    async def test_pattern_remove(self):
+        from openswmm_mcp.tools.tables import pattern_add, pattern_count, pattern_remove
+
+        ctx = await self._building("tbl_prm")
+        await pattern_add(
+            ctx,
+            session_id="tbl_prm",
+            pattern_id="ToRemove",
+            pattern_type="monthly",
+            factors=[1.0] * 12,
+        )
+        self.assertEqual((await pattern_count(ctx, session_id="tbl_prm"))["count"], 1)
+        result = await pattern_remove(
+            ctx, session_id="tbl_prm", pattern_id="ToRemove"
+        )
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual((await pattern_count(ctx, session_id="tbl_prm"))["count"], 0)
+
+    async def test_pattern_remove_empty_id_rejected(self):
+        from openswmm_mcp.tools.tables import pattern_remove
+
+        ctx = await self._building("tbl_prm_empty")
+        with self.assertRaisesRegex(ToolError, "pattern_id must not be empty"):
+            await pattern_remove(ctx, session_id="tbl_prm_empty", pattern_id="")
+
+    async def test_pattern_set_factors_replaces(self):
         from openswmm_mcp.tools.tables import pattern_add, pattern_set_factors
 
-        ctx = await _create_building_session(session_manager, "tbl_psf")
+        ctx = await self._building("tbl_psf")
         added = await pattern_add(
             ctx,
             session_id="tbl_psf",
@@ -339,8 +380,8 @@ class TestPatterns:
             pattern_index=added["index"],
             factors=new,
         )
-        assert result["status"] == "ok"
-        assert result["factors"] == 12
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["factors"], 12)
 
 
 # ===========================================================================
@@ -348,33 +389,33 @@ class TestPatterns:
 # ===========================================================================
 
 
-class TestGuards:
-    async def test_legacy_backend_rejected(self, session_manager, inp_path):
+class TestGuards(_TableToolTestCase):
+    async def test_legacy_backend_rejected(self):
         """The Tables tools require the openswmm backend; legacy is NOT_SUPPORTED."""
         from openswmm_mcp.tools.tables import count
 
-        session = await session_manager.create_session(
+        session = await self.session_manager.create_session(
             session_id="legacy_tables",
-            inp_path=inp_path,
+            inp_path=self.inp_path,
             engine="legacy",
         )
         # Bring the legacy session to opened state so the guard sees a fully-built session.
         session.backend.solver.open()
         session.state = "opened"
 
-        ctx = MockContext(session_manager)
-        with pytest.raises(ToolError, match="not supported|legacy"):
+        ctx = MockContext(self.session_manager)
+        with self.assertRaisesRegex(ToolError, "not supported|legacy"):
             await count(ctx, session_id="legacy_tables")
 
-    async def test_creation_outside_building_state_rejected(self, session_manager, inp_path):
+    async def test_creation_outside_building_state_rejected(self):
         """add_timeseries / add_curve require the building state."""
         from openswmm_mcp.tools.lifecycle import open_model
         from openswmm_mcp.tools.tables import add_timeseries
 
-        ctx = MockContext(session_manager)
-        await open_model(ctx, inp_path=inp_path, session_id="opened_ts")
+        ctx = MockContext(self.session_manager)
+        await open_model(ctx, inp_path=self.inp_path, session_id="opened_ts")
 
-        with pytest.raises(ToolError, match="building"):
+        with self.assertRaisesRegex(ToolError, "building"):
             await add_timeseries(
                 ctx,
                 session_id="opened_ts",
@@ -382,3 +423,7 @@ class TestGuards:
                 times=[0.0],
                 values=[1.0],
             )
+
+
+if __name__ == "__main__":
+    unittest.main()

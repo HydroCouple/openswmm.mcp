@@ -15,7 +15,7 @@ from fastmcp import Context, FastMCP
 from openswmm.engine import ModelEditor
 
 from openswmm_mcp.dependencies import get_session_manager, require_new_engine
-from openswmm_mcp.errors import ErrorCode, ToolError
+from openswmm_mcp.errors import ErrorCode, ToolError, resolve_index
 from openswmm_mcp.models import (
     ConversionResultModel,
     GageConfigResult,
@@ -488,27 +488,32 @@ async def set_node_properties(
     session = await _require_editable(ctx, session_id)
     nodes = session.nodes
 
-    idx = await asyncio.to_thread(nodes.get_index, node_id)
+    idx = await resolve_index(nodes, node_id, "Node")
     if idx < 0:
         raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Node '{node_id}' not found.")
 
     updated: dict[str, float] = {}
-    try:
+
+    def _apply() -> None:
+        node = nodes[idx]
         if invert_elev is not None:
-            await asyncio.to_thread(nodes.set_invert_elev, idx, invert_elev)
+            node.invert_elev = invert_elev
             updated["invert_elev"] = invert_elev
         if max_depth is not None:
-            await asyncio.to_thread(nodes.set_max_depth, idx, max_depth)
+            node.max_depth = max_depth
             updated["max_depth"] = max_depth
         if initial_depth is not None:
-            await asyncio.to_thread(nodes.set_initial_depth, idx, initial_depth)
+            node.initial_depth = initial_depth
             updated["initial_depth"] = initial_depth
         if surcharge_depth is not None:
-            await asyncio.to_thread(nodes.set_surcharge_depth, idx, surcharge_depth)
+            node.surcharge_depth = surcharge_depth
             updated["surcharge_depth"] = surcharge_depth
         if ponded_area is not None:
-            await asyncio.to_thread(nodes.set_pond_area, idx, ponded_area)
+            node.ponded_area = ponded_area
             updated["ponded_area"] = ponded_area
+
+    try:
+        await asyncio.to_thread(_apply)
     except RuntimeError as exc:
         raise ToolError(f"[{ErrorCode.ENGINE_ERROR}] {exc}")
 
@@ -573,51 +578,59 @@ async def set_link_properties(
     session = await _require_editable(ctx, session_id)
     links = session.links
 
-    idx = await asyncio.to_thread(links.get_index, link_id)
+    idx = await resolve_index(links, link_id, "Link")
     if idx < 0:
         raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Link '{link_id}' not found.")
 
     updated: dict[str, float | int | str] = {}
-    try:
+
+    # Pre-validate shape key (raises ToolError outside the thread).
+    shape_code: int | None = None
+    if xsect_shape is not None:
+        shape_key = xsect_shape.strip().lower()
+        if shape_key not in _XSECT_SHAPES:
+            valid = ", ".join(sorted(_XSECT_SHAPES))
+            raise ToolError(
+                f"[{ErrorCode.VALIDATION_ERROR}] Unknown xsect_shape '{xsect_shape}'. "
+                f"Valid: {valid}."
+            )
+        shape_code = _XSECT_SHAPES[shape_key]
+
+    def _apply() -> None:
+        link = links[idx]
         if length is not None:
-            await asyncio.to_thread(links.set_length, idx, length)
+            link.length = length
             updated["length"] = length
         if roughness is not None:
-            await asyncio.to_thread(links.set_roughness, idx, roughness)
+            link.roughness = roughness
             updated["roughness"] = roughness
         if offset_up is not None:
-            await asyncio.to_thread(links.set_offset_up, idx, offset_up)
+            link.offset_up = offset_up
             updated["offset_up"] = offset_up
         if offset_dn is not None:
-            await asyncio.to_thread(links.set_offset_dn, idx, offset_dn)
+            link.offset_dn = offset_dn
             updated["offset_dn"] = offset_dn
         if initial_flow is not None:
-            await asyncio.to_thread(links.set_initial_flow, idx, initial_flow)
+            link.initial_flow = initial_flow
             updated["initial_flow"] = initial_flow
         if max_flow is not None:
-            await asyncio.to_thread(links.set_max_flow, idx, max_flow)
+            link.max_flow = max_flow
             updated["max_flow"] = max_flow
-        if xsect_shape is not None:
-            shape_key = xsect_shape.strip().lower()
-            if shape_key not in _XSECT_SHAPES:
-                valid = ", ".join(sorted(_XSECT_SHAPES))
-                raise ToolError(
-                    f"[{ErrorCode.VALIDATION_ERROR}] Unknown xsect_shape '{xsect_shape}'. "
-                    f"Valid: {valid}."
-                )
-            shape_code = _XSECT_SHAPES[shape_key]
+        if shape_code is not None:
+            # v1: assign a (shape, g1, g2, g3, g4) tuple to link.xsect.
             g1 = xsect_geom1 or 0.0
             g2 = xsect_geom2 or 0.0
             g3 = xsect_geom3 or 0.0
             g4 = xsect_geom4 or 0.0
-            await asyncio.to_thread(links.set_xsect, idx, shape_code, g1, g2, g3, g4)
-            updated["xsect_shape"] = xsect_shape
+            link.xsect = (shape_code, g1, g2, g3, g4)
+            updated["xsect_shape"] = xsect_shape  # type: ignore[assignment]
             updated["xsect_geom1"] = g1
             updated["xsect_geom2"] = g2
             updated["xsect_geom3"] = g3
             updated["xsect_geom4"] = g4
-    except ToolError:
-        raise
+
+    try:
+        await asyncio.to_thread(_apply)
     except RuntimeError as exc:
         raise ToolError(f"[{ErrorCode.ENGINE_ERROR}] {exc}")
 
@@ -682,54 +695,67 @@ async def set_subcatchment_properties(
     session = await _require_editable(ctx, session_id)
     subcatchments = session.subcatchments
 
-    sc_idx = await asyncio.to_thread(subcatchments.get_index, subcatch_id)
+    sc_idx = await resolve_index(subcatchments, subcatch_id, "Subcatchment")
     if sc_idx < 0:
         raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Subcatchment '{subcatch_id}' not found.")
 
     updated: dict[str, float | int | str] = {}
-    try:
+
+    # Resolve cross-collection ids upfront so the worker thread doesn't
+    # itself need to schedule async operations.
+    outlet_node_idx: int | None = None
+    if outlet_node_id is not None:
+        nodes = session.nodes
+        outlet_node_idx = await resolve_index(nodes, outlet_node_id, "Node")
+        if outlet_node_idx < 0:
+            raise ToolError(
+                f"[{ErrorCode.ELEMENT_NOT_FOUND}] Outlet node '{outlet_node_id}' not found."
+            )
+
+    gage_idx: int | None = None
+    if gage_id is not None:
+        gages = session.gages
+        gage_idx = await resolve_index(gages, gage_id, "Gage")
+        if gage_idx < 0:
+            raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Gage '{gage_id}' not found.")
+
+    def _apply() -> None:
+        sub = subcatchments[sc_idx]
         if area is not None:
-            await asyncio.to_thread(subcatchments.set_area, sc_idx, area)
+            sub.area = area
             updated["area"] = area
         if width is not None:
-            await asyncio.to_thread(subcatchments.set_width, sc_idx, width)
+            sub.width = width
             updated["width"] = width
         if slope is not None:
-            await asyncio.to_thread(subcatchments.set_slope, sc_idx, slope)
+            sub.slope = slope
             updated["slope"] = slope
         if imperv_pct is not None:
-            await asyncio.to_thread(subcatchments.set_imperv_pct, sc_idx, imperv_pct)
+            sub.imperv_pct = imperv_pct
             updated["imperv_pct"] = imperv_pct
         if n_imperv is not None:
-            await asyncio.to_thread(subcatchments.set_n_imperv, sc_idx, n_imperv)
+            sub.n_imperv = n_imperv
             updated["n_imperv"] = n_imperv
         if n_perv is not None:
-            await asyncio.to_thread(subcatchments.set_n_perv, sc_idx, n_perv)
+            sub.n_perv = n_perv
             updated["n_perv"] = n_perv
         if ds_imperv is not None:
-            await asyncio.to_thread(subcatchments.set_ds_imperv, sc_idx, ds_imperv)
+            sub.ds_imperv = ds_imperv
             updated["ds_imperv"] = ds_imperv
         if ds_perv is not None:
-            await asyncio.to_thread(subcatchments.set_ds_perv, sc_idx, ds_perv)
+            sub.ds_perv = ds_perv
             updated["ds_perv"] = ds_perv
-        if outlet_node_id is not None:
-            nodes = session.nodes
-            node_idx = await asyncio.to_thread(nodes.get_index, outlet_node_id)
-            if node_idx < 0:
-                raise ToolError(
-                    f"[{ErrorCode.ELEMENT_NOT_FOUND}] Outlet node '{outlet_node_id}' not found."
-                )
-            await asyncio.to_thread(subcatchments.set_outlet, sc_idx, node_idx)
-            updated["outlet_node_id"] = outlet_node_id
-        if gage_id is not None:
-            gages = session.gages
-            gage_idx = await asyncio.to_thread(gages.get_index, gage_id)
-            if gage_idx < 0:
-                raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Gage '{gage_id}' not found.")
-            await asyncio.to_thread(subcatchments.set_gage, sc_idx, gage_idx)
-            updated["gage_id"] = gage_id
-    except ToolError:
-        raise
+        if outlet_node_idx is not None:
+            # v1: set_outlet_node accepts int / str / Node.
+            sub.set_outlet_node(outlet_node_idx)
+            updated["outlet_node_id"] = outlet_node_id  # type: ignore[assignment]
+        if gage_idx is not None:
+            # v1: subcatchment.gage is a settable property accepting Gage or key.
+            sub.gage = session.gages[gage_idx]
+            updated["gage_id"] = gage_id  # type: ignore[assignment]
+
+    try:
+        await asyncio.to_thread(_apply)
     except RuntimeError as exc:
         raise ToolError(f"[{ErrorCode.ENGINE_ERROR}] {exc}")
 
@@ -787,46 +813,59 @@ async def configure_gage(
     session = await _require_editable(ctx, session_id)
     gages = session.gages
 
-    g_idx = await asyncio.to_thread(gages.get_index, gage_id)
+    g_idx = await resolve_index(gages, gage_id, "Gage")
     if g_idx < 0:
         raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Gage '{gage_id}' not found.")
 
     updated: dict[str, str | float | int] = {}
-    try:
-        if rain_type is not None:
-            key = rain_type.strip().lower()
-            if key not in _GAGE_RAIN_TYPES:
-                valid = ", ".join(sorted(_GAGE_RAIN_TYPES))
-                raise ToolError(
-                    f"[{ErrorCode.VALIDATION_ERROR}] Unknown rain_type '{rain_type}'. "
-                    f"Valid: {valid}."
-                )
-            await asyncio.to_thread(gages.set_rain_type, g_idx, _GAGE_RAIN_TYPES[key])
-            updated["rain_type"] = rain_type
+
+    # Pre-validate enum keys outside the worker.
+    rain_type_code: int | None = None
+    if rain_type is not None:
+        key = rain_type.strip().lower()
+        if key not in _GAGE_RAIN_TYPES:
+            valid = ", ".join(sorted(_GAGE_RAIN_TYPES))
+            raise ToolError(
+                f"[{ErrorCode.VALIDATION_ERROR}] Unknown rain_type '{rain_type}'. "
+                f"Valid: {valid}."
+            )
+        rain_type_code = _GAGE_RAIN_TYPES[key]
+
+    data_source_code: int | None = None
+    if data_source is not None:
+        key = data_source.strip().lower()
+        if key not in _GAGE_DATA_SOURCES:
+            valid = ", ".join(sorted(_GAGE_DATA_SOURCES))
+            raise ToolError(
+                f"[{ErrorCode.VALIDATION_ERROR}] Unknown data_source '{data_source}'. "
+                f"Valid: {valid}."
+            )
+        data_source_code = _GAGE_DATA_SOURCES[key]
+
+    def _apply() -> None:
+        gage = gages[g_idx]
+        if rain_type_code is not None:
+            gage.rain_type = rain_type_code
+            updated["rain_type"] = rain_type  # type: ignore[assignment]
         if rain_interval is not None:
-            await asyncio.to_thread(gages.set_rain_interval, g_idx, rain_interval)
+            gage.set_rain_interval(rain_interval)
             updated["rain_interval"] = rain_interval
-        if data_source is not None:
-            key = data_source.strip().lower()
-            if key not in _GAGE_DATA_SOURCES:
-                valid = ", ".join(sorted(_GAGE_DATA_SOURCES))
-                raise ToolError(
-                    f"[{ErrorCode.VALIDATION_ERROR}] Unknown data_source '{data_source}'. "
-                    f"Valid: {valid}."
-                )
-            await asyncio.to_thread(gages.set_data_source, g_idx, _GAGE_DATA_SOURCES[key])
-            updated["data_source"] = data_source
+        if data_source_code is not None:
+            gage.data_source = data_source_code
+            updated["data_source"] = data_source  # type: ignore[assignment]
         if timeseries_id is not None:
-            await asyncio.to_thread(gages.set_timeseries, g_idx, timeseries_id)
+            gage.set_timeseries(timeseries_id)
             updated["timeseries_id"] = timeseries_id
         if filename is not None:
             sid = station_id or ""
-            await asyncio.to_thread(gages.set_filename, g_idx, filename, sid)
+            # v1 renamed set_filename → set_file.
+            gage.set_file(filename, sid)
             updated["filename"] = filename
             if station_id:
                 updated["station_id"] = station_id
-    except ToolError:
-        raise
+
+    try:
+        await asyncio.to_thread(_apply)
     except RuntimeError as exc:
         raise ToolError(f"[{ErrorCode.ENGINE_ERROR}] {exc}")
 
@@ -836,6 +875,94 @@ async def configure_gage(
         gage_id=gage_id,
         updated_fields=updated,
     )
+
+
+@editing_mcp.tool()
+async def get_gage_scale_factor(
+    ctx: Context,
+    session_id: str = "default",
+    gage_id: str = "",
+) -> dict:
+    """Return a rain gage's rainfall scale factor.
+
+    The scale factor multiplies the gage's raw rainfall series — values
+    above 1.0 amplify, below 1.0 attenuate. :func:`configure_gage` does
+    not touch it; use :func:`set_gage_scale_factor` to change it.
+    Valid in ``building``, ``opened``, or ``initialized`` state.
+
+    Parameters
+    ----------
+    gage_id:
+        Gage identifier.
+    """
+    if not gage_id:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] gage_id must not be empty.")
+
+    session = await _require_editable(ctx, session_id)
+    gages = session.gages
+
+    g_idx = await resolve_index(gages, gage_id, "Gage")
+    if g_idx < 0:
+        raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Gage '{gage_id}' not found.")
+
+    # v1: Gage.scale_factor is a read/write attribute.
+    scale_factor = await asyncio.to_thread(lambda: gages[g_idx].scale_factor)
+    return {
+        "session_id": session_id,
+        "gage_id": gage_id,
+        "scale_factor": float(scale_factor),
+    }
+
+
+@editing_mcp.tool()
+async def set_gage_scale_factor(
+    ctx: Context,
+    session_id: str = "default",
+    gage_id: str = "",
+    scale_factor: float = 1.0,
+) -> dict:
+    """Set a rain gage's rainfall scale factor.
+
+    The scale factor multiplies the gage's raw rainfall series. Maps to the
+    v1 ``Gage.scale_factor`` attribute, which :func:`configure_gage` leaves
+    untouched. Valid in ``building``, ``opened``, or ``initialized`` state.
+
+    Parameters
+    ----------
+    gage_id:
+        Gage identifier.
+    scale_factor:
+        Multiplier applied to the gage's rainfall (1.0 = unchanged).
+    """
+    if not gage_id:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] gage_id must not be empty.")
+
+    session = await _require_editable(ctx, session_id)
+    gages = session.gages
+
+    g_idx = await resolve_index(gages, gage_id, "Gage")
+    if g_idx < 0:
+        raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Gage '{gage_id}' not found.")
+
+    sf = float(scale_factor)
+
+    def _apply() -> None:
+        gages[g_idx].scale_factor = sf
+
+    try:
+        await asyncio.to_thread(_apply)
+    except RuntimeError as exc:
+        raise ToolError(f"[{ErrorCode.ENGINE_ERROR}] {exc}")
+
+    logger.info(
+        "Session '%s': gage '%s' scale_factor set to %s.", session_id, gage_id, sf
+    )
+    return {
+        "status": "updated",
+        "session_id": session_id,
+        "gage_id": gage_id,
+        "scale_factor": sf,
+    }
 
 
 # ===========================================================================
@@ -855,7 +982,7 @@ async def _resolve_for_rename(session, accessor_name: str, current_id: str) -> t
             f"[{ErrorCode.VALIDATION_ERROR}] {accessor_name[:-1]}_id must not be empty."
         )
     accessor = getattr(session, accessor_name)
-    idx = await asyncio.to_thread(accessor.get_index, current_id)
+    idx = await resolve_index(accessor, current_id, "Element")
     if idx < 0:
         raise ToolError(
             f"[{ErrorCode.ELEMENT_NOT_FOUND}] "

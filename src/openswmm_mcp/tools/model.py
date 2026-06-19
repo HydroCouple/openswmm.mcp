@@ -19,6 +19,7 @@ the Solver for OPENED / INITIALIZED / RUNNING / ENDED.
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 from typing import Any
 
 from fastmcp import Context, FastMCP
@@ -235,6 +236,12 @@ async def get_unit_system(ctx: Context, session_id: str = "default") -> dict:
     _, target = await _get_target(ctx, session_id)
 
     def _read() -> str:
+        # Prefer the engine's typed accessor (swmm_get_flow_units) when the
+        # target is a Solver that exposes it; fall back to the option string.
+        flow_units = getattr(target, "flow_units", None)
+        if flow_units is not None:
+            name = getattr(flow_units, "name", None)
+            return name if name is not None else str(flow_units)
         options = _options_mapping(target)
         if options is not None:
             return options["FLOW_UNITS"]
@@ -390,6 +397,53 @@ async def get_crs(ctx: Context, session_id: str = "default") -> dict:
 
 
 # ===========================================================================
+# Report start date/time
+# ===========================================================================
+
+
+@model_mcp.tool()
+async def get_report_start(ctx: Context, session_id: str = "default") -> dict:
+    """Return the report start date/time as an ISO 8601 string.
+
+    Surfaces the ``report_start_datetime`` property (present on both
+    ModelBuilder and Solver). The report start is the instant from which
+    reported results begin; it may lag the simulation start.
+    """
+    _, target = await _get_target(ctx, session_id)
+    dt = await asyncio.to_thread(lambda: target.report_start_datetime)
+    return {"session_id": session_id, "report_start": dt.isoformat()}
+
+
+@model_mcp.tool()
+async def set_report_start(
+    ctx: Context,
+    session_id: str = "default",
+    report_start: str = "",
+) -> dict:
+    """Set the report start date/time from an ISO 8601 string.
+
+    ``report_start`` is parsed with :meth:`datetime.datetime.fromisoformat`
+    (e.g. ``"1998-01-01T00:00:00"`` or ``"1998-01-01 00:00:00"``).
+    """
+    if not report_start:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] report_start must not be empty.")
+    try:
+        dt = datetime.fromisoformat(report_start)
+    except ValueError as exc:
+        raise ToolError(
+            f"[{ErrorCode.VALIDATION_ERROR}] report_start {report_start!r} is not a "
+            f"valid ISO 8601 date/time."
+        ) from exc
+    _, target = await _get_target(ctx, session_id)
+
+    def _write() -> None:
+        target.report_start_datetime = dt
+
+    await asyncio.to_thread(_write)
+    return {"status": "ok", "session_id": session_id, "report_start": dt.isoformat()}
+
+
+# ===========================================================================
 # User flags
 # ===========================================================================
 
@@ -468,6 +522,313 @@ async def set_userflag_real(
 ) -> dict:
     """Set a real-valued user flag."""
     return await _userflag_set(ctx, session_id, name, float(value), "set_userflag_real", "value")
+
+
+# ===========================================================================
+# User-flag schema definitions ([USER_FLAGS]) + per-object values
+# ([USER_FLAG_VALUES])
+# ===========================================================================
+
+# Flag type tokens <-> openswmm.engine.UserFlagType codes.
+_USERFLAG_TYPES: dict[str, int] = {"BOOLEAN": 0, "INTEGER": 1, "REAL": 2, "STRING": 3}
+_USERFLAG_TYPE_NAMES: dict[int, str] = {v: k for k, v in _USERFLAG_TYPES.items()}
+
+
+class _UserFlagSchemaOps:
+    """Uniform schema/value operations over either engine surface.
+
+    ``ModelBuilder`` exposes ``define_userflag`` etc. directly; ``Solver``
+    exposes the same operations on the ``solver.userflags`` view.
+    """
+
+    def __init__(self, target):
+        if hasattr(target, "define_userflag"):  # ModelBuilder
+            self.define = target.define_userflag
+            self.undefine = target.undefine_userflag
+            self.def_count = target.userflag_def_count
+            self.def_get = target.get_userflag_def
+            self.value_get = target.get_userflag_value
+            self.value_set = target.set_userflag_value
+            self.value_clear = target.clear_userflag_value
+        else:  # Solver -> UserFlags view
+            flags = target.userflags
+            self.define = flags.define
+            self.undefine = flags.undefine
+            self.def_count = lambda: len(flags.definitions())
+            self.def_get = lambda i: tuple(flags.definitions()[i])
+            self.value_get = flags.get_value
+            self.value_set = flags.set_value
+            self.value_clear = flags.clear_value
+
+
+def _resolve_userflag_type(flag_type: str) -> int:
+    token = flag_type.strip().upper()
+    if token not in _USERFLAG_TYPES:
+        raise ToolError(
+            f"[{ErrorCode.VALIDATION_ERROR}] Invalid flag type '{flag_type}'. "
+            f"Must be one of: {', '.join(_USERFLAG_TYPES)}"
+        )
+    return _USERFLAG_TYPES[token]
+
+
+@model_mcp.tool()
+async def userflag_define(
+    ctx: Context,
+    session_id: str = "default",
+    name: str = "",
+    flag_type: str = "",
+    description: str = "",
+) -> dict:
+    """Define (or redefine) a user-flag schema entry ([USER_FLAGS]).
+
+    ``flag_type`` is ``"BOOLEAN"``, ``"INTEGER"``, ``"REAL"``, or
+    ``"STRING"``. The name is stored uppercase. Redefining an existing
+    name overwrites its definition; previously assigned per-object values
+    are kept as-is.
+    """
+    if not name:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] name must not be empty.")
+    type_code = _resolve_userflag_type(flag_type)
+    _, target = await _get_target(ctx, session_id)
+    ops = _UserFlagSchemaOps(target)
+    await asyncio.to_thread(ops.define, name, type_code, description)
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "name": name.upper(),
+        "flag_type": _USERFLAG_TYPE_NAMES[type_code],
+        "description": description,
+    }
+
+
+@model_mcp.tool()
+async def userflag_undefine(
+    ctx: Context,
+    session_id: str = "default",
+    name: str = "",
+) -> dict:
+    """Remove a user-flag definition and all per-object values assigned to it."""
+    if not name:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] name must not be empty.")
+    _, target = await _get_target(ctx, session_id)
+    ops = _UserFlagSchemaOps(target)
+    await asyncio.to_thread(ops.undefine, name)
+    return {"status": "ok", "session_id": session_id, "removed": name.upper()}
+
+
+@model_mcp.tool()
+async def userflag_list_defs(ctx: Context, session_id: str = "default") -> dict:
+    """List every user-flag schema definition ([USER_FLAGS]), in insertion order.
+
+    Each entry reports ``name``, ``flag_type`` (BOOLEAN / INTEGER / REAL /
+    STRING), and ``description``.
+    """
+    _, target = await _get_target(ctx, session_id)
+    ops = _UserFlagSchemaOps(target)
+
+    def _read() -> list[dict]:
+        out = []
+        for i in range(ops.def_count()):
+            name, type_code, desc = ops.def_get(i)
+            out.append(
+                {
+                    "name": name,
+                    "flag_type": _USERFLAG_TYPE_NAMES.get(int(type_code), str(type_code)),
+                    "description": desc,
+                }
+            )
+        return out
+
+    defs = await asyncio.to_thread(_read)
+    return {"session_id": session_id, "count": len(defs), "definitions": defs}
+
+
+@model_mcp.tool()
+async def userflag_get_value(
+    ctx: Context,
+    session_id: str = "default",
+    obj_type: str = "",
+    obj_name: str = "",
+    flag_name: str = "",
+) -> dict:
+    """Return the flag value assigned to a specific object ([USER_FLAG_VALUES]).
+
+    ``obj_type`` is an object type token (e.g. ``"NODE"``, ``"LINK"``,
+    ``"SUBCATCHMENT"``). The value is returned in its INP string form
+    (BOOLEAN as YES/NO, INTEGER/REAL as decimals, STRING verbatim);
+    ``value`` is ``None`` and ``assigned`` is ``False`` when unset.
+    """
+    if not obj_type or not obj_name or not flag_name:
+        raise ToolError(
+            f"[{ErrorCode.VALIDATION_ERROR}] obj_type, obj_name, and flag_name "
+            f"must not be empty."
+        )
+    _, target = await _get_target(ctx, session_id)
+    ops = _UserFlagSchemaOps(target)
+    value = await asyncio.to_thread(ops.value_get, obj_type, obj_name, flag_name)
+    return {
+        "session_id": session_id,
+        "obj_type": obj_type.upper(),
+        "obj_name": obj_name,
+        "flag_name": flag_name.upper(),
+        "assigned": value is not None,
+        "value": value,
+    }
+
+
+@model_mcp.tool()
+async def userflag_set_value(
+    ctx: Context,
+    session_id: str = "default",
+    obj_type: str = "",
+    obj_name: str = "",
+    flag_name: str = "",
+    value: str = "",
+) -> dict:
+    """Assign a flag value to a specific object from a string.
+
+    The flag must already be defined (see ``model_userflag_define``); its
+    declared type drives parsing. BOOLEAN accepts YES/NO/TRUE/FALSE/1/0;
+    INTEGER a decimal integer; REAL a decimal number; STRING is stored
+    verbatim.
+    """
+    if not obj_type or not obj_name or not flag_name:
+        raise ToolError(
+            f"[{ErrorCode.VALIDATION_ERROR}] obj_type, obj_name, and flag_name "
+            f"must not be empty."
+        )
+    _, target = await _get_target(ctx, session_id)
+    ops = _UserFlagSchemaOps(target)
+    await asyncio.to_thread(ops.value_set, obj_type, obj_name, flag_name, value)
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "obj_type": obj_type.upper(),
+        "obj_name": obj_name,
+        "flag_name": flag_name.upper(),
+        "value": value,
+    }
+
+
+@model_mcp.tool()
+async def userflag_clear_value(
+    ctx: Context,
+    session_id: str = "default",
+    obj_type: str = "",
+    obj_name: str = "",
+    flag_name: str = "",
+) -> dict:
+    """Remove the flag value assigned to a specific object (idempotent)."""
+    if not obj_type or not obj_name or not flag_name:
+        raise ToolError(
+            f"[{ErrorCode.VALIDATION_ERROR}] obj_type, obj_name, and flag_name "
+            f"must not be empty."
+        )
+    _, target = await _get_target(ctx, session_id)
+    ops = _UserFlagSchemaOps(target)
+    await asyncio.to_thread(ops.value_clear, obj_type, obj_name, flag_name)
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "obj_type": obj_type.upper(),
+        "obj_name": obj_name,
+        "flag_name": flag_name.upper(),
+    }
+
+
+# ===========================================================================
+# External-file path slots (typed; reaches every slot, not just [FILES])
+# ===========================================================================
+
+# Role tokens <-> openswmm.engine.FilePathRole codes (SWMM_FilePathRole).
+_FILE_PATH_ROLES: dict[str, int] = {
+    "RAINFALL": 1,
+    "RUNOFF": 2,
+    "RDII": 3,
+    "INFLOWS": 4,
+    "OUTFLOWS": 5,
+    "HOTSTART_USE": 6,
+    "CLIMATE_TEMP": 7,
+    "HOTSTART_SAVE": 8,
+    "RAINGAGE_DATA": 9,
+    "TIMESERIES_DATA": 10,
+}
+_VECTOR_FILE_PATH_ROLES = frozenset({"HOTSTART_SAVE", "RAINGAGE_DATA", "TIMESERIES_DATA"})
+
+
+def _resolve_file_path_role(role: str) -> tuple[str, int]:
+    token = role.strip().upper()
+    if token not in _FILE_PATH_ROLES:
+        raise ToolError(
+            f"[{ErrorCode.VALIDATION_ERROR}] Invalid file-path role '{role}'. "
+            f"Must be one of: {', '.join(_FILE_PATH_ROLES)}"
+        )
+    return token, _FILE_PATH_ROLES[token]
+
+
+@model_mcp.tool()
+async def file_path_get(
+    ctx: Context,
+    session_id: str = "default",
+    role: str = "",
+    owner: str = "",
+) -> dict:
+    """Read an external-file slot's resolved and original paths.
+
+    ``role`` selects the slot: scalar roles ``RAINFALL``, ``RUNOFF``,
+    ``RDII``, ``INFLOWS``, ``OUTFLOWS``, ``HOTSTART_USE``, ``CLIMATE_TEMP``
+    (``owner`` ignored), or vector roles ``HOTSTART_SAVE`` (owner = decimal
+    index), ``RAINGAGE_DATA`` (owner = gage id), ``TIMESERIES_DATA``
+    (owner = series id). Returns both the engine-resolved absolute path and
+    the original token as authored in the ``.inp``; either may be empty.
+    """
+    token, code = _resolve_file_path_role(role)
+    if token in _VECTOR_FILE_PATH_ROLES and not owner:
+        raise ToolError(
+            f"[{ErrorCode.VALIDATION_ERROR}] Role '{token}' is a vector slot "
+            f"and requires an owner key."
+        )
+    _, target = await _get_builder(ctx, session_id)
+    absolute, original = await asyncio.to_thread(target.get_file_path, code, owner)
+    return {
+        "session_id": session_id,
+        "role": token,
+        "owner": owner,
+        "absolute": absolute,
+        "original": original,
+    }
+
+
+@model_mcp.tool()
+async def file_path_set(
+    ctx: Context,
+    session_id: str = "default",
+    role: str = "",
+    new_path: str = "",
+    owner: str = "",
+) -> dict:
+    """Set the original token for an external-file slot.
+
+    Clears the cached absolute resolution (the engine re-resolves on next
+    use). For vector roles the ``owner`` must already exist in the model.
+    Pass an empty ``new_path`` to clear the slot. See ``model_file_path_get``
+    for the role list.
+    """
+    token, code = _resolve_file_path_role(role)
+    if token in _VECTOR_FILE_PATH_ROLES and not owner:
+        raise ToolError(
+            f"[{ErrorCode.VALIDATION_ERROR}] Role '{token}' is a vector slot "
+            f"and requires an owner key."
+        )
+    _, target = await _get_builder(ctx, session_id)
+    await asyncio.to_thread(target.set_file_path, code, new_path, owner)
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "role": token,
+        "owner": owner,
+        "new_path": new_path,
+    }
 
 
 # ===========================================================================

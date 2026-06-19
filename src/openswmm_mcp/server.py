@@ -30,12 +30,15 @@ mcp = FastMCP(
 # Tool sub-servers (namespaced)
 # ---------------------------------------------------------------------------
 
+from openswmm_mcp.tools import gym_runs, gym_scoring  # noqa: E402, F401  (register on gym_mcp)
 from openswmm_mcp.tools.analysis import analysis_mcp  # noqa: E402
 from openswmm_mcp.tools.building import building_mcp  # noqa: E402
 from openswmm_mcp.tools.controls import controls_mcp  # noqa: E402
+from openswmm_mcp.tools.datetime_tools import datetime_mcp  # noqa: E402
 from openswmm_mcp.tools.editing import editing_mcp  # noqa: E402
 from openswmm_mcp.tools.forcing import forcing_mcp  # noqa: E402
 from openswmm_mcp.tools.geopackage import geopackage_mcp  # noqa: E402
+from openswmm_mcp.tools.gym_envs import gym_mcp  # noqa: E402
 from openswmm_mcp.tools.hotstart import hotstart_mcp  # noqa: E402
 from openswmm_mcp.tools.inflows import inflows_mcp  # noqa: E402
 from openswmm_mcp.tools.infrastructure import infrastructure_mcp  # noqa: E402
@@ -49,6 +52,7 @@ from openswmm_mcp.tools.query import query_mcp  # noqa: E402
 from openswmm_mcp.tools.spatial_quality import spatial_quality_mcp  # noqa: E402
 from openswmm_mcp.tools.subcatchments import subcatchments_mcp  # noqa: E402
 from openswmm_mcp.tools.tables import tables_mcp  # noqa: E402
+from openswmm_mcp.tools.twod import twod_mcp  # noqa: E402
 
 mcp.mount(lifecycle_mcp, namespace="lifecycle")
 mcp.mount(query_mcp, namespace="query")
@@ -69,6 +73,9 @@ mcp.mount(subcatchments_mcp, namespace="subcatchments")
 mcp.mount(pollutants_mcp, namespace="pollutants")
 mcp.mount(model_mcp, namespace="model")
 mcp.mount(quality_mcp, namespace="quality")
+mcp.mount(twod_mcp, namespace="twod")
+mcp.mount(datetime_mcp, namespace="datetime")
+mcp.mount(gym_mcp, namespace="gym")
 
 # ---------------------------------------------------------------------------
 # Resource and prompt sub-servers (no namespace -- keep URIs short)
@@ -76,6 +83,8 @@ mcp.mount(quality_mcp, namespace="quality")
 
 from openswmm_mcp.prompts.workflows import prompts_mcp  # noqa: E402
 from openswmm_mcp.resources.model import resources_mcp  # noqa: E402
+from openswmm_mcp.skills import skills_mcp  # noqa: E402
 
 mcp.mount(resources_mcp)
 mcp.mount(prompts_mcp)
+mcp.mount(skills_mcp)

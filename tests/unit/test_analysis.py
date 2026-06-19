@@ -201,6 +201,67 @@ class TestGetMassBalance:
         assert "outflow" in result.routing_total
         assert "dry_weather" in result.routing_total
 
+    # ------------------------------------------------------------------
+    # Phase 4d: engine_kind + unsupported_fields discriminator.
+    # ------------------------------------------------------------------
+
+    async def test_mass_balance_includes_engine_kind(self, session_manager, tmp_inp):
+        """Phase 4d: response must carry the active backend's name so
+        consumers can distinguish "unsupported" from "no data"."""
+        from openswmm_mcp.tools.analysis import get_mass_balance
+
+        ctx = await _open_and_run(session_manager, tmp_inp, "mb_eng_kind")
+        result = await get_mass_balance(ctx, session_id="mb_eng_kind")
+        assert result.engine_kind in ("openswmm", "legacy")
+
+    async def test_mass_balance_routing_stats_state_is_explicit(
+        self, session_manager, tmp_inp,
+    ):
+        """``routing_stats`` is either populated (with the field absent
+        from ``unsupported_fields``) or it is None (and the field is
+        listed in ``unsupported_fields``). The audit flagged the
+        previous behaviour where ``routing_stats`` was silently None on
+        legacy with no way for the caller to tell what was happening."""
+        from openswmm_mcp.tools.analysis import get_mass_balance
+
+        ctx = await _open_and_run(session_manager, tmp_inp, "mb_rs")
+        result = await get_mass_balance(ctx, session_id="mb_rs")
+        unsup = set(result.unsupported_fields or [])
+        if result.routing_stats is not None:
+            assert isinstance(result.routing_stats, dict)
+            assert "routing_stats" not in unsup
+        else:
+            assert "routing_stats" in unsup
+
+
+# ---------------------------------------------------------------------------
+# get_quality_losses
+# ---------------------------------------------------------------------------
+
+
+class TestGetQualityLosses:
+    async def test_quality_losses_after_run(self, session_manager, tmp_inp, reference_model):
+        from openswmm_mcp.tools.analysis import get_quality_losses
+
+        ctx = await _open_and_run(session_manager, tmp_inp, "qloss")
+        result = await get_quality_losses(ctx, session_id="qloss")
+
+        assert result["pollutant_count"] == reference_model.POLLUTANT_COUNT
+        # site_drainage_model.inp has TSS — its loss terms must be reported.
+        assert reference_model.POLLUTANT_ID in result["losses"]
+        entry = result["losses"][reference_model.POLLUTANT_ID]
+        assert isinstance(entry["evap_loss"], float)
+        assert isinstance(entry["seep_loss"], float)
+
+    async def test_quality_losses_requires_run_state(self, session_manager, tmp_inp):
+        from openswmm_mcp.tools.analysis import get_quality_losses
+        from openswmm_mcp.tools.lifecycle import open_model
+
+        ctx = _Ctx(session_manager)
+        await open_model(ctx, inp_path=tmp_inp, session_id="qloss_state")
+        with pytest.raises(ToolError):
+            await get_quality_losses(ctx, session_id="qloss_state")
+
 
 # ---------------------------------------------------------------------------
 # get_flooding_summary
@@ -246,6 +307,43 @@ class TestGetFloodingSummary:
         result = await get_flooding_summary(ctx, session_id="flood_thr", min_flood_volume=1e12)
 
         assert result == []
+
+    async def test_flooding_summary_matches_scalar_per_node_path(
+        self, session_manager, tmp_inp,
+    ):
+        """Phase 4c regression: the bulk-pulled flooding summary must match
+        the scalar per-node path bit-for-bit. We rebuild the expected
+        list from the per-element ``stats.*`` accessors and compare.
+        """
+        from openswmm_mcp.tools.analysis import get_flooding_summary
+
+        ctx = await _open_and_run(session_manager, tmp_inp, "flood_eq")
+        session = await ctx.lifespan_context["session_manager"].get_session("flood_eq")
+        stats = session.statistics
+        nodes = session.nodes
+
+        expected = []
+        for i in range(len(nodes)):
+            vol = stats.node_vol_flooded_at(i)
+            if vol <= 0.0:
+                continue
+            expected.append((
+                nodes.get_id(i),
+                stats.node_max_overflow_at(i),
+                vol,
+                stats.node_time_flooded_at(i),
+                stats.node_max_depth_at(i),
+            ))
+        expected.sort(key=lambda t: t[2], reverse=True)
+
+        result = await get_flooding_summary(ctx, session_id="flood_eq")
+        assert len(result) == len(expected)
+        for item, exp in zip(result, expected):
+            assert item.node_id == exp[0]
+            assert item.max_overflow_rate == pytest.approx(exp[1])
+            assert item.total_flood_volume == pytest.approx(exp[2])
+            assert item.time_flooded == pytest.approx(exp[3])
+            assert item.max_depth == pytest.approx(exp[4])
 
 
 # ---------------------------------------------------------------------------
@@ -296,6 +394,46 @@ class TestGetCapacitySummary:
         high = await get_capacity_summary(ctx, session_id="cap_hi", max_filling_threshold=0.9)
 
         assert len(high) <= len(low)
+
+    async def test_capacity_summary_matches_scalar_per_link_path(
+        self, session_manager, tmp_inp,
+    ):
+        """Phase 4c regression: bulk path output must equal the scalar
+        path output. Only ``max_flow`` currently has a bulk variant; the
+        other fields fall through to the scalar accessors but the
+        end-to-end result must still be identical."""
+        from openswmm_mcp.tools.analysis import get_capacity_summary
+
+        ctx = await _open_and_run(session_manager, tmp_inp, "cap_eq")
+        session = await ctx.lifespan_context["session_manager"].get_session("cap_eq")
+        stats = session.statistics
+        links = session.links
+
+        expected = []
+        for i in range(len(links)):
+            filling = stats.link_max_filling_at(i)
+            if filling <= 0.0:
+                continue
+            expected.append((
+                links.get_id(i),
+                filling,
+                stats.link_max_flow_at(i),
+                stats.link_max_velocity_at(i),
+                stats.link_surcharge_time_at(i),
+                stats.link_vol_flow_at(i),
+            ))
+        expected.sort(key=lambda t: t[1], reverse=True)
+
+        result = await get_capacity_summary(ctx, session_id="cap_eq",
+                                              max_filling_threshold=0.0)
+        assert len(result) == len(expected)
+        for item, exp in zip(result, expected):
+            assert item.link_id == exp[0]
+            assert item.max_filling == pytest.approx(exp[1])
+            assert item.max_flow == pytest.approx(exp[2])
+            assert item.max_velocity == pytest.approx(exp[3])
+            assert item.time_above_threshold == pytest.approx(exp[4])
+            assert item.vol_flow == pytest.approx(exp[5])
 
 
 # ---------------------------------------------------------------------------

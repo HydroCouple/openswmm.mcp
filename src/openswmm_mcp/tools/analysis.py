@@ -11,13 +11,14 @@ import asyncio
 import csv
 import json
 import logging
+from datetime import timedelta
 from pathlib import Path
 
 from fastmcp import Context, FastMCP
 
 from openswmm_mcp._util.formatting import ndarray_to_list
 from openswmm_mcp.dependencies import get_session_manager, require_new_engine, require_state
-from openswmm_mcp.errors import ErrorCode, ToolError
+from openswmm_mcp.errors import ErrorCode, ToolError, resolve_index
 from openswmm_mcp.models import (
     CapacitySummaryItem,
     ExportResult,
@@ -176,12 +177,19 @@ async def _ensure_output_reader(session):
 
 
 def _build_timestamps(reader, start: int, end: int, step: int) -> list[float]:
-    """Build a list of timestamps (as floats, Julian days) for [start, end] inclusive."""
-    start_date = reader.get_start_date()
-    report_step_days = reader.get_report_step() / 86400.0
+    """Build a list of timestamps (as floats, Julian days) for [start, end] inclusive.
+
+    v1 OutputReader exposes ``start_datetime`` (datetime) and
+    ``report_step`` (timedelta).  We project to Julian-day floats to keep
+    the historical JSON shape.
+    """
+    from openswmm.engine import datetime_to_oadate
+
+    start_date_julian = datetime_to_oadate(reader.start_datetime)
+    report_step_days = reader.report_step.total_seconds() / 86400.0
     timestamps = []
     for i in range(start, end + 1, step):  # end is inclusive, matching the reader
-        timestamps.append(start_date + i * report_step_days)
+        timestamps.append(start_date_julian + i * report_step_days)
     return timestamps
 
 
@@ -224,15 +232,20 @@ async def get_statistics(
 
     if etype == "node":
         nodes = session.nodes
-        idx = await asyncio.to_thread(nodes.get_index, element_id)
+        idx = await resolve_index(nodes, element_id, "Node")
         if idx < 0:
             raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Node '{element_id}' not found.")
         try:
-            max_depth, max_overflow, vol_flooded, time_flooded = await asyncio.gather(
-                asyncio.to_thread(stats.node_max_depth, idx),
-                asyncio.to_thread(stats.node_max_overflow, idx),
-                asyncio.to_thread(stats.node_vol_flooded, idx),
-                asyncio.to_thread(stats.node_time_flooded, idx),
+            # v1 Statistics arrays are NumPy properties; index into them.
+            def _read_node() -> tuple[float, float, float, float]:
+                return (
+                    float(stats.node_max_depth[idx]),
+                    float(stats.node_max_overflow[idx]),
+                    float(stats.node_vol_flooded[idx]),
+                    float(stats.node_time_flooded[idx]),
+                )
+            max_depth, max_overflow, vol_flooded, time_flooded = await asyncio.to_thread(
+                _read_node
             )
             return {
                 "element_type": "node",
@@ -250,17 +263,21 @@ async def get_statistics(
 
     elif etype == "link":
         links = session.links
-        idx = await asyncio.to_thread(links.get_index, element_id)
+        idx = await resolve_index(links, element_id, "Link")
         if idx < 0:
             raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Link '{element_id}' not found.")
         try:
-            ltype, max_flow, max_vel, max_fill, surcharge, vol_flow = await asyncio.gather(
-                asyncio.to_thread(links.get_type, idx),
-                asyncio.to_thread(stats.link_max_flow, idx),
-                asyncio.to_thread(stats.link_max_velocity, idx),
-                asyncio.to_thread(stats.link_max_filling, idx),
-                asyncio.to_thread(stats.link_surcharge_time, idx),
-                asyncio.to_thread(stats.link_vol_flow, idx),
+            def _read_link() -> tuple[int, float, float, float, float, float]:
+                return (
+                    int(links[idx].type),
+                    float(stats.link_max_flow[idx]),
+                    float(stats.link_max_velocity[idx]),
+                    float(stats.link_max_filling[idx]),
+                    float(stats.link_surcharge_time[idx]),
+                    float(stats.link_vol_flow[idx]),
+                )
+            ltype, max_flow, max_vel, max_fill, surcharge, vol_flow = await asyncio.to_thread(
+                _read_link
             )
             result = {
                 "element_type": "link",
@@ -273,11 +290,10 @@ async def get_statistics(
             }
             # Pump-specific stats (type code 1 = PUMP)
             if ltype == 1:
-                pump_cycles, pump_on_time, pump_volume = await asyncio.gather(
-                    asyncio.to_thread(links.get_stat_pump_cycles, idx),
-                    asyncio.to_thread(links.get_stat_pump_on_time, idx),
-                    asyncio.to_thread(links.get_stat_pump_volume, idx),
-                )
+                def _pump_stats() -> tuple[int, float, float]:
+                    s = links[idx].stats
+                    return int(s.pump_cycles), float(s.pump_on_time), float(s.pump_volume)
+                pump_cycles, pump_on_time, pump_volume = await asyncio.to_thread(_pump_stats)
                 result["pump_cycles"] = pump_cycles
                 result["pump_on_time"] = pump_on_time
                 result["pump_volume"] = pump_volume
@@ -290,17 +306,22 @@ async def get_statistics(
 
     elif etype == "subcatchment":
         subcatchments = session.subcatchments
-        idx = await asyncio.to_thread(subcatchments.get_index, element_id)
+        idx = await resolve_index(subcatchments, element_id, "Subcatchment")
         if idx < 0:
             raise ToolError(
                 f"[{ErrorCode.ELEMENT_NOT_FOUND}] Subcatchment '{element_id}' not found."
             )
         try:
-            precip, runoff_vol, max_runoff = await asyncio.gather(
-                asyncio.to_thread(stats.subcatch_precip, idx),
-                asyncio.to_thread(stats.subcatch_runoff_vol, idx),
-                asyncio.to_thread(stats.subcatch_max_runoff, idx),
-            )
+            # v1: stats.subcatchment_* (renamed from subcatch_*), numpy arrays.
+            def _read_sub() -> tuple[float, float, float]:
+                return (
+                    # subcatch_precip wasn't a numpy bulk in v0 — v1 doesn't
+                    # expose a precip array, so use the wrapper's stats view.
+                    float(session.subcatchments[idx].stats.precip),
+                    float(stats.subcatchment_runoff_vol[idx]),
+                    float(stats.subcatchment_max_runoff[idx]),
+                )
+            precip, runoff_vol, max_runoff = await asyncio.to_thread(_read_sub)
             return {
                 "element_type": "subcatchment",
                 "element_id": element_id,
@@ -346,17 +367,20 @@ async def get_mass_balance(
 
     mb = session.mass_balance
 
-    runoff_err = await asyncio.to_thread(mb.get_runoff_continuity_error)
-    routing_err = await asyncio.to_thread(mb.get_routing_continuity_error)
+    # v1 MassBalance: property-style accessors.  Legacy adapter exposes
+    # both the v1 properties and the v0 get_* methods, so this works on
+    # either backend.
+    runoff_err = await asyncio.to_thread(lambda: mb.runoff_continuity_error)
+    routing_err = await asyncio.to_thread(lambda: mb.routing_continuity_error)
 
     # Quality error -- per-pollutant when pollutants are modelled
     quality_err: float | None = None
     quality_errs: dict[str, float] | None = None
     pollutants = session.pollutants
-    poll_count = await asyncio.to_thread(pollutants.count)
+    poll_count = await asyncio.to_thread(lambda: len(pollutants))
     if poll_count > 0:
         try:
-            quality_err = await asyncio.to_thread(mb.get_quality_continuity_error, 0)
+            quality_err = await asyncio.to_thread(mb.quality_continuity_error, 0)
         except Exception:
             quality_err = None
 
@@ -365,40 +389,84 @@ async def get_mass_balance(
             qe = {}
             for p in range(poll_count):
                 pid = await asyncio.to_thread(pollutants.get_id, p)
-                err = await asyncio.to_thread(mb.get_quality_continuity_error, p)
+                err = await asyncio.to_thread(mb.quality_continuity_error, p)
                 qe[pid] = err
             if qe:
                 quality_errs = qe
         except Exception:
             pass
 
-    # Collect all runoff total components
+    # Collect all runoff total components — v1 method ``runoff_total`` (was
+    # ``get_runoff_total``); legacy backend's MassBalance shim lacks this
+    # entirely, so guard with hasattr.
     runoff_total: dict[str, float] = {}
-    for member in RunoffTotal:
-        try:
-            value = await asyncio.to_thread(mb.get_runoff_total, member)
-            runoff_total[member.name.lower()] = value
-        except Exception:
-            pass
+    runoff_total_fn = getattr(mb, "runoff_total", None)
+    if callable(runoff_total_fn):
+        for member in RunoffTotal:
+            try:
+                value = await asyncio.to_thread(runoff_total_fn, member)
+                runoff_total[member.name.lower()] = value
+            except Exception:
+                pass
 
     # Collect all routing total components
     routing_total: dict[str, float] = {}
-    for member in RoutingTotal:
+    routing_total_fn = getattr(mb, "routing_total", None)
+    if callable(routing_total_fn):
+        for member in RoutingTotal:
+            try:
+                value = await asyncio.to_thread(routing_total_fn, member)
+                routing_total[member.name.lower()] = value
+            except Exception:
+                pass
+
+    # Routing diagnostics — v1 exposes a RoutingDiagnostics object via the
+    # ``routing_diagnostics`` property, plus a top-level ``max_courant``
+    # property.  Project both down to the legacy dict shape for the
+    # response.  Legacy backend doesn't expose either — guard with hasattr.
+    routing_stats: dict[str, float] | None = None
+    max_courant: float | None = None
+    routing_stats_supported = hasattr(mb, "routing_diagnostics")
+    if routing_stats_supported:
         try:
-            value = await asyncio.to_thread(mb.get_routing_total, member)
-            routing_total[member.name.lower()] = value
+            def _read_diag() -> tuple[dict[str, float], float | None]:
+                diag = mb.routing_diagnostics
+                # RoutingDiagnostics is a NamedTuple / dataclass-like; expose
+                # whatever fields it carries as a flat dict.
+                if hasattr(diag, "_asdict"):
+                    stats_dict = dict(diag._asdict())
+                elif hasattr(diag, "__dict__"):
+                    stats_dict = {k: v for k, v in vars(diag).items()
+                                  if not k.startswith("_")}
+                else:
+                    stats_dict = {}
+                # max_courant is also a top-level MassBalance property.
+                mc = None
+                try:
+                    mc = float(mb.max_courant)
+                except (AttributeError, Exception):
+                    mc = stats_dict.get("max_courant")
+                return stats_dict, mc
+
+            routing_stats, max_courant = await asyncio.to_thread(_read_diag)
         except Exception:
             pass
 
-    # Routing diagnostics (combined stats — single C call)
-    routing_stats: dict[str, float] | None = None
-    max_courant: float | None = None
-    if hasattr(mb, "get_routing_stats"):
-        try:
-            routing_stats = await asyncio.to_thread(mb.get_routing_stats)
-            max_courant = routing_stats.get("max_courant")
-        except Exception:
-            pass
+    # Phase 4d: assemble the unsupported-fields list from the active
+    # backend's capability surface.  Per the audit, the legacy backend's
+    # ``get_quality_continuity_error`` silently ignores its
+    # ``pollutant_index`` argument, so ``quality_continuity_errors``
+    # (per-pollutant breakdown) is meaningless there.
+    engine_kind = session.engine_kind
+    unsupported: list[str] = []
+    if not routing_stats_supported:
+        unsupported.append("routing_diagnostics")
+        unsupported.append("max_courant")
+    if engine_kind == "legacy":
+        # Per audit Appendix A: legacy backend collapses every pollutant
+        # into the same scalar continuity error.  The per-pollutant dict
+        # is therefore unreliable on legacy regardless of pollutant count.
+        unsupported.append("quality_continuity_errors")
 
     return MassBalanceResult(
         session_id=session_id,
@@ -410,7 +478,55 @@ async def get_mass_balance(
         routing_total=routing_total,
         routing_stats=routing_stats,
         max_courant=max_courant,
+        engine_kind=engine_kind,
+        unsupported_fields=unsupported or None,
     )
+
+
+@analysis_mcp.tool()
+async def get_quality_losses(
+    ctx: Context,
+    session_id: str = "default",
+) -> dict:
+    """Return per-pollutant evaporation and seepage mass losses.
+
+    These are the quality mass-balance loss terms the routing continuity
+    accounts for but which :func:`get_mass_balance` does not surface (it
+    reports continuity *errors* and volumetric totals). For every modelled
+    pollutant, returns the cumulative mass lost to evaporation and to
+    seepage (model mass units).
+
+    Requires the ``openswmm`` backend and a session in ``running`` or
+    ``ended`` state.
+
+    Parameters
+    ----------
+    session_id:
+        Identifier of the session.  Defaults to ``"default"``.
+    """
+    sm = get_session_manager(ctx)
+    session = await sm.get_session(session_id)
+    require_new_engine(session, "Quality mass-balance loss terms")
+    require_state(session, "running", "ended")
+
+    mb = session.mass_balance
+    pollutants = session.pollutants
+    poll_count = await asyncio.to_thread(lambda: len(pollutants))
+
+    losses: dict[str, dict[str, float]] = {}
+    for p in range(poll_count):
+        pid = await asyncio.to_thread(pollutants.get_id, p)
+        # v1 MassBalance.quality_evap_loss / quality_seep_loss take a
+        # pollutant key (index or id) and return a cumulative mass (float).
+        evap = await asyncio.to_thread(mb.quality_evap_loss, p)
+        seep = await asyncio.to_thread(mb.quality_seep_loss, p)
+        losses[pid] = {"evap_loss": float(evap), "seep_loss": float(seep)}
+
+    return {
+        "session_id": session_id,
+        "pollutant_count": poll_count,
+        "losses": losses,
+    }
 
 
 @analysis_mcp.tool()
@@ -475,7 +591,7 @@ async def get_time_series(
 
     reader = await _ensure_output_reader(session)
 
-    period_count = await asyncio.to_thread(reader.get_period_count)
+    period_count = await asyncio.to_thread(lambda: reader.period_count)
     # get_node/link/subcatch_series uses an inclusive [start, end] index range.
     last_period = period_count - 1
     if end_period < 0 or end_period > last_period:
@@ -496,37 +612,37 @@ async def get_time_series(
     # OutputReader series methods take integer element indices, not string IDs.
     if etype == "node":
         var_enum = _resolve_node_var(variable)
-        node_idx = await asyncio.to_thread(session.nodes.get_index, element_id)
+        node_idx = await resolve_index(session.nodes, element_id, "Node")
         if node_idx < 0:
             raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Node '{element_id}' not found.")
         raw = await asyncio.to_thread(
-            reader.get_node_series, node_idx, var_enum, start_period, end_period
+            reader.node_series, node_idx, var_enum, start=start_period, end=end_period
         )
     elif etype == "link":
         var_enum = _resolve_link_var(variable)
-        link_idx = await asyncio.to_thread(session.links.get_index, element_id)
+        link_idx = await resolve_index(session.links, element_id, "Link")
         if link_idx < 0:
             raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Link '{element_id}' not found.")
         raw = await asyncio.to_thread(
-            reader.get_link_series, link_idx, var_enum, start_period, end_period
+            reader.link_series, link_idx, var_enum, start=start_period, end=end_period
         )
     elif etype == "subcatchment":
         var_enum = _resolve_subcatch_var(variable)
-        sc_idx = await asyncio.to_thread(session.subcatchments.get_index, element_id)
+        sc_idx = await resolve_index(session.subcatchments, element_id, "Subcatchment")
         if sc_idx < 0:
             raise ToolError(
                 f"[{ErrorCode.ELEMENT_NOT_FOUND}] Subcatchment '{element_id}' not found."
             )
         raw = await asyncio.to_thread(
-            reader.get_subcatch_series,
+            reader.subcatchment_series,
             sc_idx,
             var_enum,
-            start_period,
-            end_period,
+            start=start_period,
+            end=end_period,
         )
     else:  # system
         var_enum = _resolve_system_var(variable)
-        raw = await asyncio.to_thread(reader.get_system_series, var_enum, start_period, end_period)
+        raw = await asyncio.to_thread(reader.system_series, var_enum, start=start_period, end=end_period)
 
     values = ndarray_to_list(raw)
 
@@ -573,26 +689,43 @@ async def get_flooding_summary(
 
     require_new_engine(session, "Per-element flooding statistics")
     stats = session.statistics
-    nodes = session.nodes
-    node_count = await asyncio.to_thread(nodes.count)
 
     def _fetch_all():
-        result = []
-        for i in range(node_count):
-            try:
-                vol = stats.node_vol_flooded(i)
-            except Exception:
-                continue
-            if vol <= min_flood_volume:
+        # Phase 4c: pull all four statistics as NumPy arrays in four C
+        # calls total, then filter + sort in Python. Old path looped
+        # ``stats.node_vol_flooded(i) / node_max_overflow(i) /
+        # node_time_flooded(i) / node_max_depth(i)`` per node — 4 * N
+        # C ABI crossings for a 5 000-node network. The bulk path is
+        # ~4 crossings regardless of N.
+        meta = session.meta
+        ids = meta.node_ids
+        if not ids:
+            return []
+
+        # v1 Statistics exposes each column as a numpy property — no
+        # ``_bulk`` suffix and no per-index method.
+        vol = stats.node_vol_flooded
+        max_over = stats.node_max_overflow
+        t_flood = stats.node_time_flooded
+        max_depth = stats.node_max_depth
+
+        # Build FloodingSummaryItem records for nodes that exceed the
+        # threshold. Numpy comparison + boolean indexing would be faster
+        # but the per-item Pydantic model construction dominates anyway,
+        # so a clean Python loop reads better here.
+        result: list[FloodingSummaryItem] = []
+        for i, node_id in enumerate(ids):
+            v = float(vol[i])
+            if v <= min_flood_volume:
                 continue
             try:
                 result.append(
                     FloodingSummaryItem(
-                        node_id=nodes.get_id(i),
-                        max_overflow_rate=stats.node_max_overflow(i),
-                        total_flood_volume=vol,
-                        time_flooded=stats.node_time_flooded(i),
-                        max_depth=stats.node_max_depth(i),
+                        node_id=node_id,
+                        max_overflow_rate=float(max_over[i]),
+                        total_flood_volume=v,
+                        time_flooded=float(t_flood[i]),
+                        max_depth=float(max_depth[i]),
                     )
                 )
             except Exception:
@@ -628,27 +761,40 @@ async def get_capacity_summary(
 
     require_new_engine(session, "Per-link capacity statistics")
     stats = session.statistics
-    links = session.links
-    link_count = await asyncio.to_thread(links.count)
 
     def _fetch_all():
-        result = []
-        for i in range(link_count):
-            try:
-                filling = stats.link_max_filling(i)
-            except Exception:
-                continue
+        # Phase 4c+4e: every column now has a bulk getter. Pull all 5
+        # statistics as NumPy arrays in 5 C calls regardless of N, then
+        # filter + sort in Python. The Phase 4e additions
+        # (link_max_filling_bulk / link_max_velocity_bulk /
+        # link_surcharge_time_bulk / link_vol_flow_bulk) close the loop
+        # opened in Phase 4c.
+        meta = session.meta
+        ids = meta.link_ids
+        if not ids:
+            return []
+
+        # v1 Statistics exposes each column as a numpy property.
+        filling_arr = stats.link_max_filling
+        max_flow_arr = stats.link_max_flow
+        max_vel_arr = stats.link_max_velocity
+        t_surch_arr = stats.link_surcharge_time
+        vol_flow_arr = stats.link_vol_flow
+
+        result: list[CapacitySummaryItem] = []
+        for i, link_id in enumerate(ids):
+            filling = float(filling_arr[i])
             if filling <= max_filling_threshold:
                 continue
             try:
                 result.append(
                     CapacitySummaryItem(
-                        link_id=links.get_id(i),
+                        link_id=link_id,
                         max_filling=filling,
-                        max_flow=stats.link_max_flow(i),
-                        max_velocity=stats.link_max_velocity(i),
-                        time_above_threshold=stats.link_surcharge_time(i),
-                        vol_flow=stats.link_vol_flow(i),
+                        max_flow=float(max_flow_arr[i]),
+                        max_velocity=float(max_vel_arr[i]),
+                        time_above_threshold=float(t_surch_arr[i]),
+                        vol_flow=float(vol_flow_arr[i]),
                     )
                 )
             except Exception:
@@ -790,42 +936,42 @@ async def compare_scenarios(
     # Determine element count and series accessor
     if etype == "node":
         var_enum = _resolve_node_var(variable)
-        count_a = await asyncio.to_thread(reader_a.get_node_count)
-        count_b = await asyncio.to_thread(reader_b.get_node_count)
+        count_a = reader_a.node_count
+        count_b = reader_b.node_count
         count = min(count_a, count_b)
 
         async def _get_id(reader, idx):
-            return await asyncio.to_thread(reader.get_node_id, idx)
+            return await asyncio.to_thread(lambda: reader.node_ids[idx])
 
         async def _get_series(reader, idx):
-            n = await asyncio.to_thread(reader.get_period_count)
-            return await asyncio.to_thread(reader.get_node_series, idx, var_enum, 0, n - 1)
+            n = await asyncio.to_thread(lambda: reader.period_count)
+            return await asyncio.to_thread(reader.node_series, idx, var_enum, start=0, end=n - 1)
 
     elif etype == "link":
         var_enum = _resolve_link_var(variable)
-        count_a = await asyncio.to_thread(reader_a.get_link_count)
-        count_b = await asyncio.to_thread(reader_b.get_link_count)
+        count_a = reader_a.link_count
+        count_b = reader_b.link_count
         count = min(count_a, count_b)
 
         async def _get_id(reader, idx):
-            return await asyncio.to_thread(reader.get_link_id, idx)
+            return await asyncio.to_thread(lambda: reader.link_ids[idx])
 
         async def _get_series(reader, idx):
-            n = await asyncio.to_thread(reader.get_period_count)
-            return await asyncio.to_thread(reader.get_link_series, idx, var_enum, 0, n - 1)
+            n = await asyncio.to_thread(lambda: reader.period_count)
+            return await asyncio.to_thread(reader.link_series, idx, var_enum, start=0, end=n - 1)
 
     elif etype == "subcatchment":
         var_enum = _resolve_subcatch_var(variable)
-        count_a = await asyncio.to_thread(reader_a.get_subcatch_count)
-        count_b = await asyncio.to_thread(reader_b.get_subcatch_count)
+        count_a = reader_a.subcatchment_count
+        count_b = reader_b.subcatchment_count
         count = min(count_a, count_b)
 
         async def _get_id(reader, idx):
-            return await asyncio.to_thread(reader.get_subcatch_id, idx)
+            return await asyncio.to_thread(lambda: reader.subcatchment_ids[idx])
 
         async def _get_series(reader, idx):
-            n = await asyncio.to_thread(reader.get_period_count)
-            return await asyncio.to_thread(reader.get_subcatch_series, idx, var_enum, 0, n - 1)
+            n = await asyncio.to_thread(lambda: reader.period_count)
+            return await asyncio.to_thread(reader.subcatchment_series, idx, var_enum, start=0, end=n - 1)
 
     else:
         raise ToolError(
@@ -951,22 +1097,15 @@ async def export_results(
 
     from openswmm.engine import OutLinkVar, OutNodeVar
 
-    node_count = await asyncio.to_thread(reader.get_node_count)
-    link_count = await asyncio.to_thread(reader.get_link_count)
-    period_count = await asyncio.to_thread(reader.get_period_count)
-    start_time = await asyncio.to_thread(reader.get_start_date)
-    report_step = await asyncio.to_thread(reader.get_report_step)
+    node_count = await asyncio.to_thread(lambda: reader.node_count)
+    link_count = await asyncio.to_thread(lambda: reader.link_count)
+    period_count = await asyncio.to_thread(lambda: reader.period_count)
+    start_time = await asyncio.to_thread(lambda: reader.start_datetime)
+    report_step = await asyncio.to_thread(lambda: reader.report_step.total_seconds())
 
-    # Collect all node and link IDs
-    node_ids = []
-    for i in range(node_count):
-        nid = await asyncio.to_thread(reader.get_node_id, i)
-        node_ids.append(nid)
-
-    link_ids = []
-    for i in range(link_count):
-        lid = await asyncio.to_thread(reader.get_link_id, i)
-        link_ids.append(lid)
+    # Collect all node and link IDs (v1: bulk list properties).
+    node_ids = list(await asyncio.to_thread(lambda: reader.node_ids))[:node_count]
+    link_ids = list(await asyncio.to_thread(lambda: reader.link_ids))[:link_count]
 
     # Node variables to export (exclude POLLUT_BASE)
     node_vars = [m for m in OutNodeVar if m != OutNodeVar.POLLUT_BASE]
@@ -980,14 +1119,14 @@ async def export_results(
     for i, nid in enumerate(node_ids):
         node_series[nid] = {}
         for var in node_vars:
-            raw = await asyncio.to_thread(reader.get_node_series, i, var, 0, last_period)
+            raw = await asyncio.to_thread(reader.node_series, i, var, start=0, end=last_period)
             node_series[nid][var.name.lower()] = ndarray_to_list(raw)
 
     link_series: dict[str, dict[str, list[float]]] = {}
     for i, lid in enumerate(link_ids):
         link_series[lid] = {}
         for var in link_vars:
-            raw = await asyncio.to_thread(reader.get_link_series, i, var, 0, last_period)
+            raw = await asyncio.to_thread(reader.link_series, i, var, start=0, end=last_period)
             link_series[lid][var.name.lower()] = ndarray_to_list(raw)
 
     record_count = 0
@@ -1065,7 +1204,7 @@ def _write_csv(
             for p in range(period_count):
                 row = [
                     p,
-                    start_time + p * report_step,
+                    (start_time + timedelta(seconds=p * report_step)).isoformat(),
                     "node",
                     nid,
                 ]
@@ -1082,7 +1221,7 @@ def _write_csv(
             for p in range(period_count):
                 row = [
                     p,
-                    start_time + p * report_step,
+                    (start_time + timedelta(seconds=p * report_step)).isoformat(),
                     "link",
                     lid,
                 ]
@@ -1136,7 +1275,7 @@ def _write_json(
 
     output = {
         "period_count": period_count,
-        "start_time": start_time,
+        "start_time": start_time.isoformat() if hasattr(start_time, "isoformat") else start_time,
         "report_step": report_step,
         "elements": records,
     }
@@ -1163,7 +1302,7 @@ def _write_json(
 
 
 def _node_attribute_keys(n_pollutants: int) -> list[str]:
-    """Variable order in the row returned by reader.get_node_attribute.
+    """Variable order in the row returned by reader.node_attributes.
 
     Index 0..5 are the engine base variables; indices 6..6+n_pollutants
     are pollutant concentrations (one column per defined pollutant).
@@ -1217,16 +1356,16 @@ async def output_metadata(ctx: Context, session_id: str = "default") -> dict:
         err,
     ) = await asyncio.to_thread(
         lambda: (
-            reader.get_version(),
-            reader.get_flow_units(),
-            reader.get_subcatch_count(),
-            reader.get_node_count(),
-            reader.get_link_count(),
-            reader.get_pollut_count(),
-            reader.get_period_count(),
-            reader.get_start_date(),
-            reader.get_report_step(),
-            reader.get_error_code(),
+            reader.version,
+            int(reader.flow_units),
+            reader.subcatchment_count,
+            reader.node_count,
+            reader.link_count,
+            reader.pollutant_count,
+            reader.period_count,
+            reader.start_datetime.isoformat(),
+            reader.report_step.total_seconds(),
+            reader.error_code,
         )
     )
     return {
@@ -1253,7 +1392,7 @@ async def output_period_count(ctx: Context, session_id: str = "default") -> dict
     require_new_engine(session, "Output reader period count")
 
     reader = await _ensure_output_reader(session)
-    n = await asyncio.to_thread(reader.get_period_count)
+    n = await asyncio.to_thread(lambda: reader.period_count)
     return {"session_id": session_id, "period_count": n}
 
 
@@ -1266,7 +1405,7 @@ async def output_pollutant_count(ctx: Context, session_id: str = "default") -> d
     require_new_engine(session, "Output reader pollutant count")
 
     reader = await _ensure_output_reader(session)
-    n = await asyncio.to_thread(reader.get_pollut_count)
+    n = await asyncio.to_thread(lambda: reader.pollutant_count)
     return {"session_id": session_id, "pollutant_count": n}
 
 
@@ -1283,12 +1422,12 @@ async def output_period_time(ctx: Context, session_id: str = "default", period: 
     require_new_engine(session, "Output reader period time")
 
     reader = await _ensure_output_reader(session)
-    n_periods = await asyncio.to_thread(reader.get_period_count)
+    n_periods = await asyncio.to_thread(lambda: reader.period_count)
     if not 0 <= period < n_periods:
         raise ToolError(
             f"[{ErrorCode.VALIDATION_ERROR}] period must be in [0, {n_periods}); got {period}."
         )
-    elapsed = await asyncio.to_thread(reader.get_period_time, period)
+    elapsed = await asyncio.to_thread(lambda: float(reader.period_times[period].astype("float64") / 1e9))
     return {
         "session_id": session_id,
         "period": period,
@@ -1321,26 +1460,108 @@ async def output_node_attribute(
     require_new_engine(session, "Output reader node attribute")
 
     reader = await _ensure_output_reader(session)
-    n_periods = await asyncio.to_thread(reader.get_period_count)
+    n_periods = await asyncio.to_thread(lambda: reader.period_count)
     if not 0 <= period < n_periods:
         raise ToolError(
             f"[{ErrorCode.VALIDATION_ERROR}] period must be in [0, {n_periods}); got {period}."
         )
 
-    node_idx = await asyncio.to_thread(session.nodes.get_index, node_id)
+    node_idx = await resolve_index(session.nodes, node_id, "Node")
     if node_idx < 0:
         raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Node '{node_id}' not found.")
 
-    n_poll = await asyncio.to_thread(reader.get_pollut_count)
-    arr = await asyncio.to_thread(reader.get_node_attribute, node_idx, period)
+    n_poll = await asyncio.to_thread(lambda: reader.pollutant_count)
+    attrs = await asyncio.to_thread(reader.node_attributes, node_idx, period)
     keys = _node_attribute_keys(n_poll)
-    values = ndarray_to_list(arr)
+    values = [float(v) for v in attrs.values()]
     return {
         "session_id": session_id,
         "node_id": node_id,
         "node_index": node_idx,
         "period": period,
         "attributes": dict(zip(keys, values[: len(keys)], strict=False)),
+    }
+
+
+@analysis_mcp.tool()
+async def output_node_stats(
+    ctx: Context,
+    session_id: str = "default",
+    node_id: str = "",
+) -> dict:
+    """Return post-run node statistics aggregated from the .out file.
+
+    Wraps the four engine-level accessors
+    ``swmm_output_get_node_stat_max_depth`` /
+    ``_max_overflow`` /
+    ``_vol_flooded`` /
+    ``_time_flooded``.
+
+    These differ from :func:`get_flooding_summary` in two ways:
+
+      * the aggregation is computed from the **binary output file**
+        (so it works even after the engine handle is closed); and
+      * the response covers a **single named node**, not a filtered
+        list across the whole network.
+
+    Parameters
+    ----------
+    session_id:
+        Identifier of the session.  Must be in ``ended`` state.
+    node_id:
+        String node identifier (e.g. ``"J1"``).  Required.
+
+    Returns
+    -------
+    dict
+        ``{"session_id": ..., "node_id": ..., "node_index": ...,
+        "max_depth": float, "max_overflow": float,
+        "total_flood_volume": float, "time_flooded_seconds": float,
+        "time_flooded_hours": float}``.  ``time_flooded_hours`` is
+        provided as a convenience because that is the convention SWMM's
+        ``statsrpt`` uses for display.
+
+    Raises
+    ------
+    ToolError
+        Session not in ``ended`` state, backend is the legacy engine
+        (this feature requires the new engine), ``node_id`` is empty,
+        or the node does not exist.
+    """
+    if not node_id:
+        raise ToolError(
+            f"[{ErrorCode.VALIDATION_ERROR}] node_id must not be empty.")
+    sm = get_session_manager(ctx)
+    session = await sm.get_session(session_id)
+    require_state(session, "ended")
+    require_new_engine(session, "Output reader node statistics")
+
+    node_idx = await resolve_index(session.nodes, node_id, "Node")
+    if node_idx < 0:
+        raise ToolError(
+            f"[{ErrorCode.ELEMENT_NOT_FOUND}] Node '{node_id}' not found.")
+
+    reader = await _ensure_output_reader(session)
+
+    # Fetch the four aggregates in one ``to_thread`` so we pay a single
+    # context switch instead of four.  Each underlying C call releases
+    # the GIL while it scans the .out file.
+    def _fetch() -> dict:
+        return {
+            # v1: reader.node_stats(node) returns an object with the four
+            # per-node summary fields.
+            "max_depth": float(reader.node_stats(node_idx).max_depth),
+            "max_overflow": float(reader.node_stats(node_idx).max_overflow),
+            "total_flood_volume": float(reader.node_stats(node_idx).vol_flooded),
+            "time_flooded_seconds": float(reader.node_stats(node_idx).time_flooded),
+        }
+    stats = await asyncio.to_thread(_fetch)
+    return {
+        "session_id": session_id,
+        "node_id": node_id,
+        "node_index": node_idx,
+        **stats,
+        "time_flooded_hours": stats["time_flooded_seconds"] / 3600.0,
     }
 
 
@@ -1365,20 +1586,20 @@ async def output_link_attribute(
     require_new_engine(session, "Output reader link attribute")
 
     reader = await _ensure_output_reader(session)
-    n_periods = await asyncio.to_thread(reader.get_period_count)
+    n_periods = await asyncio.to_thread(lambda: reader.period_count)
     if not 0 <= period < n_periods:
         raise ToolError(
             f"[{ErrorCode.VALIDATION_ERROR}] period must be in [0, {n_periods}); got {period}."
         )
 
-    link_idx = await asyncio.to_thread(session.links.get_index, link_id)
+    link_idx = await resolve_index(session.links, link_id, "Link")
     if link_idx < 0:
         raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Link '{link_id}' not found.")
 
-    n_poll = await asyncio.to_thread(reader.get_pollut_count)
-    arr = await asyncio.to_thread(reader.get_link_attribute, link_idx, period)
+    n_poll = await asyncio.to_thread(lambda: reader.pollutant_count)
+    attrs = await asyncio.to_thread(reader.link_attributes, link_idx, period)
     keys = _link_attribute_keys(n_poll)
-    values = ndarray_to_list(arr)
+    values = [float(v) for v in attrs.values()]
     return {
         "session_id": session_id,
         "link_id": link_id,
@@ -1409,20 +1630,20 @@ async def output_subcatch_attribute(
     require_new_engine(session, "Output reader subcatchment attribute")
 
     reader = await _ensure_output_reader(session)
-    n_periods = await asyncio.to_thread(reader.get_period_count)
+    n_periods = await asyncio.to_thread(lambda: reader.period_count)
     if not 0 <= period < n_periods:
         raise ToolError(
             f"[{ErrorCode.VALIDATION_ERROR}] period must be in [0, {n_periods}); got {period}."
         )
 
-    sc_idx = await asyncio.to_thread(session.subcatchments.get_index, subcatch_id)
+    sc_idx = await resolve_index(session.subcatchments, subcatch_id, "Subcatchment")
     if sc_idx < 0:
         raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Subcatchment '{subcatch_id}' not found.")
 
-    n_poll = await asyncio.to_thread(reader.get_pollut_count)
-    arr = await asyncio.to_thread(reader.get_subcatch_attribute, sc_idx, period)
+    n_poll = await asyncio.to_thread(lambda: reader.pollutant_count)
+    attrs = await asyncio.to_thread(reader.subcatchment_attributes, sc_idx, period)
     keys = _subcatch_attribute_keys(n_poll)
-    values = ndarray_to_list(arr)
+    values = [float(v) for v in attrs.values()]
     return {
         "session_id": session_id,
         "subcatch_id": subcatch_id,
@@ -1453,14 +1674,14 @@ async def output_system_result(
     require_new_engine(session, "Output reader system result")
 
     reader = await _ensure_output_reader(session)
-    n_periods = await asyncio.to_thread(reader.get_period_count)
+    n_periods = await asyncio.to_thread(lambda: reader.period_count)
     if not 0 <= period < n_periods:
         raise ToolError(
             f"[{ErrorCode.VALIDATION_ERROR}] period must be in [0, {n_periods}); got {period}."
         )
 
     var_enum = _resolve_system_var(variable)
-    value = await asyncio.to_thread(reader.get_system_result, period, var_enum)
+    value = await asyncio.to_thread(reader.system_result, period, var_enum)
     return {
         "session_id": session_id,
         "variable": variable,
@@ -1503,19 +1724,19 @@ async def output_node_results(
     require_new_engine(session, "Output reader node results")
 
     reader = await _ensure_output_reader(session)
-    n_periods = await asyncio.to_thread(reader.get_period_count)
+    n_periods = await asyncio.to_thread(lambda: reader.period_count)
     if not 0 <= period < n_periods:
         raise ToolError(
             f"[{ErrorCode.VALIDATION_ERROR}] period must be in [0, {n_periods}); got {period}."
         )
 
     var_enum = _resolve_node_var(variable)
-    n_nodes = await asyncio.to_thread(reader.get_node_count)
-    arr = await asyncio.to_thread(reader.get_node_result, period, var_enum)
+    n_nodes = await asyncio.to_thread(lambda: reader.node_count)
+    arr = await asyncio.to_thread(reader.node_result, period, var_enum)
     values = ndarray_to_list(arr)
 
     def _ids() -> list[str]:
-        return [reader.get_node_id(i) for i in range(n_nodes)]
+        return [reader.node_ids[i] for i in range(n_nodes)]
 
     ids = await asyncio.to_thread(_ids)
     records = [
@@ -1550,19 +1771,19 @@ async def output_link_results(
     require_new_engine(session, "Output reader link results")
 
     reader = await _ensure_output_reader(session)
-    n_periods = await asyncio.to_thread(reader.get_period_count)
+    n_periods = await asyncio.to_thread(lambda: reader.period_count)
     if not 0 <= period < n_periods:
         raise ToolError(
             f"[{ErrorCode.VALIDATION_ERROR}] period must be in [0, {n_periods}); got {period}."
         )
 
     var_enum = _resolve_link_var(variable)
-    n_links = await asyncio.to_thread(reader.get_link_count)
-    arr = await asyncio.to_thread(reader.get_link_result, period, var_enum)
+    n_links = await asyncio.to_thread(lambda: reader.link_count)
+    arr = await asyncio.to_thread(reader.link_result, period, var_enum)
     values = ndarray_to_list(arr)
 
     def _ids() -> list[str]:
-        return [reader.get_link_id(i) for i in range(n_links)]
+        return [reader.link_ids[i] for i in range(n_links)]
 
     ids = await asyncio.to_thread(_ids)
     records = [
@@ -1597,19 +1818,19 @@ async def output_subcatch_results(
     require_new_engine(session, "Output reader subcatchment results")
 
     reader = await _ensure_output_reader(session)
-    n_periods = await asyncio.to_thread(reader.get_period_count)
+    n_periods = await asyncio.to_thread(lambda: reader.period_count)
     if not 0 <= period < n_periods:
         raise ToolError(
             f"[{ErrorCode.VALIDATION_ERROR}] period must be in [0, {n_periods}); got {period}."
         )
 
     var_enum = _resolve_subcatch_var(variable)
-    n_sub = await asyncio.to_thread(reader.get_subcatch_count)
-    arr = await asyncio.to_thread(reader.get_subcatch_result, period, var_enum)
+    n_sub = await asyncio.to_thread(lambda: reader.subcatchment_count)
+    arr = await asyncio.to_thread(reader.subcatchment_result, period, var_enum)
     values = ndarray_to_list(arr)
 
     def _ids() -> list[str]:
-        return [reader.get_subcatch_id(i) for i in range(n_sub)]
+        return [reader.subcatchment_ids[i] for i in range(n_sub)]
 
     ids = await asyncio.to_thread(_ids)
     records = [

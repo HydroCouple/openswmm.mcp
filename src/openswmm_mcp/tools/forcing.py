@@ -13,7 +13,7 @@ import logging
 from fastmcp import Context, FastMCP
 
 from openswmm_mcp.dependencies import get_session_manager, require_new_engine, require_state
-from openswmm_mcp.errors import ErrorCode, ToolError
+from openswmm_mcp.errors import ErrorCode, ToolError, resolve_index
 from openswmm_mcp.models import ForcingResult
 
 logger = logging.getLogger(__name__)
@@ -25,29 +25,39 @@ forcing_mcp = FastMCP("forcing")
 # Helpers
 # ---------------------------------------------------------------------------
 
-# Valid (target_type, variable) -> Forcing method name
+# Valid (target_type, variable) -> Forcing method name (v1 names).
+# Legacy backend's _LegacyForcing exposes both v0 (subcatch_*) and v1
+# (subcatchment_*) names via alias so this mapping works on either.
 _FORCING_DISPATCH: dict[tuple[str, str], str] = {
     ("node", "lateral_inflow"): "node_lat_inflow",
     ("node", "head"): "node_head_boundary",
     ("node", "quality"): "node_quality",
     ("link", "flow"): "link_flow",
     ("link", "setting"): "link_setting",
-    ("subcatchment", "rainfall"): "subcatch_rainfall",
-    ("subcatchment", "evap"): "subcatch_evap",
+    ("subcatchment", "rainfall"): "subcatchment_rainfall",
+    ("subcatchment", "evap"): "subcatchment_evap",
+    ("subcatchment", "snowfall"): "subcatchment_snowfall",
     ("gage", "rainfall"): "gage_rainfall",
 }
 
 _VALID_VARIABLES_BY_TYPE: dict[str, list[str]] = {
     "node": ["lateral_inflow", "head", "quality"],
     "link": ["flow", "setting"],
-    "subcatchment": ["rainfall", "evap"],
+    "subcatchment": ["rainfall", "evap", "snowfall"],
     "gage": ["rainfall"],
 }
 
 
 def _resolve_forcing_mode(mode: str) -> int:
-    """Map a human-readable mode string to the ForcingMode enum value."""
-    mapping = {"replace": 0, "add": 1}
+    """Map a human-readable mode string to the ForcingMode enum value.
+
+    Mirrors ``openswmm.engine.ForcingMode`` (and the C ``SWMM_ForcingMode``):
+    ``REPLACE = 1``, ``ADD = 2`` — code ``0`` is the engine-internal
+    "no forcing" state and must never be sent. Returned as a plain int so
+    it cleanly accepts both the v1 ``ForcingMode`` IntEnum and the legacy
+    adapter's int param (the legacy adapter ignores ``mode`` entirely).
+    """
+    mapping = {"replace": 1, "add": 2}
     key = mode.strip().lower()
     if key not in mapping:
         raise ToolError(
@@ -57,10 +67,13 @@ def _resolve_forcing_mode(mode: str) -> int:
     return mapping[key]
 
 
-def _resolve_forcing_target(persist: bool) -> int:
-    """Map the persist boolean to the ForcingTarget enum value."""
-    # ForcingTarget: RESET=0, PERSIST=1
-    return 1 if persist else 0
+# v1 ForcingTarget enum codes — used by ``Forcing.clear(target, key)``.
+_FORCING_TARGET_CODES: dict[str, int] = {
+    "node": 0,        # ForcingTarget.NODE
+    "link": 1,        # ForcingTarget.LINK
+    "subcatchment": 2,  # ForcingTarget.SUBCATCH
+    "gage": 3,        # ForcingTarget.GAGE
+}
 
 
 # ---------------------------------------------------------------------------
@@ -96,7 +109,7 @@ async def set_forcing(
         The variable to override.  Valid choices depend on *target_type*:
         node (``"lateral_inflow"``, ``"head"``, ``"quality"``),
         link (``"flow"``, ``"setting"``),
-        subcatchment (``"rainfall"``, ``"evap"``),
+        subcatchment (``"rainfall"``, ``"evap"``, ``"snowfall"``),
         gage (``"rainfall"``).
     value:
         The forcing value to apply.
@@ -133,9 +146,10 @@ async def set_forcing(
     method_name = _FORCING_DISPATCH[dispatch_key]
 
     forcing_mode = _resolve_forcing_mode(mode)
-    forcing_target = _resolve_forcing_target(persist)
+    persist_flag = bool(persist)
 
-    # Forcing methods take integer element indices, not string IDs.
+    # Forcing methods accept either int index or str id in v1; resolve to
+    # int for consistency with legacy adapter which expects int.
     _accessor_map = {
         "node": "nodes",
         "link": "links",
@@ -143,22 +157,29 @@ async def set_forcing(
         "gage": "gages",
     }
     accessor = getattr(session, _accessor_map[target_lower])
-    element_idx = await asyncio.to_thread(accessor.get_index, element_id)
-    if element_idx < 0:
-        raise ToolError(
-            f"[{ErrorCode.ELEMENT_NOT_FOUND}] {target_lower.capitalize()} '{element_id}' not found."
-        )
+    # get_index raises ElementNotFoundError (KeyError subclass), never -1.
+    element_idx = await resolve_index(accessor, element_id, target_lower.capitalize())
 
     forcing = session.forcing
+    value_f = float(value)
 
     try:
         method = getattr(forcing, method_name)
+        # v1 Forcing methods use keyword-only ``mode`` and ``persist``.
         if var_lower == "quality":
-            # node_quality requires an additional pollutant_idx argument;
-            # default to pollutant index 0
-            await asyncio.to_thread(method, element_idx, 0, value, forcing_mode, forcing_target)
+            # node_quality(node, pollutant, mass_rate, *, mode=..., persist=...)
+            # — defaults pollutant index to 0.
+            await asyncio.to_thread(
+                lambda: method(
+                    element_idx, 0, value_f, mode=forcing_mode, persist=persist_flag
+                )
+            )
         else:
-            await asyncio.to_thread(method, element_idx, value, forcing_mode, forcing_target)
+            await asyncio.to_thread(
+                lambda: method(
+                    element_idx, value_f, mode=forcing_mode, persist=persist_flag
+                )
+            )
     except NotImplementedError as exc:
         raise ToolError(
             f"[{ErrorCode.NOT_SUPPORTED}] Forcing variable '{var_lower}' on "
@@ -177,6 +198,254 @@ async def set_forcing(
         mode=mode.strip().lower(),
         persist=persist,
     )
+
+
+@forcing_mcp.tool()
+async def set_link_quality(
+    ctx: Context,
+    session_id: str = "default",
+    link_id: str = "",
+    pollutant: str = "",
+    value: float = 0.0,
+    mode: str = "replace",
+    persist: bool = False,
+) -> dict:
+    """Force a pollutant concentration on a link (RUNNING state only).
+
+    Overrides the in-link concentration of a single pollutant for the
+    current (and, with ``persist=True``, future) timesteps. The
+    element-keyed :func:`set_forcing` covers node quality but not link
+    quality, so this is the dedicated link-quality forcing tool.
+
+    Link quality forcing is a v1-only capability and requires the
+    ``openswmm`` backend.
+
+    Parameters
+    ----------
+    session_id:
+        Target simulation session.
+    link_id:
+        The name or index of the link.
+    pollutant:
+        The name or index of the pollutant.
+    value:
+        The concentration to apply (model concentration units).
+    mode:
+        ``"replace"`` (default) overwrites the computed value;
+        ``"add"`` adds to it.
+    persist:
+        If ``True`` the override persists across timesteps; otherwise it
+        resets after each step.
+    """
+    sm = get_session_manager(ctx)
+    session = await sm.get_session(session_id)
+    require_new_engine(session, "Link quality forcing")
+    require_state(session, "running")
+
+    forcing_mode = _resolve_forcing_mode(mode)
+    persist_flag = bool(persist)
+    value_f = float(value)
+
+    # ``get_index`` raises ElementNotFoundError (a KeyError subclass) for an
+    # unknown id; ``resolve_index`` translates that into a clean ToolError
+    # (it never returns a -1 sentinel).
+    link_idx = await resolve_index(session.links, link_id, "Link")
+    pollut_idx = await resolve_index(session.pollutants, pollutant, "Pollutant")
+
+    forcing = session.forcing
+
+    # v1: Forcing.link_quality(link, pollutant, value, *, mode=..., persist=...).
+    try:
+        await asyncio.to_thread(
+            lambda: forcing.link_quality(
+                link_idx, pollut_idx, value_f, mode=forcing_mode, persist=persist_flag
+            )
+        )
+    except Exception as exc:
+        raise ToolError(
+            f"[{ErrorCode.ENGINE_ERROR}] Failed to set link quality forcing: {exc}"
+        ) from exc
+
+    return {
+        "status": "applied",
+        "session_id": session_id,
+        "link_id": link_id,
+        "pollutant": pollutant,
+        "value": value,
+        "mode": mode.strip().lower(),
+        "persist": persist,
+    }
+
+
+@forcing_mcp.tool()
+async def get_climate_evap_rate(ctx: Context, session_id: str = "default") -> dict:
+    """Return the current climate-derived evaporation rate (read-only).
+
+    Reports the broadcast potential-evapotranspiration rate the engine would
+    apply in the absence of any PET forcing, including monthly adjustments,
+    in user units (in/day for US projects, mm/day for SI). Intended for
+    caller-side composition: read this rate, apply your own adjustment
+    logic, and prescribe the result via ``forcing_set_forcing`` with
+    ``target_type="subcatchment"`` and ``variable="evap"``.
+    """
+    sm = get_session_manager(ctx)
+    session = await sm.get_session(session_id)
+    require_new_engine(session, "Climate evaporation-rate read-back")
+    require_state(session, "running")
+
+    forcing = session.forcing
+    rate = await asyncio.to_thread(forcing.climate_evap_rate)
+    return {
+        "session_id": session_id,
+        "evap_rate": rate,
+        "units": "in/day (US) or mm/day (SI)",
+    }
+
+
+# Model-global climate forcing: (variable -> (setter, getter or None)).
+# These are not element-keyed, so they get a dedicated tool rather than
+# riding set_forcing's (target_type, element_id) dispatch.
+_CLIMATE_SETTERS: dict[str, str] = {
+    "temperature": "climate_temperature",
+    "wind": "climate_wind",
+    "evap": "climate_evap",
+}
+
+
+@forcing_mcp.tool()
+async def set_climate_forcing(
+    ctx: Context,
+    session_id: str = "default",
+    variable: str = "",
+    value: float = 0.0,
+    mode: str = "replace",
+    persist: bool = False,
+) -> dict:
+    """Apply a model-global climate forcing override.
+
+    Overrides a climate input that applies to the whole model (not a single
+    element): air temperature, wind speed, or potential evaporation. These
+    feed snowmelt, evaporation, and other climate-driven processes from the
+    next step on.
+
+    Climate forcing is a v1-only capability and requires the ``openswmm``
+    backend.
+
+    Parameters
+    ----------
+    session_id:
+        Target simulation session.
+    variable:
+        ``"temperature"`` (air temperature, project units),
+        ``"wind"`` (wind speed, project units), or
+        ``"evap"`` (potential evaporation rate, in/day US or mm/day SI).
+    value:
+        The forcing value to apply.
+    mode:
+        ``"replace"`` (default) overwrites the climate-derived value;
+        ``"add"`` adds to it.
+    persist:
+        If ``True`` the override persists across timesteps; otherwise it
+        resets after each step.
+    """
+    sm = get_session_manager(ctx)
+    session = await sm.get_session(session_id)
+    require_new_engine(session, "Climate forcing")
+    require_state(session, "running")
+
+    var_lower = variable.strip().lower()
+    method_name = _CLIMATE_SETTERS.get(var_lower)
+    if method_name is None:
+        raise ToolError(
+            f"[{ErrorCode.VALIDATION_ERROR}] Invalid climate variable '{variable}'. "
+            f"Must be one of: {', '.join(_CLIMATE_SETTERS)}"
+        )
+
+    forcing_mode = _resolve_forcing_mode(mode)
+    persist_flag = bool(persist)
+    value_f = float(value)
+
+    try:
+        method = getattr(forcing := session.forcing, method_name)
+        await asyncio.to_thread(
+            lambda: method(value_f, mode=forcing_mode, persist=persist_flag)
+        )
+    except Exception as exc:
+        raise ToolError(
+            f"[{ErrorCode.ENGINE_ERROR}] Failed to set climate forcing: {exc}"
+        ) from exc
+
+    return {
+        "status": "applied",
+        "session_id": session_id,
+        "variable": var_lower,
+        "value": value,
+        "mode": mode.strip().lower(),
+        "persist": persist,
+    }
+
+
+@forcing_mcp.tool()
+async def set_climate_dry_only(
+    ctx: Context,
+    session_id: str = "default",
+    flag: bool = True,
+) -> dict:
+    """Toggle the climate "evaporate only during dry weather" rule.
+
+    When enabled, evaporation is suppressed during rainfall periods. Requires
+    the ``openswmm`` backend; takes effect on the next step.
+
+    Parameters
+    ----------
+    session_id:
+        Target simulation session.
+    flag:
+        ``True`` suppresses evaporation during rainfall; ``False`` allows it.
+    """
+    sm = get_session_manager(ctx)
+    session = await sm.get_session(session_id)
+    require_new_engine(session, "Climate dry-only toggle")
+    require_state(session, "running")
+
+    flag_b = bool(flag)
+    try:
+        forcing = session.forcing
+        await asyncio.to_thread(lambda: forcing.climate_dry_only(flag_b))
+    except Exception as exc:
+        raise ToolError(
+            f"[{ErrorCode.ENGINE_ERROR}] Failed to set dry-only flag: {exc}"
+        ) from exc
+
+    return {"status": "applied", "session_id": session_id, "dry_only": flag_b}
+
+
+@forcing_mcp.tool()
+async def get_climate_state(ctx: Context, session_id: str = "default") -> dict:
+    """Read back the current climate inputs (read-only).
+
+    Returns the air temperature, wind speed, dry-only flag, and the
+    climate-derived evaporation rate the engine is currently using (after any
+    forcing). Requires the ``openswmm`` backend.
+    """
+    sm = get_session_manager(ctx)
+    session = await sm.get_session(session_id)
+    require_new_engine(session, "Climate state read-back")
+    require_state(session, "running")
+
+    forcing = session.forcing
+    temp = await asyncio.to_thread(forcing.get_climate_temperature)
+    wind = await asyncio.to_thread(forcing.get_climate_wind_speed)
+    dry_only = await asyncio.to_thread(forcing.get_climate_dry_only)
+    evap_rate = await asyncio.to_thread(forcing.climate_evap_rate)
+    return {
+        "session_id": session_id,
+        "temperature": temp,
+        "wind_speed": wind,
+        "dry_only": bool(dry_only),
+        "evap_rate": evap_rate,
+        "units": "temperature/wind in project units; evap_rate in/day (US) or mm/day (SI)",
+    }
 
 
 @forcing_mcp.tool()
@@ -230,8 +499,8 @@ async def clear_forcing(
                 f"on each timestep. Use clear_forcing() with no arguments to "
                 f"clear all overrides at once."
             )
-        # clear(target_type_code, element_idx): NODE=0, LINK=1, SUBCATCH=2, GAGE=3
-        _type_codes = {"node": 0, "link": 1, "subcatchment": 2, "gage": 3}
+        # v1 ``Forcing.clear(target, key)`` takes a ForcingTarget enum code
+        # (NODE / LINK / SUBCATCH / GAGE) and an element key.
         _accessor_map = {
             "node": "nodes",
             "link": "links",
@@ -239,16 +508,11 @@ async def clear_forcing(
             "gage": "gages",
         }
         type_lower = target_type.strip().lower()
-        type_code = _type_codes.get(type_lower)
+        type_code = _FORCING_TARGET_CODES.get(type_lower)
         if type_code is None:
             raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] Unknown target_type '{target_type}'.")
         accessor = getattr(session, _accessor_map[type_lower])
-        element_idx = await asyncio.to_thread(accessor.get_index, element_id)
-        if element_idx < 0:
-            raise ToolError(
-                f"[{ErrorCode.ELEMENT_NOT_FOUND}] {type_lower.capitalize()} "
-                f"'{element_id}' not found."
-            )
+        element_idx = await resolve_index(accessor, element_id, type_lower.capitalize())
         await asyncio.to_thread(forcing.clear, type_code, element_idx)
         return {
             "status": "cleared",
@@ -289,9 +553,7 @@ async def set_link_control(
     require_state(session, "running")
     require_new_engine(session, "Link control rules")
 
-    link_idx = await asyncio.to_thread(session.links.get_index, link_id)
-    if link_idx < 0:
-        raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Link '{link_id}' not found.")
+    link_idx = await resolve_index(session.links, link_id, "Link")
 
     controls = session.controls
 
@@ -333,12 +595,15 @@ async def add_control_rule(
 
     controls = session.controls
 
+    def _append() -> int:
+        # v1 Controls is a MutableSequence — use append for new rules.
+        controls.append(rule_text)
+        return len(controls)
+
     try:
-        await asyncio.to_thread(controls.add_rule, rule_text)
+        rule_count = await asyncio.to_thread(_append)
     except Exception as exc:
         raise ToolError(f"[{ErrorCode.ENGINE_ERROR}] Failed to add control rule: {exc}") from exc
-
-    rule_count = await asyncio.to_thread(controls.count)
 
     return {
         "status": "added",
@@ -374,15 +639,19 @@ async def set_rainfall_override(
     session = await sm.get_session(session_id)
     require_state(session, "running")
 
-    gage_idx = await asyncio.to_thread(session.gages.get_index, gage_id)
-    if gage_idx < 0:
-        raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Gage '{gage_id}' not found.")
+    gage_idx = await resolve_index(session.gages, gage_id, "Gage")
 
     forcing = session.forcing
+    rain_value = float(rainfall)
 
-    # ForcingMode.REPLACE = 0, ForcingTarget.PERSIST = 1
+    # v1: mode/persist are keyword-only; REPLACE (ForcingMode code 1) +
+    # persist=True for a sticky override.
     try:
-        await asyncio.to_thread(forcing.gage_rainfall, gage_idx, rainfall, 0, 1)
+        await asyncio.to_thread(
+            lambda: forcing.gage_rainfall(
+                gage_idx, rain_value, mode=_resolve_forcing_mode("replace"), persist=True
+            )
+        )
     except Exception as exc:
         raise ToolError(
             f"[{ErrorCode.ENGINE_ERROR}] Failed to set rainfall override: {exc}"
@@ -396,3 +665,76 @@ async def set_rainfall_override(
         "mode": "replace",
         "persist": True,
     }
+
+
+# ===========================================================================
+# Phase 4 — persistent-forcing convenience tool
+#
+# The generic ``set_forcing`` accepts ``persist=True``, but the parameter
+# is buried among several others.  For LLM workflows that explicitly want
+# a sticky override (rather than one-shot per-step injection), this
+# dedicated tool surfaces persistence as the headline behaviour.
+# ===========================================================================
+
+
+@forcing_mcp.tool()
+async def set_persistent_forcing(
+    ctx: Context,
+    session_id: str = "default",
+    target_type: str = "",
+    element_id: str = "",
+    variable: str = "",
+    value: float = 0.0,
+    mode: str = "replace",
+) -> ForcingResult:
+    """Apply a forcing override that **persists across timesteps**.
+
+    Equivalent to :func:`set_forcing` with ``persist=True``, surfaced as
+    its own tool so an LLM doesn't have to know about the persist flag
+    to get a sticky override.  Use :func:`clear_forcing` to remove the
+    override later.
+
+    Sticky overrides are a v1-only capability — they require the new
+    engine.  On the legacy backend the call is rejected with
+    ``NOT_SUPPORTED`` because legacy resets API values every step
+    automatically.
+
+    Parameters
+    ----------
+    target_type:
+        ``"node"`` / ``"link"`` / ``"subcatchment"`` / ``"gage"``.
+    element_id:
+        Element ID (string) or numeric index as a string.
+    variable:
+        Variable to override.  Same set as :func:`set_forcing`:
+        node ``lateral_inflow`` / ``head`` / ``quality``;
+        link ``flow`` / ``setting``;
+        subcatchment ``rainfall`` / ``evap``;
+        gage ``rainfall``.
+    value:
+        The forced value (units match the variable).
+    mode:
+        ``"replace"`` (default) overwrites the computed value;
+        ``"add"`` adds to it.
+    """
+    sm = get_session_manager(ctx)
+    session = await sm.get_session(session_id)
+    if session.engine_kind != "openswmm":
+        raise ToolError(
+            f"[{ErrorCode.NOT_SUPPORTED}] Persistent forcing requires the "
+            f"openswmm backend; on legacy, values reset on each timestep. "
+            f"Use set_forcing() with persist=False or switch backends."
+        )
+
+    # Delegate to set_forcing with persist=True so we don't duplicate the
+    # validation + dispatch logic.
+    return await set_forcing(
+        ctx,
+        session_id=session_id,
+        target_type=target_type,
+        element_id=element_id,
+        variable=variable,
+        value=value,
+        mode=mode,
+        persist=True,
+    )

@@ -1,0 +1,104 @@
+name: Documentation
+
+on:
+  push:
+    branches: [main, dev]
+    tags: ["v*.*.*"]
+    paths:
+      - "docs/**"
+      - "src/openswmm_mcp/**"
+      - "README.md"
+      - "CHANGELOG.md"
+      - ".github/workflows/documentation.yml"
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - "docs/**"
+      - "src/openswmm_mcp/**"
+      - "README.md"
+      - "CHANGELOG.md"
+      - ".github/workflows/documentation.yml"
+  workflow_dispatch:
+
+# Allow only one concurrent deployment. Do NOT cancel in-progress runs so
+# that production deployments always complete. Mirrors openswmm.engine
+# documentation.yml.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Job 1 — Build Sphinx documentation
+# ─────────────────────────────────────────────────────────────────────────────
+jobs:
+  build:
+    name: Build Sphinx HTML
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install docs + package extras
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[docs]"
+
+      - name: Build Sphinx HTML (strict, fail on warning)
+        run: sphinx-build -b html -W --keep-going docs docs/_build/html
+
+      - name: Upload HTML artefact
+        uses: actions/upload-artifact@v5
+        with:
+          name: sphinx-html
+          path: docs/_build/html/
+          retention-days: 7
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Job 2 — Deploy to GitHub Pages
+#
+# Mirrors the openswmm.engine pattern: the `environment.url` output is
+# bound to `${{ steps.deployment.outputs.page_url }}` so the deployed
+# URL appears as a clickable link in the Actions UI, in PR checks, and
+# in the repository's "Environments" panel.
+# ─────────────────────────────────────────────────────────────────────────────
+  deploy:
+    name: Deploy to GitHub Pages
+    if: |
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      && (github.ref == 'refs/heads/main'
+          || github.ref == 'refs/heads/dev'
+          || startsWith(github.ref, 'refs/tags/v'))
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      pages: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Download Sphinx HTML
+        uses: actions/download-artifact@v5
+        with:
+          name: sphinx-html
+          path: site/
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artefact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: site/openswmm.mcp/
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
