@@ -117,6 +117,15 @@ downstream operational optimization.
    Spare capacity *concurrent with* flooding elsewhere indicates spatial
    maldistribution — opportunities for diversion, in-system storage, or control
    changes. Tabulate the idle volume/conveyance available during peak stress.
+   Build **system-wide available-capacity time series**, one per commodity, on
+   the same time base as the flooding series:
+   - **Conveyance** — remaining flow capacity, e.g. Σ over conduits of
+     `(1 − hmax/Hmax)` weighted by full-flow capacity (from link depth/flow
+     series).
+   - **Storage** — total free volume, Σ over storage units of
+     `(max_volume − current_volume)` (node depth + storage curve).
+   - **Treatment** — spare throughput at `TREATED` facilities,
+     `Σ (capacity − current_throughput)`.
 4. **Uncontrolled-discharge analysis:** identify outfall nodes lacking the
    treatment tag via `nodes_get_tag` (confirm the outfall set with
    `nodes_get_outfall_type` / `nodes_get_outfall_route_to`). For each untreated
@@ -124,10 +133,20 @@ downstream operational optimization.
    flood/overflow windows. Report total uncontrolled release volume and its
    timing relative to system stress.
 
-Produce Plotly time-series figures: system flooding/overflow hydrograph with
-adverse-event windows shaded; stressed-asset depth/flow series; and untreated-
-outfall discharge overlaid on the stress windows. → verify: idle-capacity table
-and uncontrolled-release volume are quantified, not just described.
+Produce Plotly time-series figures. The primary figure is a **linked,
+shared-x-axis two-panel chart** (`make_subplots(rows=2, shared_xaxes=True)`) so
+the two panels pan/zoom together and are read at the same instant:
+
+- **Top panel** — system flooding/overflow hydrograph with adverse-event
+  windows shaded, and untreated-outfall discharge overlaid.
+- **Bottom panel** — available **conveyance, storage, and treatment** capacity
+  (the three series above), so idle capacity is visible directly beneath the
+  flooding it coincides with.
+
+Shade the same adverse-event windows across both panels. Also produce
+stressed-asset depth/flow series. → verify: the linked panels share one x-axis,
+and the idle-capacity table and uncontrolled-release volume are quantified, not
+just described.
 
 ### 4. Deliverable
 
@@ -139,11 +158,45 @@ include_plotlyjs=...)` so the file opens standalone). Structure:
 2. Macro assessment — flooding, storage utilization, hmax/Hmax distribution.
 3. Granular assessment — constrained-asset register + network maps.
 4. Temporal assessment — adverse-event timing, idle-capacity table, and
-   uncontrolled-discharge volumes.
-5. Methods & thresholds — the exact threshold values used this run.
+   uncontrolled-discharge volumes (delivered as the interactive dashboard).
+5. Hydraulic grade line — animated HGL profiles along key trunk paths
+   (invert/crown/HGL/rim vs distance over the storm).
+6. Volume & mass routing — Sankey of inflow → storage / conveyed / treated /
+   untreated / flooded / infiltration, with continuity error.
+7. Duration & velocity — utilization exceedance/duration curves and
+   self-cleansing/scour velocity screening.
+8. Risk & level-of-service — pass/fail KPI scorecard and an asset criticality
+   ranking (peak utilization × duration × consequence).
+9. Infrastructure recommendations — auto-generated improvements (conduit
+   upsizing / parallel relief, storage/detention sizing, green-infrastructure
+   / LID, and an RTC-vs-capital comparison that links to
+   operational-optimization), each traced to the diagnostic that triggered it,
+   roughly sized, and re-simulated to quantify benefit where feasible.
+10. Methods & thresholds — the exact threshold values used this run.
 
-Also export the constrained-asset register and temporal tables as CSV
-(`analysis_export_results` and/or written directly) alongside the HTML.
+Also export the constrained-asset register, temporal tables, and the
+recommendations register as CSV (`analysis_export_results` and/or written
+directly) alongside the HTML.
+
+These sections are delivered as the **multi-tab interactive dashboard** (see
+Reference files), not just static figures.
+
+## Reference files
+
+In this skill's `references/` folder:
+
+- `capacity_dashboard.template.html` — a self-contained interactive dashboard:
+  a clickable network map (click a conduit/node to chart its utilization
+  against the global undesired state), a time slider + play that recolors the
+  map at time *t* and moves a linked cursor on the time series, an
+  adverse-condition banner, and selected-asset chips. Build the dashboard by
+  injecting two things into the template's placeholders: `__PLOTLY_JS__`
+  (inline `plotly.min.js` for offline use, or a CDN `<script>` tag) and
+  `__DATA_JSON__` (`json.dumps(DATA)`).
+- `DASHBOARD.md` — the `DATA` contract the template expects (time base,
+  event windows, global-state series, and per-node/per-link `util`/`avail`
+  series). Compute these from the analysis tools and the available-capacity
+  series defined in the temporal step.
 
 ## Guardrails
 

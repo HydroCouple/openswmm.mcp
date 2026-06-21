@@ -164,6 +164,22 @@ only) in the output folder:
 5. Tuning (if run) — the interactive Pareto front and the selected config.
 6. Methods — objective weights, constraints, and all parameters used this run.
 
+Deliver the **results as the multi-tab interactive dashboard** (see Reference
+files): the Pareto front is clickable, and selecting a configuration updates the
+objective costs, cost-savings and reduction KPIs, and the linked
+baseline-vs-optimized macro and granular time series together. Additional tabs:
+
+7. Cost-benefit / ROI — capital + O&M vs damages/CSO-penalty/energy avoided,
+   with payback and NPV.
+8. Multi-objective trade-offs — parallel-coordinates across all four objectives;
+   selecting a Pareto point isolates its line.
+9. Control explainability — actuator-setting and buyer/seller price-differential
+   timelines, plus an asset×time capacity-price heatmap (which assets traded
+   capacity, and when each gate/pump acted).
+10. Robustness — the selected configuration re-evaluated across a storm ensemble,
+    with a reliability summary, so a one-storm winner is not mistaken for a
+    recommendation.
+
 Persist the market config and tuned parameters as JSON, export the iteration/
 Pareto evaluations as CSV, and write the controlled model to a **new** `.inp`
 (`building_write_model`) — never overwrite the original.
@@ -183,6 +199,13 @@ Start from these bundled templates instead of improvising the config each run
   where the MCP tool calls plug in (bulk state read / `links_set_target_setting`
   / `lifecycle_stride`). Reuse this logic for the gym env or the outer NSGA-II
   loop so tuning scores the same controller it ships.
+- `references/optimization_dashboard.template.html` — the interactive results
+  dashboard (clickable Pareto front → objective/cost-savings panels, reduction
+  KPIs, and linked baseline-vs-optimized macro/granular time series). Build it by
+  injecting `__PLOTLY_JS__` and `__DATA_JSON__` into the template's placeholders.
+- `DASHBOARD.md` — the `DATA` contract the dashboard expects (baseline +
+  per-config objectives, costs, savings, macro/granular series, and event
+  windows).
 
 ## Guardrails
 
