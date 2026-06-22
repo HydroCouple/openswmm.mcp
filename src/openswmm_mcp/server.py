@@ -33,6 +33,7 @@ mcp = FastMCP(
 from openswmm_mcp.tools import gym_runs, gym_scoring  # noqa: E402, F401  (register on gym_mcp)
 from openswmm_mcp.tools.analysis import analysis_mcp  # noqa: E402
 from openswmm_mcp.tools.building import building_mcp  # noqa: E402
+from openswmm_mcp.tools.climate import climate_mcp  # noqa: E402
 from openswmm_mcp.tools.controls import controls_mcp  # noqa: E402
 from openswmm_mcp.tools.datetime_tools import datetime_mcp  # noqa: E402
 from openswmm_mcp.tools.editing import editing_mcp  # noqa: E402
@@ -66,6 +67,7 @@ mcp.mount(geopackage_mcp, namespace="geopackage")
 mcp.mount(tables_mcp, namespace="tables")
 mcp.mount(inflows_mcp, namespace="inflows")
 mcp.mount(controls_mcp, namespace="controls")
+mcp.mount(climate_mcp, namespace="climate")
 mcp.mount(infrastructure_mcp, namespace="infrastructure")
 mcp.mount(nodes_mcp, namespace="nodes")
 mcp.mount(links_mcp, namespace="links")
