@@ -41,10 +41,13 @@ _EVAP_METHODS: dict[str, int] = {
     "constant": 0, "monthly": 1, "timeseries": 2, "temperature": 3, "file": 4,
 }
 _WIND_SOURCES: dict[str, int] = {"monthly": 0, "file": 1}
+# Climate-file temperature units (legacy [TEMPERATURE] FILE keyword). -1 = auto.
+_TEMP_UNITS: dict[str, int] = {"auto": -1, "c10": 0, "c": 1, "f": 2}
 
 _TEMP_SOURCE_NAMES = {v: k for k, v in _TEMP_SOURCES.items()}
 _EVAP_METHOD_NAMES = {v: k for k, v in _EVAP_METHODS.items()}
 _WIND_SOURCE_NAMES = {v: k for k, v in _WIND_SOURCES.items()}
+_TEMP_UNITS_NAMES = {v: k for k, v in _TEMP_UNITS.items()}
 
 _MONTHS = 12
 _ADC_POINTS = 10
@@ -135,6 +138,7 @@ async def get_climate_config(ctx: Context, session_id: str = "default") -> dict:
                 "source": _TEMP_SOURCE_NAMES.get(c.temp_source, c.temp_source),
                 "timeseries": c.temp_timeseries,
                 "file_start": c.temp_file_start,
+                "file_units": _TEMP_UNITS_NAMES.get(c.temp_units, c.temp_units),
                 "elevation": c.elevation,
                 "latitude": c.latitude,
                 "longitude_correction_min": c.longitude_correction,
@@ -189,10 +193,12 @@ async def set_temperature_config(
     latitude: float | None = None,
     longitude_correction_min: float | None = None,
     file_start: float | None = None,
+    file_units: str | int | None = None,
 ) -> dict:
     """Edit [TEMPERATURE] config. ``source`` is none/timeseries/file. Setting
     ``timeseries`` also switches the source to TIMESERIES. ``latitude`` must be
     in [-90, 90]; ``longitude_correction_min`` is minutes of solar-time offset.
+    ``file_units`` is the climate-file temperature units: auto/c10/c/f.
     """
     _, c = await _editable_climate(ctx, session_id)
     changed: list[str] = []
@@ -204,6 +210,9 @@ async def set_temperature_config(
         if timeseries is not None:
             c.temp_timeseries = timeseries
             changed.append("timeseries")
+        if file_units is not None:
+            c.temp_units = _coerce_enum(file_units, _TEMP_UNITS, "temperature file units")
+            changed.append("file_units")
         if elevation is not None:
             c.elevation = float(elevation); changed.append("elevation")
         if latitude is not None:
