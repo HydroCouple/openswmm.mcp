@@ -44,12 +44,27 @@ async def server_lifespan(server) -> AsyncIterator[dict]:
         working_dir=settings.working_dir,
     )
 
+    # 3b. Create the managers that own interactive gym envs and
+    #     background optimization jobs (gym_env_* / gym_*_job tools)
+    from openswmm_mcp.gym_support.envs import EnvManager
+    from openswmm_mcp.gym_support.jobs import JobManager
+
+    env_manager = EnvManager()
+    job_manager = JobManager()
+
     # 4. Yield the context dict so tools can access shared state
     try:
-        yield {"session_manager": session_manager, "settings": settings}
+        yield {
+            "session_manager": session_manager,
+            "settings": settings,
+            "env_manager": env_manager,
+            "job_manager": job_manager,
+        }
     finally:
         # 5. Cleanup on shutdown
         logger.info("OpenSWMM MCP server shutting down -- cleaning up sessions")
+        job_manager.shutdown()
+        env_manager.close_all()
         await session_manager.cleanup_all()
 
 
@@ -110,6 +125,40 @@ def get_settings(ctx: Context) -> ServerSettings:
         ) from exc
 
 
+def get_env_manager(ctx: Context):
+    """Extract the gym C{EnvManager} from the FastMCP lifespan context.
+
+    @param ctx: The FastMCP L{Context} injected into a tool handler.
+    @type ctx: L{Context}
+    @return: The shared interactive-env manager.
+    @rtype: L{EnvManager<openswmm_mcp.gym_support.envs.EnvManager>}
+    @raise ToolError: If the env manager is not available in the context.
+    """
+    try:
+        return ctx.lifespan_context["env_manager"]
+    except (KeyError, TypeError) as exc:
+        raise ToolError(
+            "Gym env manager is not available. The server may not have started correctly."
+        ) from exc
+
+
+def get_job_manager(ctx: Context):
+    """Extract the gym C{JobManager} from the FastMCP lifespan context.
+
+    @param ctx: The FastMCP L{Context} injected into a tool handler.
+    @type ctx: L{Context}
+    @return: The shared background-optimization job manager.
+    @rtype: L{JobManager<openswmm_mcp.gym_support.jobs.JobManager>}
+    @raise ToolError: If the job manager is not available in the context.
+    """
+    try:
+        return ctx.lifespan_context["job_manager"]
+    except (KeyError, TypeError) as exc:
+        raise ToolError(
+            "Gym job manager is not available. The server may not have started correctly."
+        ) from exc
+
+
 def require_state(session, *valid_states: str) -> None:
     """Assert that *session* is in one of *valid_states*.
 
@@ -161,5 +210,36 @@ def require_new_engine(session, feature: str) -> None:
     if kind != "openswmm":
         raise ToolError(
             f"[{ErrorCode.NOT_SUPPORTED}] {feature} requires the new openswmm "
-            f"engine; this session was opened with engine='{kind}'."
+            f"engine; this session was opened with engine='{kind}'. "
+            f"Re-open the model with engine='openswmm' (the default) to use "
+            f"spatial/geometry and other new-engine tools."
         )
+
+
+def require_gymnasium(feature: str = "This tool") -> None:
+    """Assert that the optional C{openswmm.gymnasium} package is importable.
+
+    Gym tool modules import C{openswmm_gymnasium} lazily so the server
+    starts cleanly without the C{gym} extra; this guard converts the
+    eventual C{ImportError} into an actionable C{ToolError} instead.
+
+    @param feature: Human-readable name of the feature being requested,
+        used in the error message (e.g. C{"gym_run_episode"}).
+    @type feature: str
+    @raise ToolError: With code
+        L{ErrorCode.DEPENDENCY_MISSING<openswmm_mcp.errors.ErrorCode>}
+        when C{openswmm_gymnasium} cannot be imported.
+    @return: C{None}
+    @rtype: C{None}
+    @author: Caleb Buahin
+    """
+    from openswmm_mcp.errors import ErrorCode
+
+    try:
+        import openswmm_gymnasium  # noqa: F401
+    except ImportError as exc:
+        raise ToolError(
+            f"[{ErrorCode.DEPENDENCY_MISSING}] {feature} requires the optional "
+            "openswmm.gymnasium package. Install it with: "
+            "pip install 'openswmm.mcp[gym]'"
+        ) from exc

@@ -23,6 +23,9 @@ EXPECTED_KINDS = {
         "peak_outflow",
         "reliability_margin",
         "setpoint_smoothness",
+        "uncontrolled_discharge",
+        "storage_underutilization",
+        "pump_energy",
     },
     "runtime_factory": {"orifice_setting", "node_lateral_inflow"},
     "design_factory": {

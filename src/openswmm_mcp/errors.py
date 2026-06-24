@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import traceback
 from typing import Any
 
@@ -21,6 +22,13 @@ class ErrorCode:
     MAX_SESSIONS_REACHED: str = "MAX_SESSIONS_REACHED"
     NOT_SUPPORTED: str = "NOT_SUPPORTED"
     STALE_OBJECT: str = "STALE_OBJECT"
+    DEPENDENCY_MISSING: str = "DEPENDENCY_MISSING"
+    # Aliases used by the geopackage tool surface (which raises
+    # ``ToolError(ErrorCode.NOT_FOUND, msg)`` / ``ErrorCode.BAD_PARAM``);
+    # defined here so those error paths resolve instead of raising
+    # ``AttributeError``.
+    NOT_FOUND: str = "NOT_FOUND"
+    BAD_PARAM: str = "BAD_PARAM"
 
 
 # ---------------------------------------------------------------------------
@@ -46,6 +54,36 @@ except ImportError:  # pragma: no cover
 # ---------------------------------------------------------------------------
 # Helper
 # ---------------------------------------------------------------------------
+
+
+async def resolve_index(accessor: Any, element_id: Any, kind: str = "Element") -> int:
+    """Resolve a string element id to its engine index off the event loop.
+
+    The handle-based engine's ``get_index`` raises
+    :class:`~openswmm.engine.ElementNotFoundError` (a :class:`KeyError`
+    subclass) when an id is unknown; this translates that into a clean
+    ``ELEMENT_NOT_FOUND`` :class:`ToolError`.  Integer ids pass through
+    unchanged (callers may already hold an index).
+
+    :param accessor: An engine collection exposing ``get_index(id)``
+        (e.g. ``session.nodes`` / ``session.links``).
+    :param element_id: The id to resolve (``str``) or an existing index
+        (``int``).
+    :param kind: Human-readable element kind for the error message.
+    """
+    if isinstance(element_id, int):
+        return element_id
+    if not element_id:
+        _token = {"Node": "node_id", "Link": "link_id",
+                  "Subcatchment": "subcatch_id", "Gage": "gage_id",
+                  "Pollutant": "pollutant_id"}.get(kind, "element_id")
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] {_token} must not be empty.")
+    try:
+        return await asyncio.to_thread(accessor.get_index, element_id)
+    except KeyError:
+        raise ToolError(
+            f"[{ErrorCode.ELEMENT_NOT_FOUND}] {kind} '{element_id}' not found."
+        ) from None
 
 
 def engine_error_response(exc: BaseException) -> dict[str, Any]:

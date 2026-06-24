@@ -38,6 +38,7 @@ _OBS_METHODS: dict[str, str] = {
     "link_capacities": "add_link_capacities",
     "link_volumes": "add_link_volumes",
     "subcatch_runoff": "add_subcatch_runoff",
+    "subcatch_groundwater": "add_subcatch_groundwater",
     "rainfall_gages": "add_rainfall",
 }
 
@@ -62,6 +63,8 @@ class ObservationSpec(BaseModel):
     @ivar link_capacities: Link IDs contributing capacity features.
     @ivar link_volumes: Link IDs contributing volume features.
     @ivar subcatch_runoff: Subcatchment IDs contributing runoff features.
+    @ivar subcatch_groundwater: Subcatchment IDs contributing groundwater
+        (baseflow) features.
     @ivar rainfall_gages: Rain gage IDs contributing rainfall features.
     @ivar include_clock: Whether to append simulation-clock features.
     """
@@ -81,6 +84,7 @@ class ObservationSpec(BaseModel):
     link_capacities: list[str] = []
     link_volumes: list[str] = []
     subcatch_runoff: list[str] = []
+    subcatch_groundwater: list[str] = []
     rainfall_gages: list[str] = []
     include_clock: bool = False
 
@@ -197,9 +201,24 @@ class EnvConfig(BaseModel):
       - C{"cip"} -> C{SwmmCIPEnv}
       - C{"joint"} -> C{SwmmJointCIPRTCEnv}
       - C{"mo_rtc"} -> C{SwmmMORTCEnv}
+      - C{"market"} -> C{SwmmControlEnv} (tune a reactive market controller's
+        cost-curve + PID params; decision vector is the market policy space)
+      - C{"schedule"} -> C{SwmmControlEnv} (open-loop full-event optimal control;
+        decision vector is per-structure settings over the event)
 
     @ivar env_type: Which env class to construct.
     @ivar inp_path: Path to the SWMM C{.inp} driving each episode.
+    @ivar market_config: Market controller config dict (C{"market"} only,
+        required); see C{openswmm_gymnasium.config.MarketConfig}.
+    @ivar policy_bounds: Optional per-field search-bound overrides for the
+        market policy space (C{"market"} only).
+    @ivar tune_full: Also tune piecewise-linear C{full} knees (C{"market"} only).
+    @ivar control_interval_seconds: Control interval; required for C{"schedule"},
+        else overrides the market control interval.
+    @ivar structure_ids: Controllable link IDs (C{"schedule"} only, required).
+    @ivar n_points: Scheduled settings per structure (C{"schedule"} only, required).
+    @ivar schedule_bounds: Optional C{[low, high]} setting bounds (C{"schedule"}
+        only; default C{[0, 1]}).
     @ivar runtime_factories: Runtime (RTC) action factories.
     @ivar design_factories: Design (CIP) action factories.
     @ivar observations: Observation feature spec (must be non-empty).
@@ -216,7 +235,7 @@ class EnvConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    env_type: Literal["rtc", "cip", "joint", "mo_rtc"]
+    env_type: Literal["rtc", "cip", "joint", "mo_rtc", "market", "schedule"]
     inp_path: str
     runtime_factories: list[RuntimeFactorySpec] = []
     design_factories: list[DesignFactorySpec] = []
@@ -229,6 +248,13 @@ class EnvConfig(BaseModel):
     wrappers: list[WrapperSpec] = []
     rpt_path: str | None = None
     out_path: str | None = None
+    market_config: dict[str, Any] | None = None
+    policy_bounds: dict[str, list[float]] | None = None
+    tune_full: bool = False
+    control_interval_seconds: float | None = None
+    structure_ids: list[str] | None = None
+    n_points: int | None = None
+    schedule_bounds: list[float] | None = None
 
     @model_validator(mode="after")
     def _check_env_type_constraints(self) -> EnvConfig:
@@ -246,6 +272,32 @@ class EnvConfig(BaseModel):
             raise ValueError("observations must declare at least one feature")
         if self.control_interval_steps < 1:
             raise ValueError("control_interval_steps must be >= 1")
+
+        if self.env_type == "market":
+            if self.market_config is None:
+                raise ValueError("env_type 'market' requires market_config")
+            if self.design_factories or self.runtime_factories:
+                raise ValueError(
+                    "env_type 'market' does not accept design_factories or "
+                    "runtime_factories; the decision vector is the market policy"
+                )
+        elif self.market_config is not None:
+            raise ValueError("market_config is only valid for env_type 'market'")
+
+        if self.env_type == "schedule":
+            if not self.structure_ids or self.n_points is None:
+                raise ValueError("env_type 'schedule' requires structure_ids and n_points")
+            if self.n_points < 1:
+                raise ValueError("n_points must be >= 1")
+            if self.control_interval_seconds is None:
+                raise ValueError("env_type 'schedule' requires control_interval_seconds")
+            if self.design_factories or self.runtime_factories:
+                raise ValueError(
+                    "env_type 'schedule' does not accept design_factories or "
+                    "runtime_factories; the decision vector is the control schedule"
+                )
+        elif self.structure_ids is not None or self.n_points is not None:
+            raise ValueError("structure_ids/n_points are only valid for env_type 'schedule'")
 
         if self.env_type in ("cip", "joint") and not self.design_factories:
             raise ValueError(f"env_type '{self.env_type}' requires design_factories")
@@ -299,6 +351,7 @@ def build_env(config: EnvConfig) -> Any:
     try:
         from openswmm_gymnasium import (
             SwmmCIPEnv,
+            SwmmControlEnv,
             SwmmJointCIPRTCEnv,
             SwmmMORTCEnv,
             SwmmRTCEnv,
@@ -347,6 +400,44 @@ def build_env(config: EnvConfig) -> Any:
                 runtime_factories=runtime_factories,
                 **common,
                 **stepped,
+            )
+        elif config.env_type == "market":
+            from openswmm_gymnasium.config import MarketConfig
+            from openswmm_gymnasium.spaces import MarketPolicySpace
+
+            market = MarketConfig.from_dict(config.market_config)
+            market.validate()
+            bounds = (
+                {k: tuple(v) for k, v in config.policy_bounds.items()}
+                if config.policy_bounds
+                else None
+            )
+            policy_space = MarketPolicySpace.from_config(
+                market, bounds=bounds, tune_full=config.tune_full
+            )
+            env = SwmmControlEnv(
+                config.inp_path,
+                market_config=market,
+                policy_space=policy_space,
+                control_interval_seconds=config.control_interval_seconds,
+                **common,
+            )
+        elif config.env_type == "schedule":
+            from openswmm_gymnasium.control import ScheduleController
+            from openswmm_gymnasium.spaces import SchedulePolicySpace
+
+            structures = list(config.structure_ids)
+            lo, hi = (config.schedule_bounds or [0.0, 1.0])
+            policy_space = SchedulePolicySpace(
+                structures, config.n_points, low=float(lo), high=float(hi)
+            )
+            env = SwmmControlEnv(
+                config.inp_path,
+                policy_space=policy_space,
+                controller_factory=lambda sched: ScheduleController(structures, sched),
+                metric_reader_factory=None,
+                control_interval_seconds=config.control_interval_seconds,
+                **common,
             )
         else:  # "mo_rtc"
             env = SwmmMORTCEnv(

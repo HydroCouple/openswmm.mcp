@@ -112,16 +112,87 @@ class DesignDimension:
         return len(self.labels)
 
 
-def design_dimensions(env_config: EnvConfig) -> list[DesignDimension]:
-    """Derive labeled search-space dimensions from the design factories.
+def _market_dimensions(env_config: EnvConfig) -> list[DesignDimension]:
+    """Derive search dimensions from a market env's policy space.
 
-    @param env_config: Config whose C{design_factories} span the space.
+    Each tunable controller parameter (cost-curve onset/steepness/ceiling, PID
+    gains) becomes a single-component dimension carrying its own bounds.
+
+    @param env_config: A C{"market"} env config.
     @type env_config: L{EnvConfig}
-    @return: One entry per design factory, in config order.
     @rtype: list of L{DesignDimension}
-    @raise ToolError: C{VALIDATION_ERROR} when the config has no design
-        factories (nothing to optimize).
+    @raise ToolError: C{DEPENDENCY_MISSING} without the gym extra.
     """
+    try:
+        from openswmm_gymnasium.config import MarketConfig
+        from openswmm_gymnasium.spaces import MarketPolicySpace
+    except ImportError as exc:
+        raise ToolError(
+            f"[{ErrorCode.DEPENDENCY_MISSING}] Market optimization requires the "
+            "optional openswmm.gymnasium package. Install it with: "
+            "pip install 'openswmm.mcp[gym]'"
+        ) from exc
+
+    market = MarketConfig.from_dict(env_config.market_config)
+    market.validate()
+    bounds = (
+        {k: tuple(v) for k, v in env_config.policy_bounds.items()}
+        if env_config.policy_bounds
+        else None
+    )
+    space = MarketPolicySpace.from_config(market, bounds=bounds, tune_full=env_config.tune_full)
+    return [
+        DesignDimension(key=p.label, labels=(p.label,), low=p.low, high=p.high)
+        for p in space.params
+    ]
+
+
+def _schedule_dimensions(env_config: EnvConfig) -> list[DesignDimension]:
+    """Derive search dimensions from an open-loop control schedule.
+
+    Each per-structure scheduled setting becomes a single-component dimension.
+
+    @param env_config: A C{"schedule"} env config.
+    @type env_config: L{EnvConfig}
+    @rtype: list of L{DesignDimension}
+    @raise ToolError: C{DEPENDENCY_MISSING} without the gym extra.
+    """
+    try:
+        from openswmm_gymnasium.spaces import SchedulePolicySpace
+    except ImportError as exc:
+        raise ToolError(
+            f"[{ErrorCode.DEPENDENCY_MISSING}] Schedule optimization requires the "
+            "optional openswmm.gymnasium package. Install it with: "
+            "pip install 'openswmm.mcp[gym]'"
+        ) from exc
+
+    lo, hi = env_config.schedule_bounds or [0.0, 1.0]
+    space = SchedulePolicySpace(
+        env_config.structure_ids, env_config.n_points, low=float(lo), high=float(hi)
+    )
+    return [
+        DesignDimension(key=label, labels=(label,), low=float(space.low[i]), high=float(space.high[i]))
+        for i, label in enumerate(space.labels)
+    ]
+
+
+def design_dimensions(env_config: EnvConfig) -> list[DesignDimension]:
+    """Derive labeled search-space dimensions from the config.
+
+    For C{"market"}/C{"schedule"} configs the dimensions come from the
+    controller policy space; otherwise from the design factories.
+
+    @param env_config: Config whose factories / policy span the space.
+    @type env_config: L{EnvConfig}
+    @return: One entry per factory (or policy parameter), in config order.
+    @rtype: list of L{DesignDimension}
+    @raise ToolError: C{VALIDATION_ERROR} when the config has nothing to
+        optimize.
+    """
+    if env_config.env_type == "market":
+        return _market_dimensions(env_config)
+    if env_config.env_type == "schedule":
+        return _schedule_dimensions(env_config)
     if not env_config.design_factories:
         raise ToolError(
             f"[{ErrorCode.VALIDATION_ERROR}] Optimization requires an env "
@@ -247,6 +318,8 @@ class _Evaluator:
         self._dims = dims
         self._env = build_env(job.env_config)
         self._is_cip = job.env_config.env_type == "cip"
+        # market + schedule are single-step envs whose action is the raw vector.
+        self._is_policy_env = job.env_config.env_type in ("market", "schedule")
         self._directions = _term_directions(job.env_config)
         self.objective_names = list(self._directions)
         self.evaluations: list[dict[str, Any]] = []
@@ -287,7 +360,16 @@ class _Evaluator:
             raise _Cancelled()
         design = self._design_payload(vector)
 
-        if self._is_cip:
+        if self._is_policy_env:
+            # market/schedule: the action *is* the raw policy vector; one step
+            # runs the whole episode under the controller.
+            self._env.reset(seed=self._job.opt_config.seed)
+            _obs, _reward, terminated, truncated, info = self._env.step(
+                np.asarray(vector, dtype=np.float32)
+            )
+            components = dict(info.get("reward_components", {}))
+            steps = 1
+        elif self._is_cip:
             self._env.reset(seed=self._job.opt_config.seed)
             action = build_action(self._env.action_space, {"design": json_safe(design)})
             _obs, _reward, terminated, truncated, info = self._env.step(action)

@@ -22,7 +22,20 @@ from openswmm_mcp.dependencies import server_lifespan
 
 mcp = FastMCP(
     "OpenSWMM MCP Server",
-    instructions="SWMM stormwater engine tools for LLM-driven modeling workflows",
+    instructions=(
+        "SWMM stormwater engine tools for LLM-driven modeling workflows.\n\n"
+        "This server also bundles reusable Agent Skills -- multi-step expert "
+        "workflows that are NOT auto-loaded over MCP. Before improvising with raw "
+        "tools on a substantive request, check whether a skill applies: read the "
+        "`swmm://skills` resource (a JSON index of {name, description}); if one "
+        "matches the user's intent, load its full instructions via the "
+        "`use_skill(skill_name)` prompt and follow that workflow rather than "
+        "reinventing it. In particular: for capacity / constraint / bottleneck / "
+        "flooding-or-surcharge assessment and reporting, use `capacity-assessment` "
+        "(it drives the standard assessment + plotting/dashboard workflow); for "
+        "calibrating against observed data use `calibrate-model`; for real-time / "
+        "agent-based control tuning use `operational-optimization`."
+    ),
     lifespan=server_lifespan,
 )
 

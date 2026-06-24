@@ -102,6 +102,41 @@ class SetpointSmoothnessParams(_Params):
     name: str = "setpoint_smoothness"
 
 
+class UncontrolledDischargeParams(_Params):
+    """Params for the C{uncontrolled_discharge} reward term.
+
+    @ivar link_ids: Links discharging to untreated outfalls (required).
+    @ivar name: Term identifier.
+    """
+
+    link_ids: list[str] = Field(min_length=1)
+    name: str = "uncontrolled_discharge"
+
+
+class StorageUnderUtilizationParams(_Params):
+    """Params for the C{storage_underutilization} reward term.
+
+    @ivar node_ids: Storage node IDs (required).
+    @ivar name: Term identifier.
+    """
+
+    node_ids: list[str] = Field(min_length=1)
+    name: str = "storage_underutilization"
+
+
+class PumpEnergyParams(_Params):
+    """Params for the C{pump_energy} reward term.
+
+    @ivar link_ids: Pump link IDs (required).
+    @ivar rated_power: Optional C{{link_id: power}} (default 1.0 each).
+    @ivar name: Term identifier.
+    """
+
+    link_ids: list[str] = Field(min_length=1)
+    rated_power: dict[str, float] | None = None
+    name: str = "pump_energy"
+
+
 # -- runtime action factories ----------------------------------------------
 
 
@@ -312,6 +347,27 @@ for _spec in [
         "openswmm_gymnasium.rewards:SetpointSmoothness",
         SetpointSmoothnessParams,
         "Penalty on rapid link-setting changes (cost to minimize).",
+    ),
+    KindSpec(
+        "uncontrolled_discharge",
+        "reward_term",
+        "openswmm_gymnasium.rewards:UncontrolledDischarge",
+        UncontrolledDischargeParams,
+        "Discharge through links feeding untreated outfalls (cost to minimize).",
+    ),
+    KindSpec(
+        "storage_underutilization",
+        "reward_term",
+        "openswmm_gymnasium.rewards:StorageUnderUtilization",
+        StorageUnderUtilizationParams,
+        "Time-integrated unused storage headroom (cost to minimize).",
+    ),
+    KindSpec(
+        "pump_energy",
+        "reward_term",
+        "openswmm_gymnasium.rewards:PumpEnergy",
+        PumpEnergyParams,
+        "Pumping effort = setting x rated_power x dt (cost to minimize).",
     ),
     # runtime factories (openswmm_gymnasium.spaces.runtime)
     KindSpec(

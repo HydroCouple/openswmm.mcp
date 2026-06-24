@@ -368,6 +368,93 @@ def _pick_evaluation(results: dict[str, Any], output_dir: str, evaluation: int |
     )
 
 
+def _apply_market_policy(
+    env_config: Any,
+    decisions: dict[str, list[float]],
+    record: dict[str, Any],
+    output_dir: Path,
+) -> dict[str, Any]:
+    """Write a market job's optimized controller config to its output dir.
+
+    Rebuilds the tuned C{MarketConfig} from the chosen decision vector and saves
+    it as C{market_config.tuned.json} (user-reviewable). No model session is
+    touched — a market job tunes the controller, not the model.
+
+    @return: The applied policy, objectives, and the written config path.
+    @rtype: dict
+    """
+    from openswmm_gymnasium.config import MarketConfig
+    from openswmm_gymnasium.spaces import MarketPolicySpace
+
+    market = MarketConfig.from_dict(env_config.market_config)
+    market.validate()
+    bounds = (
+        {k: tuple(v) for k, v in env_config.policy_bounds.items()}
+        if env_config.policy_bounds
+        else None
+    )
+    space = MarketPolicySpace.from_config(market, bounds=bounds, tune_full=env_config.tune_full)
+    vector = np.array([float(decisions[label][0]) for label in space.labels], dtype=np.float64)
+    tuned = space.unflatten(vector)
+    tuned.validate()
+
+    out_path = output_dir / "market_config.tuned.json"
+    tuned.save(str(out_path))
+    return {
+        "applied": "market_policy",
+        "evaluation": record.get("evaluation"),
+        "market_config_path": str(out_path),
+        "objectives": record.get("objectives", {}),
+        "policy": {label: float(decisions[label][0]) for label in space.labels},
+    }
+
+
+def _apply_schedule_policy(
+    env_config: Any,
+    decisions: dict[str, list[float]],
+    record: dict[str, Any],
+    output_dir: Path,
+) -> dict[str, Any]:
+    """Write a schedule job's optimized control schedule to its output dir.
+
+    Saves C{schedule.tuned.json} (the per-structure setting schedule + cadence).
+    No model session is touched.
+
+    @return: The applied schedule, objectives, and the written path.
+    @rtype: dict
+    """
+    from openswmm_gymnasium.spaces import SchedulePolicySpace
+
+    lo, hi = env_config.schedule_bounds or [0.0, 1.0]
+    space = SchedulePolicySpace(
+        env_config.structure_ids, env_config.n_points, low=float(lo), high=float(hi)
+    )
+    vector = np.array([float(decisions[label][0]) for label in space.labels], dtype=np.float64)
+    schedule = space.unflatten(vector)
+
+    out_path = output_dir / "schedule.tuned.json"
+    out_path.write_text(
+        json.dumps(
+            {
+                "control_interval_seconds": env_config.control_interval_seconds,
+                "structure_ids": list(env_config.structure_ids),
+                "n_points": env_config.n_points,
+                "schedule": schedule,
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return {
+        "applied": "schedule_policy",
+        "evaluation": record.get("evaluation"),
+        "schedule_path": str(out_path),
+        "objectives": record.get("objectives", {}),
+        "schedule": schedule,
+    }
+
+
 @gym_mcp.tool()
 async def apply_design(
     ctx: Context,
@@ -388,6 +475,12 @@ async def apply_design(
     change is in-memory — call C{building_write_model} to persist a new
     C{.inp}, or rerun the simulation to evaluate it. Requires the gym
     extra.
+
+    For a C{"market"} job (operational tuning) there is no model edit: the
+    optimized controller config is written to C{market_config.tuned.json} in
+    the job's output dir and its path is returned; C{session_id} is ignored.
+    A C{"schedule"} job similarly writes C{schedule.tuned.json} (the optimized
+    open-loop control schedule).
     """
     require_gymnasium("gym_apply_design")
     manager = get_job_manager(ctx)
@@ -395,6 +488,17 @@ async def apply_design(
     env_config = manager.get_env_config(job_id)
     record = _pick_evaluation(results, results["output_dir"], evaluation)
     decisions: dict[str, list[float]] = record["decisions"]
+
+    # market/schedule jobs tune a controller, not the model: write the optimized
+    # config to the job's output dir rather than editing a session.
+    if env_config.env_type == "market":
+        return await asyncio.to_thread(
+            _apply_market_policy, env_config, decisions, record, Path(results["output_dir"])
+        )
+    if env_config.env_type == "schedule":
+        return await asyncio.to_thread(
+            _apply_schedule_policy, env_config, decisions, record, Path(results["output_dir"])
+        )
 
     session_manager = get_session_manager(ctx)
     session = await session_manager.get_session(session_id)
