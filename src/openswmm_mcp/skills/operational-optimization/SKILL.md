@@ -137,19 +137,43 @@ objectives. → verify: loop completes and constraint compliance is logged.
 ### 3. Optional — NSGA-II tuning of the market
 
 Treat the **cost-curve parameters (onset/steepness/ceiling) and PID gains** as
-the decision vector and search them against the four objectives:
+the decision vector and search them against the operational objectives. This is
+wired end to end as a dedicated gym env (`env_type: "market"`): the engine runs
+the reactive controller internally per candidate, so there is **no outer loop**.
 
-- Inspect support with `gym_list_capabilities`. If the gym env can host the
-  market policy (env_type `joint`), express the parameters as design factories
-  and run `gym_create_env_config` → `gym_validate_env_config` →
-  `gym_start_optimization` (`algorithm: nsga2`, set `budget`/`population_size`)
-  → `gym_pareto_filter` / `gym_score_front` → `gym_apply_design`.
-- Otherwise run an **outer NSGA-II loop**: per candidate parameter vector, run
-  the Tier-2 reactive loop to completion and score the four objectives with the
-  `analysis_*` tools; keep the non-dominated set.
+1. Build a `market` env config:
+   - `market_config` — this skill's market JSON (the controller being tuned).
+   - `reward_terms` — the objectives to minimize: `uncontrolled_discharge`
+     (`link_ids` = conduits feeding untreated outfalls), `storage_underutilization`
+     (`node_ids` = storage nodes), `pump_energy` (`link_ids` = pumps), and/or
+     `flooding_volume`.
+   - `observations` — a few nodes/links to record for the report.
+   - optional `policy_bounds` to override per-field search ranges; `tune_full`
+     to also tune piecewise-linear knees.
+2. `gym_create_env_config` → `gym_validate_env_config` → `gym_start_optimization`
+   (`algorithm: nsga2`, set `budget`/`population_size`). Each evaluation runs one
+   full episode under the controller built from a candidate vector (curve
+   onset/ceiling/steepness + PID Kp/Ki/Kd).
+3. `gym_pareto_filter` / `gym_score_front` to inspect the front, then
+   `gym_apply_design` to write the selected **`market_config.tuned.json`** to the
+   job's output dir. A market job tunes the controller, not the model, so no
+   model session is edited.
 
-Either way the output is a **Pareto set** of market configurations, not one
-answer. → verify: the applied configuration reproduces its reported objectives.
+Inspect available reward terms / env support with `gym_list_capabilities`.
+
+The output is a **Pareto set** of market configurations, not one answer.
+→ verify: the applied configuration reproduces its reported objectives.
+
+**Alternative — open-loop schedule (`env_type: "schedule"`).** When you want a
+fixed operating plan for a *known* event rather than a reactive controller,
+optimize a precomputed per-structure setting schedule directly: set
+`structure_ids`, `n_points` (settings per structure over the event), and
+`control_interval_seconds`; the decision vector is the schedule itself. Same
+`gym_start_optimization` → `gym_pareto_filter` → `gym_apply_design` flow;
+`gym_apply_design` writes **`schedule.tuned.json`**. This is open-loop (no live
+feedback) — full-event optimal control. (A true receding-horizon MPC predictor
+is not offered: SWMM hot-start does not faithfully resume mid-event on this
+engine, so a re-simulated horizon would be unreliable.)
 
 ### 4. Deliverable
 

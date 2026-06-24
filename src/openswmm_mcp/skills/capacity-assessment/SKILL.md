@@ -1,6 +1,6 @@
 ---
 name: capacity-assessment
-description: "Use this skill when the user wants to assess the hydraulic capacity of a SWMM drainage/sewer network: where it floods, where pipes are full or surcharged, how much storage is being used, and where spare capacity exists. Triggers include 'capacity assessment', 'is the system undersized', 'where does it surcharge/flood', 'hmax/Hmax', 'd/D ratio', 'conveyance capacity', 'storage utilization', 'bottlenecks', 'CSO / uncontrolled overflow', or any request for a flooding/surcharge map or capacity report. Do NOT use for building a model, calibrating it, or designing/optimizing controls (use operational-optimization for control tuning)."
+description: "Use this skill when the user wants to assess the hydraulic capacity of a SWMM drainage/sewer network: where it floods, where pipes are full or surcharged, how much storage is being used, and where spare capacity exists. Triggers include 'capacity assessment', 'constraint analysis', 'constraint assessment', 'where are the constraints', 'is the system undersized', 'where does it surcharge/flood', 'hmax/Hmax', 'd/D ratio', 'conveyance capacity', 'storage utilization', 'bottlenecks', 'CSO / uncontrolled overflow', or any request for a flooding/surcharge map or capacity report. Do NOT use for building a model, calibrating it, or designing/optimizing controls (use operational-optimization for control tuning)."
 ---
 
 # Hydraulic capacity assessment of a SWMM network
@@ -53,7 +53,11 @@ considered to hold *excess* capacity during a stress event.
 
 ### 0. Load the model and ensure results exist
 
-1. `lifecycle_open_model` with the `.inp` path.
+1. `lifecycle_open_model` with the `.inp` path. Ensure the session uses the new
+   engine (`engine="openswmm"`, the default) — the granular/temporal map steps
+   call spatial tools that return `NOT_SUPPORTED` on a `legacy` session. If a
+   pre-existing session is on legacy (`lifecycle_get_simulation_state` reports
+   `engine`), re-open with `engine="openswmm"` before proceeding.
 2. `lifecycle_get_simulation_state` — if the session is not `ended`, run it with
    `lifecycle_run_simulation`. If it is already `ended`, reuse the existing
    results (do not re-run). → verify: state is `ended` before any analysis.
