@@ -384,3 +384,52 @@ async def test_decode_policy_rejects_non_control_curve(ctx, output_dir, job_mana
     await _wait_for(job_manager, snap["job_id"], "done", "failed", timeout=120.0)
     with pytest.raises(ToolError, match="control_curve"):
         await decode_policy(ctx, job_id=snap["job_id"], index="best")
+
+
+# ---------------------------------------------------------------------------
+# Resolved-settings echo (#9) and JSON-string optimization arg (#1)
+# ---------------------------------------------------------------------------
+
+
+def test_optimization_config_resolved_includes_only_relevant_fields():
+    # Issue #9: resolved() echoes the applied settings; algorithm-specific
+    # fields appear only when they actually apply.
+    nsga2 = OptimizationConfig(
+        algorithm="nsga2", budget=600, population_size=24, seed=7
+    ).resolved()
+    assert nsga2 == {
+        "algorithm": "nsga2", "budget": 600, "seed": 7, "population_size": 24
+    }
+    rnd = OptimizationConfig().resolved()
+    assert rnd == {"algorithm": "random_search", "budget": 50, "seed": None}
+    assert "population_size" not in rnd
+    grid = OptimizationConfig(algorithm="grid_search", grid_levels=4).resolved()
+    assert grid["grid_levels"] == 4 and "population_size" not in grid
+
+
+@pytest.mark.integration
+async def test_start_optimization_accepts_json_string_and_echoes_resolved(
+    ctx, output_dir, job_manager
+):
+    # Issue #1 + #9: a JSON-*string* optimization arg is honored (not silently
+    # downgraded), and the resolved settings are echoed in the snapshot and the
+    # results so a downgrade would be unmissable.
+    pytest.importorskip("openswmm_gymnasium")
+    from openswmm_mcp.tools.gym_runs import get_job_results, start_optimization
+
+    snap = await start_optimization(
+        ctx,
+        config=_control_curve_config(_copy_b01(output_dir)).model_dump(mode="json"),
+        optimization='{"algorithm": "random_search", "budget": 4, "seed": 3}',
+        output_dir=str(output_dir / "json_str_opt"),
+    )
+    assert snap["optimization"] == {
+        "algorithm": "random_search", "budget": 4, "seed": 3
+    }
+    final = await _wait_for(job_manager, snap["job_id"], "done", "failed")
+    assert final["state"] == "done", final["error"]
+    assert final["optimization"]["budget"] == 4
+
+    results = await get_job_results(ctx, job_id=snap["job_id"])
+    assert results["optimization"]["algorithm"] == "random_search"
+    assert results["evaluations_count"] == 4

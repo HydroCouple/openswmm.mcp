@@ -18,9 +18,70 @@ import pytest
 from pydantic import ValidationError
 
 from openswmm_mcp.errors import ToolError
-from openswmm_mcp.gym_support.config import EnvConfig, ObservationSpec, build_env
+from openswmm_mcp.gym_support.config import (
+    OBSERVATION_FEATURES,
+    EnvConfig,
+    JsonObject,
+    ObservationSpec,
+    build_env,
+    coerce_json_param,
+    decode_json_if_str,
+)
 
 _REFERENCE_INP = (Path(__file__).parents[1] / "data" / "site_drainage_example.inp").resolve()
+
+
+# ---------------------------------------------------------------------------
+# JSON-string coercion for complex tool params (issue #1)
+# ---------------------------------------------------------------------------
+
+
+def test_coerce_json_param_passes_through_native_values():
+    assert coerce_json_param({"a": 1}, "x") == {"a": 1}
+    assert coerce_json_param([[1.0, 2.0]], "x") == [[1.0, 2.0]]
+    assert coerce_json_param(None, "x") is None
+    assert coerce_json_param("", "x") == ""  # empty string treated as unset
+
+
+def test_coerce_json_param_decodes_json_strings():
+    assert coerce_json_param('{"algorithm": "nsga2", "budget": 600}', "optimization") == {
+        "algorithm": "nsga2",
+        "budget": 600,
+    }
+    assert coerce_json_param("[[1, 2], [3, 4]]", "front") == [[1, 2], [3, 4]]
+
+
+def test_coerce_json_param_rejects_malformed_json_string():
+    with pytest.raises(ToolError, match="not valid JSON"):
+        coerce_json_param("{not json", "optimization")
+
+
+def test_decode_json_if_str_validator_runs_inside_pydantic_binding():
+    # decode_json_if_str is the BeforeValidator that fixes the real binding-layer
+    # rejection: a Pydantic model typed with JsonObject must accept a JSON
+    # *string* and bind it as a dict (this is what FastMCP does to tool args).
+    from pydantic import BaseModel
+
+    class _M(BaseModel):
+        optimization: JsonObject = None
+
+    assert _M(optimization='{"algorithm": "nsga2"}').optimization == {"algorithm": "nsga2"}
+    assert _M(optimization={"a": 1}).optimization == {"a": 1}
+    assert _M(optimization=None).optimization is None
+    # plain validator: passthrough + decode + clean error
+    assert decode_json_if_str([[1, 2]]) == [[1, 2]]
+    assert decode_json_if_str('{"x": 1}') == {"x": 1}
+    with pytest.raises(ValueError, match="not valid JSON"):
+        decode_json_if_str("{bad")
+
+
+def test_observation_features_are_real_observation_spec_fields():
+    # OBSERVATION_FEATURES is the discoverable source of truth surfaced by
+    # gym_list_capabilities: the element-ID feature keys. Each must be a real
+    # ObservationSpec field (it is a subset — ObservationSpec also has
+    # non-element-ID flags such as include_clock).
+    assert set(OBSERVATION_FEATURES) <= set(ObservationSpec.model_fields)
+    assert "node_depths" in OBSERVATION_FEATURES and "link_flows" in OBSERVATION_FEATURES
 _OUTPUT_ROOT = Path(__file__).parents[1] / "_output" / "gym_config"
 
 

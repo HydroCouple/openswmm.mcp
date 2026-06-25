@@ -51,6 +51,29 @@ def output_dir(request) -> Path:
 
 
 # ---------------------------------------------------------------------------
+# Binding-layer JSON-string coercion (issue #1, real fix)
+# ---------------------------------------------------------------------------
+
+
+async def test_pareto_filter_accepts_json_string_front_via_binding_layer():
+    # The real #1 fix: a client that serializes the 'front' array as a JSON
+    # *string* must succeed through FastMCP's argument binding (a
+    # BeforeValidator decodes it), NOT fail with a pydantic list/dict_type
+    # error before the tool body ever runs. Goes through mcp.call_tool to
+    # exercise that binding layer (a plain function call would bypass it).
+    pytest.importorskip("openswmm_gymnasium")
+    from openswmm_mcp.server import mcp
+
+    res = await mcp.call_tool(
+        "gym_pareto_filter", {"front": "[[1.0, 2.0], [2.0, 1.0], [3.0, 3.0]]"}
+    )
+    data = getattr(res, "structured_content", None) or res.data
+    assert data["input_count"] == 3
+    # (3,3) is dominated; the non-dominated front is the other two corners.
+    assert data["front"] == [[1.0, 2.0], [2.0, 1.0]]
+
+
+# ---------------------------------------------------------------------------
 # Pure helpers
 # ---------------------------------------------------------------------------
 

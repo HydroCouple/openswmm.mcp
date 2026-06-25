@@ -70,6 +70,29 @@ class OptimizationConfig(BaseModel):
     seed: int | None = None
     max_steps_per_episode: int = Field(default=10_000, ge=1)
 
+    def resolved(self) -> dict[str, Any]:
+        """The search settings actually applied, for echoing in every job
+        snapshot and result.
+
+        Surfacing these makes a silent algorithm/budget downgrade impossible to
+        miss: a caller who reads the start response or C{gym_get_job} sees the
+        real C{algorithm}/C{budget} the run used, not just whatever it
+        requested (previously these lived only in C{job.json}). Only the fields
+        that affect the chosen algorithm are included.
+
+        @rtype: dict
+        """
+        out: dict[str, Any] = {
+            "algorithm": self.algorithm,
+            "budget": self.budget,
+            "seed": self.seed,
+        }
+        if self.algorithm in _PLATYPUS_ALGORITHMS:
+            out["population_size"] = self.population_size
+        elif self.algorithm == "grid_search":
+            out["grid_levels"] = self.grid_levels
+        return out
+
 
 JobState = Literal["pending", "running", "done", "failed", "cancelled"]
 
@@ -312,6 +335,9 @@ class Job:
                 "state": self.state,
                 "algorithm": self.opt_config.algorithm,
                 "budget": self.opt_config.budget,
+                # Full applied settings (algorithm/budget/seed + algo-specific),
+                # so a silent downgrade vs. the requested run is unmissable (#9).
+                "optimization": self.opt_config.resolved(),
                 "evaluations_done": self.evaluations_done,
                 "output_dir": str(self.output_dir),
                 "error": self.error,
@@ -660,6 +686,9 @@ class JobManager:
             else:
                 _run_platypus(evaluator, dims, job.opt_config)
             result = _assemble_result(evaluator)
+            # Echo the applied search settings into the result so result.json
+            # and gym_get_job_results both record what actually ran (#9).
+            result["optimization"] = job.opt_config.resolved()
             (job.output_dir / "result.json").write_text(
                 json.dumps(json_safe(result), indent=2) + "\n", encoding="utf-8"
             )

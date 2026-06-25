@@ -38,6 +38,12 @@ from openswmm_mcp.dependencies import (
     require_state,
 )
 from openswmm_mcp.errors import ErrorCode, ToolError
+from openswmm_mcp.gym_support.config import (
+    JsonFloatMatrix,
+    JsonFloatVector,
+    JsonStrListRequired,
+    coerce_json_param,
+)
 from openswmm_mcp.gym_support.envs import json_safe
 from openswmm_mcp.gym_support.jobs import design_dimensions
 from openswmm_mcp.tools.gym_envs import gym_mcp
@@ -190,7 +196,7 @@ def _compute_indicator(
 @gym_mcp.tool()
 async def pareto_filter(
     ctx: Context,
-    front: list[list[float]] | None = None,
+    front: JsonFloatMatrix = None,
     job_id: str | None = None,
 ) -> dict:
     """Return the non-dominated subset of objective vectors.
@@ -201,6 +207,7 @@ async def pareto_filter(
     the indices of the surviving rows. Requires the gym extra.
     """
     require_gymnasium("gym_pareto_filter")
+    front = coerce_json_param(front, "front")
     matrix, names = await _resolve_front(ctx, front, job_id)
 
     from openswmm_gymnasium.scoring import pareto_front
@@ -222,13 +229,13 @@ async def pareto_filter(
 @gym_mcp.tool()
 async def score_front(
     ctx: Context,
-    indicators: list[str],
-    front: list[list[float]] | None = None,
+    indicators: JsonStrListRequired,
+    front: JsonFloatMatrix = None,
     job_id: str | None = None,
-    reference_point: list[float] | None = None,
-    ideal_point: list[float] | None = None,
-    reference_front: list[list[float]] | None = None,
-    weights: list[list[float]] | None = None,
+    reference_point: JsonFloatVector = None,
+    ideal_point: JsonFloatVector = None,
+    reference_front: JsonFloatMatrix = None,
+    weights: JsonFloatMatrix = None,
 ) -> dict:
     """Compute quality indicators over a front of cost vectors.
 
@@ -245,6 +252,12 @@ async def score_front(
     exactly one. Requires the gym extra.
     """
     require_gymnasium("gym_score_front")
+    front = coerce_json_param(front, "front")
+    indicators = coerce_json_param(indicators, "indicators")
+    reference_point = coerce_json_param(reference_point, "reference_point")
+    ideal_point = coerce_json_param(ideal_point, "ideal_point")
+    reference_front = coerce_json_param(reference_front, "reference_front")
+    weights = coerce_json_param(weights, "weights")
     provided = {
         "reference_point": reference_point,
         "ideal_point": ideal_point,
@@ -285,12 +298,12 @@ async def score_front(
 @gym_mcp.tool()
 async def compare_runs(
     ctx: Context,
-    job_ids: list[str],
-    indicators: list[str],
-    reference_point: list[float] | None = None,
-    ideal_point: list[float] | None = None,
-    reference_front: list[list[float]] | None = None,
-    weights: list[list[float]] | None = None,
+    job_ids: JsonStrListRequired,
+    indicators: JsonStrListRequired,
+    reference_point: JsonFloatVector = None,
+    ideal_point: JsonFloatVector = None,
+    reference_front: JsonFloatMatrix = None,
+    weights: JsonFloatMatrix = None,
 ) -> dict:
     """Score several finished jobs' Pareto fronts with the same indicators.
 
@@ -300,6 +313,8 @@ async def compare_runs(
     C{gym_score_front}. Requires the gym extra.
     """
     require_gymnasium("gym_compare_runs")
+    job_ids = coerce_json_param(job_ids, "job_ids")
+    indicators = coerce_json_param(indicators, "indicators")
     if len(job_ids) < 2:
         raise ToolError(
             f"[{ErrorCode.VALIDATION_ERROR}] compare_runs needs at least two "

@@ -92,6 +92,49 @@ async def test_list_capabilities_structure(ctx):
     assert control_curve["params_schema"]["type"] == "object"
 
 
+async def test_list_capabilities_surfaces_env_and_observation_schema(ctx):
+    # Issue #2: the EnvConfig envelope, ObservationSpec schema, the valid
+    # observation feature keys, and worked examples must be discoverable
+    # without reading source.
+    result = await list_capabilities(ctx)
+    assert result["env_config_schema"]["title"] == "EnvConfig"
+    assert result["observation_spec_schema"]["title"] == "ObservationSpec"
+    feats = result["observation_features"]
+    assert "node_depths" in feats and "link_flows" in feats
+    # Every observation_feature is a real ObservationSpec field.
+    assert set(feats) <= set(result["observation_spec_schema"]["properties"])
+    # A worked example per common env_type, each carrying its own env_type.
+    for env_type in ("cip", "rtc", "control_curve", "schedule"):
+        assert result["examples"][env_type]["env_type"] == env_type
+
+
+async def test_observations_validation_error_enumerates_feature_keys(ctx):
+    # Issue #2: the IDs-as-keys mistake (observations={"J1":"depthN"}) must
+    # yield an error that names the valid feature keys, not a bare
+    # "Extra inputs are not permitted".
+    bad = {
+        "env_type": "rtc",
+        "inp_path": "m.inp",
+        "observations": {"J1": "depthN"},
+        "reward_terms": [{"kind": "flooding_volume", "params": {}}],
+    }
+    with pytest.raises(ToolError) as exc:
+        await create_env_config(ctx, name="bad_obs", config=bad)
+    msg = str(exc.value)
+    assert "node_depths" in msg
+    assert "not the IDs directly" in msg
+
+
+async def test_json_string_config_is_accepted(ctx, output_dir):
+    # Issue #1: a client that serializes the config object as a JSON *string*
+    # must still succeed (defensive coercion), exactly like passing the dict.
+    import json
+
+    cfg = (await list_capabilities(ctx))["examples"]["cip"]
+    created = await create_env_config(ctx, name="from_str", config=json.dumps(cfg))
+    assert created["summary"]["env_type"] == "cip"
+
+
 # ---------------------------------------------------------------------------
 # Config CRUD via tools (pure)
 # ---------------------------------------------------------------------------

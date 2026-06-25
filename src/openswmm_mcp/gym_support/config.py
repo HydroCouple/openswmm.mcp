@@ -16,12 +16,99 @@ the C{gym} extra; only L{build_env} imports C{openswmm_gymnasium}.
 
 from __future__ import annotations
 
-from typing import Any, ClassVar, Literal
+import json
+from typing import Annotated, Any, ClassVar, Literal
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, model_validator
 
 from openswmm_mcp.errors import ErrorCode, ToolError
 from openswmm_mcp.gym_support import registry
+
+
+def decode_json_if_str(value: Any) -> Any:
+    """Pydantic C{BeforeValidator}: decode a JSON-string argument to its
+    object/array form B{during} validation, so the tool body never sees a raw
+    string.
+
+    Several MCP clients / LLM tool-callers serialize nested object/array
+    arguments as JSON I{strings} even when the schema types them as
+    C{object}/C{array}. FastMCP validates tool arguments against the function
+    signature with Pydantic, which would otherwise reject the string at bind
+    time (C{Input should be a valid dictionary}) — B{before} any function-body
+    coercion could run. Applying this as a C{BeforeValidator} on the parameter
+    annotation intercepts the string at exactly that layer.
+
+    A non-string value passes through unchanged; an empty/whitespace string is
+    returned as-is (treated as "unset").
+
+    @param value: The raw argument as received from the client.
+    @return: The decoded object/array, or C{value} unchanged.
+    @raise ValueError: If C{value} is a non-empty string that is not valid JSON
+        (Pydantic wraps this into a clear validation error).
+    """
+    if not isinstance(value, str):
+        return value
+    stripped = value.strip()
+    if not stripped:
+        return value
+    try:
+        return json.loads(stripped)
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise ValueError(
+            "expected an object/array (or a JSON string encoding one); got a "
+            f"string that is not valid JSON: {exc}"
+        ) from exc
+
+
+#: Reusable tool-parameter annotations that accept either the native value OR a
+#: JSON-encoded string of it (decoded during binding by L{decode_json_if_str}).
+#: Use these for every complex C{gym_*} tool parameter so a stringifying client
+#: cannot break the call.
+JsonObject = Annotated[dict[str, Any] | None, BeforeValidator(decode_json_if_str)]
+JsonObjectRequired = Annotated[dict[str, Any], BeforeValidator(decode_json_if_str)]
+JsonArray = Annotated[list[Any] | None, BeforeValidator(decode_json_if_str)]
+JsonFloatMatrix = Annotated[
+    list[list[float]] | None, BeforeValidator(decode_json_if_str)
+]
+JsonFloatVector = Annotated[list[float] | None, BeforeValidator(decode_json_if_str)]
+JsonStrList = Annotated[list[str] | None, BeforeValidator(decode_json_if_str)]
+JsonStrListRequired = Annotated[list[str], BeforeValidator(decode_json_if_str)]
+
+
+def coerce_json_param(value: Any, param: str) -> Any:
+    """Accept either a native object/array or a JSON-encoded string for a
+    complex tool parameter.
+
+    Several MCP clients (and LLM tool-callers) serialize nested object/array
+    arguments as JSON I{strings} even when the tool schema types them as
+    C{object}/C{array}; the server would then reject the string. Decoding a
+    string argument here makes every C{gym_*} tool robust to that behaviour —
+    e.g. C{optimization='{"algorithm":"nsga2","budget":600}'} is accepted
+    exactly like the equivalent dict, so a requested NSGA-II run can never be
+    silently downgraded because its argument failed to bind.
+
+    A non-string value passes through unchanged. An empty/whitespace string is
+    treated as "unset" and returned as-is (callers handle C{None}/empty).
+
+    @param value: The raw argument as received from the client.
+    @param param: Parameter name, for error messages.
+    @return: The decoded object/array, or C{value} unchanged.
+    @raise ToolError: C{VALIDATION_ERROR} if C{value} is a non-empty string
+        that is not valid JSON.
+    """
+    if not isinstance(value, str):
+        return value
+    stripped = value.strip()
+    if not stripped:
+        return value
+    try:
+        return json.loads(stripped)
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise ToolError(
+            f"[{ErrorCode.VALIDATION_ERROR}] Parameter '{param}' was a string "
+            f"that is not valid JSON: {exc}. Pass an object/array (or a JSON "
+            "string that encodes one)."
+        ) from exc
 
 # Observation feature name -> ObservationBuilder method name.
 _OBS_METHODS: dict[str, str] = {
@@ -41,6 +128,12 @@ _OBS_METHODS: dict[str, str] = {
     "subcatch_groundwater": "add_subcatch_groundwater",
     "rainfall_gages": "add_rainfall",
 }
+
+#: Valid C{observations} feature keys (each maps element IDs -> features), in
+#: builder/concatenation order. Surfaced by C{gym_list_capabilities} and in
+#: config-validation errors so the C{ObservationSpec} field names are
+#: discoverable without reading source.
+OBSERVATION_FEATURES: tuple[str, ...] = tuple(_OBS_METHODS)
 
 
 class ObservationSpec(BaseModel):

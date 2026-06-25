@@ -32,13 +32,78 @@ from pydantic import ValidationError
 from openswmm_mcp.dependencies import get_settings, require_gymnasium
 from openswmm_mcp.errors import ErrorCode, ToolError
 from openswmm_mcp.gym_support import registry
-from openswmm_mcp.gym_support.config import EnvConfig, build_env
+from openswmm_mcp.gym_support.config import (
+    OBSERVATION_FEATURES,
+    EnvConfig,
+    JsonObject,
+    JsonObjectRequired,
+    ObservationSpec,
+    build_env,
+    coerce_json_param,
+)
 from openswmm_mcp.gym_support.store import GymStore
 
 gym_mcp = FastMCP("gym")
 
 #: Default sub-directory (under the server working dir) for config JSON.
 _CONFIG_SUBDIR = "gym_configs"
+
+#: One worked, minimal config per common env_type, returned by
+#: C{list_capabilities} so the whole envelope shape is copy-pasteable.
+_ENV_EXAMPLES: dict[str, dict[str, Any]] = {
+    "cip": {
+        "env_type": "cip",
+        "inp_path": "model.inp",
+        "design_factories": [
+            {"kind": "link_diameter", "params": {"link_ids": ["C1"], "low": 0.5, "high": 2.0}}
+        ],
+        "observations": {"node_depths": ["J1"]},
+        "reward_terms": [{"kind": "flooding_volume", "params": {}}],
+    },
+    "rtc": {
+        "env_type": "rtc",
+        "inp_path": "model.inp",
+        "runtime_factories": [
+            {"kind": "orifice_setting", "params": {"link_ids": ["Or1"]}}
+        ],
+        "observations": {"node_depths": ["J1"], "link_flows": ["Or1"]},
+        "reward_terms": [{"kind": "flooding_volume", "params": {}}],
+    },
+    "control_curve": {
+        "env_type": "control_curve",
+        "inp_path": "model.inp",
+        "control_interval_seconds": 300,
+        "policy_factory": {
+            "kind": "control_curve",
+            "params": {
+                "x_normalized": True,
+                "assets": [
+                    {
+                        "link_id": "Or1",
+                        "obs_node": "R1",
+                        "obs_attr": "depthN",
+                        "x_knots": [0.0, 0.25, 0.5, 0.75, 1.0],
+                        "monotonic": "nondecreasing",
+                    }
+                ],
+            },
+        },
+        "observations": {"node_depths": ["R1"]},
+        "reward_terms": [
+            {"kind": "uncontrolled_discharge", "params": {"link_ids": ["W1"]}},
+            {"kind": "flooding_volume", "params": {}},
+        ],
+    },
+    "schedule": {
+        "env_type": "schedule",
+        "inp_path": "model.inp",
+        "structure_ids": ["Or1"],
+        "n_points": 4,
+        "control_interval_seconds": 300,
+        "observations": {"node_depths": ["R1"]},
+        "reward_terms": [{"kind": "uncontrolled_discharge", "params": {"link_ids": ["W1"]}}],
+    },
+}
 
 
 # ---------------------------------------------------------------------------
@@ -73,14 +138,24 @@ def _parse_config(config: dict[str, Any]) -> EnvConfig:
     @raise ToolError: C{VALIDATION_ERROR} with the Pydantic detail when
         the config does not satisfy the schema.
     """
+    config = coerce_json_param(config, "config")
     try:
         return EnvConfig(**config)
     except ToolError:
         raise
     except (ValidationError, TypeError) as exc:
+        hint = (
+            "Call gym_list_capabilities for valid kinds, param schemas, the "
+            "EnvConfig/ObservationSpec schema, and worked examples."
+        )
+        if "observ" in str(exc).lower():
+            hint = (
+                "'observations' is a typed object: each key must be one of "
+                f"{list(OBSERVATION_FEATURES)} mapping to a list of element IDs "
+                "(e.g. {\"node_depths\": [\"J1\"]}), not the IDs directly. " + hint
+            )
         raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] Invalid environment config: {exc}. "
-            "Call gym_list_capabilities for valid kinds and param schemas."
+            f"[{ErrorCode.VALIDATION_ERROR}] Invalid environment config: {exc}. {hint}"
         ) from exc
 
 
@@ -146,6 +221,11 @@ async def list_capabilities(ctx: Context) -> dict:
     from the kind registry, so it is always in sync with what
     C{gym_create_env_config} accepts.
 
+    Also returns the C{EnvConfig} envelope schema, the C{ObservationSpec}
+    schema and its valid feature keys (C{observation_features}), and one
+    worked C{example} per common env_type, so the whole config shape is
+    discoverable without reading source.
+
     Works without the gym extra installed (pure metadata).
     """
     capabilities: dict[str, list[dict[str, Any]]] = {}
@@ -176,14 +256,33 @@ async def list_capabilities(ctx: Context) -> dict:
             "vs flooding volume).",
         },
         "capabilities": capabilities,
+        # The config envelope + observation schema, so an agent never has to
+        # read source to learn the EnvConfig/ObservationSpec field names.
+        "env_config_schema": EnvConfig.model_json_schema(),
+        "observation_spec_schema": ObservationSpec.model_json_schema(),
+        "observation_features": list(OBSERVATION_FEATURES),
+        "examples": _ENV_EXAMPLES,
         "notes": [
-            "Compose configs with gym_create_env_config; observation features "
-            "are listed per element ID in 'observations'.",
+            "Compose configs with gym_create_env_config. 'observations' is a "
+            "typed object whose keys are the fixed feature names in "
+            "'observation_features' (e.g. node_depths, link_flows), each mapping "
+            "to a list of element IDs — not the IDs directly.",
             "reward_terms left empty means the env default: a single "
             "all-nodes flooding_volume term.",
+            "reward-term CSO semantics differ: 'cso_volume' sums NODE overflow at "
+            "tagged nodes, while weir/relief spill is a LINK flow — use "
+            "'uncontrolled_discharge' with link_ids for weirs and untreated-outfall "
+            "conduits. Do not use cso_volume for weir CSO.",
             "policy_factory 'control_curve' is searched by gym_start_optimization "
             "just like design_factories; decode a result vector to per-asset "
             "curves with gym_decode_policy.",
+            "control_curve monotonic projection is a deterministic running clamp "
+            "applied at decode time: 'nondecreasing' = left-to-right cumulative "
+            "max (applied[i] = max(raw[0..i])), 'nonincreasing' = cumulative min. "
+            "gym_decode_policy returns the already-projected y_values that ran.",
+            "The fully-open baseline can be the CSO-optimal corner that search "
+            "may never sample exactly; measure it separately (pin a control_curve "
+            "with y_low=y_high=1.0) and union it into the front before concluding.",
         ],
     }
 
@@ -234,7 +333,7 @@ async def describe_benchmark(ctx: Context, benchmark_id: str | None = None) -> d
 async def create_env_config(
     ctx: Context,
     name: str,
-    config: dict,
+    config: JsonObjectRequired,
     overwrite: bool = False,
     config_dir: str | None = None,
 ) -> dict:
@@ -288,7 +387,7 @@ async def delete_env_config(ctx: Context, name: str, config_dir: str | None = No
 async def validate_env_config(
     ctx: Context,
     name: str | None = None,
-    config: dict | None = None,
+    config: JsonObject = None,
     config_dir: str | None = None,
 ) -> dict:
     """Instantiate the config against the real engine and report spaces.

@@ -33,7 +33,7 @@ from pydantic import ValidationError
 
 from openswmm_mcp.dependencies import get_env_manager, get_job_manager, require_gymnasium
 from openswmm_mcp.errors import ErrorCode, ToolError
-from openswmm_mcp.gym_support.config import EnvConfig
+from openswmm_mcp.gym_support.config import EnvConfig, JsonObject, coerce_json_param
 from openswmm_mcp.gym_support.envs import build_action, json_safe
 from openswmm_mcp.gym_support.envs import run_episode as _run_episode_sync
 from openswmm_mcp.gym_support.jobs import OptimizationConfig
@@ -88,8 +88,8 @@ def _default_run_dir(env_config: EnvConfig, run_id: str) -> Path:
 async def run_episode(
     ctx: Context,
     name: str | None = None,
-    config: dict | None = None,
-    policy: dict | None = None,
+    config: JsonObject = None,
+    policy: JsonObject = None,
     run_dir: str | None = None,
     max_steps: int = 10_000,
     seed: int | None = None,
@@ -113,6 +113,7 @@ async def run_episode(
     are always user-reviewable. Requires the gym extra.
     """
     require_gymnasium("gym_run_episode")
+    policy = coerce_json_param(policy, "policy")
     env_config = await _resolve_config(ctx, name, config, config_dir)
     run_id = time.strftime("%Y%m%d-%H%M%S") + f"-{seed if seed is not None else 'x'}"
     resolved_run_dir = Path(run_dir) if run_dir is not None else _default_run_dir(
@@ -144,7 +145,7 @@ async def env_open(
     ctx: Context,
     env_id: str = "default",
     name: str | None = None,
-    config: dict | None = None,
+    config: JsonObject = None,
     config_dir: str | None = None,
 ) -> dict:
     """Open an interactive env the LLM can drive step by step.
@@ -195,7 +196,7 @@ async def env_reset(ctx: Context, env_id: str = "default", seed: int | None = No
 async def env_step(
     ctx: Context,
     env_id: str = "default",
-    action: dict | None = None,
+    action: JsonObject = None,
 ) -> dict:
     """Advance the interactive env one control interval.
 
@@ -205,6 +206,7 @@ async def env_step(
     the observation, reward (scalar, or vector for C{mo_rtc}),
     termination flags, and the per-term reward components from C{info}.
     """
+    action = coerce_json_param(action, "action")
     manager = get_env_manager(ctx)
     handle = manager.get(env_id)
 
@@ -252,8 +254,8 @@ async def list_envs(ctx: Context) -> dict:
 async def start_optimization(
     ctx: Context,
     name: str | None = None,
-    config: dict | None = None,
-    optimization: dict | None = None,
+    config: JsonObject = None,
+    optimization: JsonObject = None,
     output_dir: str | None = None,
     config_dir: str | None = None,
 ) -> dict:
@@ -282,6 +284,7 @@ async def start_optimization(
     stop with C{gym_cancel_job}. Requires the gym extra.
     """
     require_gymnasium("gym_start_optimization")
+    optimization = coerce_json_param(optimization, "optimization")
     env_config = await _resolve_config(ctx, name, config, config_dir)
     try:
         opt_config = OptimizationConfig(**(optimization or {}))
