@@ -152,11 +152,93 @@ def test_bad_kind_params_rejected():
             {"ideal_point": [0.0], "reference_point": [1.0]},
             "only valid for env_type 'mo_rtc'",
         ),
+        ("control_curve", {"control_interval_seconds": 300}, "requires a policy_factory"),
+        (
+            "control_curve",
+            {
+                "policy_factory": {
+                    "kind": "control_curve",
+                    "params": {
+                        "assets": [
+                            {"link_id": "Or1", "obs_node": "J1", "x_knots": [0.0, 1.0]}
+                        ]
+                    },
+                }
+            },
+            "requires control_interval_seconds",
+        ),
+        (
+            "control_curve",
+            {
+                "control_interval_seconds": 300,
+                "policy_factory": {
+                    "kind": "control_curve",
+                    "params": {
+                        "assets": [
+                            {"link_id": "Or1", "obs_node": "J1", "x_knots": [0.0, 1.0]}
+                        ]
+                    },
+                },
+                "design_factories": [
+                    {
+                        "kind": "link_diameter",
+                        "params": {"link_ids": ["C1"], "low": 0.5, "high": 2.0},
+                    }
+                ],
+            },
+            "does not accept design_factories",
+        ),
+        (
+            "rtc",
+            {
+                "policy_factory": {
+                    "kind": "control_curve",
+                    "params": {
+                        "assets": [
+                            {"link_id": "Or1", "obs_node": "J1", "x_knots": [0.0, 1.0]}
+                        ]
+                    },
+                }
+            },
+            "only valid for env_type 'control_curve'",
+        ),
     ],
 )
 def test_env_type_constraints(env_type, kwargs, match):
     with pytest.raises(ValidationError, match=match):
         EnvConfig(env_type=env_type, inp_path="m.inp", observations=_obs(), **kwargs)
+
+
+def test_control_curve_config_valid_and_round_trips():
+    cfg = EnvConfig(
+        env_type="control_curve",
+        inp_path="model.inp",
+        control_interval_seconds=300,
+        policy_factory={
+            "kind": "control_curve",
+            "params": {
+                "assets": [
+                    {
+                        "link_id": "Or1",
+                        "obs_node": "JI1",
+                        "x_knots": [0.0, 0.33, 0.66, 1.0],
+                        "monotonic": "nonincreasing",
+                    }
+                ],
+                "x_normalized": True,
+            },
+        },
+        observations=_obs(),
+        reward_terms=[
+            {"kind": "cso_volume", "params": {"node_ids": ["JC1b"]}},
+            {"kind": "flooding_volume", "params": {}},
+        ],
+    )
+    assert cfg.env_type == "control_curve"
+    assert cfg.policy_factory.kind == "control_curve"
+    # Survives a JSON round-trip unchanged.
+    again = EnvConfig(**cfg.model_dump(mode="json"))
+    assert again.policy_factory.params["assets"][0]["link_id"] == "Or1"
 
 
 def test_control_interval_must_be_positive():

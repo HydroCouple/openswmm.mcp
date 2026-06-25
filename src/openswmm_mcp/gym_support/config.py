@@ -181,6 +181,19 @@ class DesignFactorySpec(_KindSpecModel):
     _category: ClassVar[str] = "design_factory"
 
 
+class PolicyFactorySpec(_KindSpecModel):
+    """A searchable static control policy by registry kind (C{policy_factory}).
+
+    Like a design factory, it contributes static dimensions to the searchable
+    decision vector — but instead of mutating the model geometry it installs a
+    closed-loop controller evaluated each control step. Not constructed via
+    L{registry.construct_kind}; L{build_env} builds the policy space directly
+    from C{params}.
+    """
+
+    _category: ClassVar[str] = "policy_factory"
+
+
 # Public alias used by tools that accept either factory flavour.
 ActionFactorySpec = RuntimeFactorySpec | DesignFactorySpec
 
@@ -205,6 +218,9 @@ class EnvConfig(BaseModel):
         cost-curve + PID params; decision vector is the market policy space)
       - C{"schedule"} -> C{SwmmControlEnv} (open-loop full-event optimal control;
         decision vector is per-structure settings over the event)
+      - C{"control_curve"} -> C{SwmmControlEnv} (tune a reactive PWL control
+        policy; decision vector is the per-knot breakpoint settings of the
+        C{policy_factory})
 
     @ivar env_type: Which env class to construct.
     @ivar inp_path: Path to the SWMM C{.inp} driving each episode.
@@ -221,6 +237,8 @@ class EnvConfig(BaseModel):
         only; default C{[0, 1]}).
     @ivar runtime_factories: Runtime (RTC) action factories.
     @ivar design_factories: Design (CIP) action factories.
+    @ivar policy_factory: Searchable static control policy (C{"control_curve"}
+        only, required); decision vector is its policy parameters.
     @ivar observations: Observation feature spec (must be non-empty).
     @ivar reward_terms: Reward terms; empty list means the env default
         (a single all-nodes C{FloodingVolume}).
@@ -235,10 +253,13 @@ class EnvConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    env_type: Literal["rtc", "cip", "joint", "mo_rtc", "market", "schedule"]
+    env_type: Literal[
+        "rtc", "cip", "joint", "mo_rtc", "market", "schedule", "control_curve"
+    ]
     inp_path: str
     runtime_factories: list[RuntimeFactorySpec] = []
     design_factories: list[DesignFactorySpec] = []
+    policy_factory: PolicyFactorySpec | None = None
     observations: ObservationSpec
     reward_terms: list[RewardTermSpec] = []
     control_interval_steps: int = 1
@@ -298,6 +319,23 @@ class EnvConfig(BaseModel):
                 )
         elif self.structure_ids is not None or self.n_points is not None:
             raise ValueError("structure_ids/n_points are only valid for env_type 'schedule'")
+
+        if self.env_type == "control_curve":
+            if self.policy_factory is None:
+                raise ValueError("env_type 'control_curve' requires a policy_factory")
+            if self.control_interval_seconds is None:
+                raise ValueError(
+                    "env_type 'control_curve' requires control_interval_seconds"
+                )
+            if self.design_factories or self.runtime_factories:
+                raise ValueError(
+                    "env_type 'control_curve' does not accept design_factories or "
+                    "runtime_factories; the decision vector is the control policy"
+                )
+        elif self.policy_factory is not None:
+            raise ValueError(
+                "policy_factory is only valid for env_type 'control_curve'"
+            )
 
         if self.env_type in ("cip", "joint") and not self.design_factories:
             raise ValueError(f"env_type '{self.env_type}' requires design_factories")
@@ -436,6 +474,24 @@ def build_env(config: EnvConfig) -> Any:
                 policy_space=policy_space,
                 controller_factory=lambda sched: ScheduleController(structures, sched),
                 metric_reader_factory=None,
+                control_interval_seconds=config.control_interval_seconds,
+                **common,
+            )
+        elif config.env_type == "control_curve":
+            from openswmm_gymnasium.control import (
+                ControlCurveController,
+                ControlCurveMetricReader,
+            )
+            from openswmm_gymnasium.spaces import ControlCurvePolicySpace
+
+            policy_space = ControlCurvePolicySpace.from_params(
+                config.policy_factory.params
+            )
+            env = SwmmControlEnv(
+                config.inp_path,
+                policy_space=policy_space,
+                controller_factory=lambda policy: ControlCurveController(policy),
+                metric_reader_factory=lambda policy: ControlCurveMetricReader(policy),
                 control_interval_seconds=config.control_interval_seconds,
                 **common,
             )

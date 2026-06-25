@@ -73,12 +73,23 @@ def _rtc_config(inp: str = "model.inp") -> dict:
 
 async def test_list_capabilities_structure(ctx):
     result = await list_capabilities(ctx)
-    assert set(result["env_types"]) == {"rtc", "cip", "joint", "mo_rtc"}
+    assert set(result["env_types"]) == {
+        "rtc", "cip", "joint", "mo_rtc", "market", "schedule", "control_curve",
+    }
     caps = result["capabilities"]
-    assert set(caps) == {"reward_term", "runtime_factory", "design_factory", "wrapper"}
+    assert set(caps) == {
+        "reward_term", "runtime_factory", "design_factory", "wrapper", "policy_factory",
+    }
     flooding = next(c for c in caps["reward_term"] if c["kind"] == "flooding_volume")
     assert flooding["description"]
     assert flooding["params_schema"]["type"] == "object"
+    # Spec §9 criterion 1: control_curve is discoverable under policy_factory
+    # with a complete params_schema.
+    control_curve = next(
+        c for c in caps["policy_factory"] if c["kind"] == "control_curve"
+    )
+    assert control_curve["description"]
+    assert control_curve["params_schema"]["type"] == "object"
 
 
 # ---------------------------------------------------------------------------

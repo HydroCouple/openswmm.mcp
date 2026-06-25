@@ -133,6 +133,57 @@ def test_design_dimensions_requires_design_factories():
         design_dimensions(rtc)
 
 
+def _control_curve_config(inp: str) -> EnvConfig:
+    return EnvConfig(
+        env_type="control_curve",
+        inp_path=inp,
+        control_interval_seconds=300,
+        policy_factory={
+            "kind": "control_curve",
+            "params": {
+                "assets": [
+                    {
+                        "link_id": "ORIF",
+                        "obs_node": "T1",
+                        "x_knots": [0.0, 0.5, 1.0],
+                        "monotonic": "nonincreasing",
+                    }
+                ],
+                "x_normalized": True,
+            },
+        },
+        observations=ObservationSpec(node_depths=["T1", "T2"]),
+        reward_terms=[
+            {"kind": "uncontrolled_discharge", "params": {"link_ids": ["OUT"]}},
+            {"kind": "storage_underutilization", "params": {"node_ids": ["T1", "T2"]}},
+        ],
+    )
+
+
+def test_control_curve_dimensions_labels_and_bounds():
+    pytest.importorskip("openswmm_gymnasium")
+    dims = design_dimensions(_control_curve_config("m.inp"))
+    assert [d.key for d in dims] == [
+        "control_curve/ORIF/y[0]",
+        "control_curve/ORIF/y[1]",
+        "control_curve/ORIF/y[2]",
+    ]
+    assert all(d.size == 1 for d in dims)
+    assert all((d.low, d.high) == (0.0, 1.0) for d in dims)
+
+
+def test_precondition_gate_accepts_control_curve_rejects_bare_rtc(job_manager):
+    pytest.importorskip("openswmm_gymnasium")
+    # A control_curve config has a searchable static factory -> accepted.
+    design_dimensions(_control_curve_config("m.inp"))  # no raise
+    # A bare rtc config has neither design nor policy factory -> rejected.
+    rtc = EnvConfig(
+        env_type="rtc", inp_path="m.inp", observations=ObservationSpec(node_depths=["T1"])
+    )
+    with pytest.raises(ToolError, match="searchable static factory|design_factories"):
+        design_dimensions(rtc)
+
+
 def test_job_manager_unknown_job_and_algorithm(job_manager):
     with pytest.raises(ToolError, match="ELEMENT_NOT_FOUND"):
         job_manager.get("nope")
@@ -273,3 +324,63 @@ async def test_nsga2_produces_nondominated_front(ctx, output_dir, job_manager):
                 x < y for x, y in zip(a_obj, b_obj)
             )
             assert not dominates
+
+
+def _copy_b01(output_dir: Path) -> str:
+    from openswmm_gymnasium.benchmarks.b01_twin_tank import SCENARIO_INP
+
+    dest = output_dir / "scenario.inp"
+    shutil.copy(SCENARIO_INP, dest)
+    return str(dest)
+
+
+@pytest.mark.integration
+async def test_control_curve_nsga2_front_and_decode(ctx, output_dir, job_manager):
+    pytest.importorskip("openswmm_gymnasium")
+    pytest.importorskip("platypus")
+    from openswmm_mcp.tools.gym_runs import (
+        decode_policy,
+        get_job_results,
+        start_optimization,
+    )
+
+    cfg = _control_curve_config(_copy_b01(output_dir))
+    snap = await start_optimization(
+        ctx,
+        config=cfg.model_dump(mode="json"),
+        optimization={"algorithm": "nsga2", "budget": 8, "population_size": 4, "seed": 5},
+        output_dir=str(output_dir / "cc_nsga2"),
+    )
+    final = await _wait_for(job_manager, snap["job_id"], "done", "failed", timeout=300.0)
+    assert final["state"] == "done", final["error"]
+
+    results = await get_job_results(ctx, job_id=snap["job_id"])
+    front = results["pareto"]
+    assert front  # size >= 1
+    # Decisions decode straight back to per-asset curves.
+    decoded = await decode_policy(ctx, job_id=snap["job_id"], index="best")
+    assert len(decoded["curves"]) == 1
+    curve = decoded["curves"][0]
+    assert curve["link_id"] == "ORIF"
+    assert curve["obs_node"] == "T1"
+    assert curve["x_knots"] == [0.0, 0.5, 1.0]
+    assert len(curve["y_values"]) == 3
+    # nonincreasing projection: the applied curve is monotone non-increasing.
+    ys = curve["y_values"]
+    assert all(ys[i + 1] <= ys[i] + 1e-9 for i in range(len(ys) - 1))
+
+
+@pytest.mark.integration
+async def test_decode_policy_rejects_non_control_curve(ctx, output_dir, job_manager):
+    pytest.importorskip("openswmm_gymnasium")
+    from openswmm_mcp.tools.gym_runs import decode_policy, start_optimization
+
+    snap = await start_optimization(
+        ctx,
+        config=_cip_config(_copy_inp(output_dir)).model_dump(mode="json"),
+        optimization={"algorithm": "random_search", "budget": 2, "seed": 1},
+        output_dir=str(output_dir / "cip_for_decode"),
+    )
+    await _wait_for(job_manager, snap["job_id"], "done", "failed", timeout=120.0)
+    with pytest.raises(ToolError, match="control_curve"):
+        await decode_policy(ctx, job_id=snap["job_id"], index="best")

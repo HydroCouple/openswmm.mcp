@@ -23,9 +23,9 @@ from __future__ import annotations
 
 import importlib
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from openswmm_mcp.errors import ErrorCode, ToolError
 
@@ -223,6 +223,74 @@ class NodeMaxDepthParams(_Params):
     name: str = "node_max_depth"
 
 
+# -- policy factories (searchable static control policies) --------------------
+
+
+class ControlCurveAssetParams(_Params):
+    """One controlled link and its PWL breakpoint curve.
+
+    @ivar link_id: Controlled link ID (orifice/weir/pump). Must exist.
+    @ivar obs_node: Observed node feeding the curve's C{x} axis. Must exist.
+    @ivar obs_attr: Observation attribute (C{depthN}, C{headN}, C{volumeN},
+        C{inflowN}).
+    @ivar x_knots: Strictly increasing knot positions (length >= 2).
+    @ivar y_low: Lower search bound for every knot setting.
+    @ivar y_high: Upper search bound for every knot setting.
+    @ivar y_init: Optional seed/neutral curve (defaults to all C{y_high}).
+    @ivar monotonic: Curve constraint, projected at decode time.
+    """
+
+    link_id: str = Field(min_length=1)
+    obs_node: str = Field(min_length=1)
+    obs_attr: Literal["depthN", "depth", "headN", "volumeN", "inflowN"] = "depthN"
+    x_knots: list[float] = Field(min_length=2)
+    y_low: float = 0.0
+    y_high: float = 1.0
+    y_init: list[float] | None = None
+    monotonic: Literal["none", "nonincreasing", "nondecreasing"] = "none"
+
+    @model_validator(mode="after")
+    def _check_asset(self) -> ControlCurveAssetParams:
+        if any(
+            self.x_knots[i + 1] <= self.x_knots[i]
+            for i in range(len(self.x_knots) - 1)
+        ):
+            raise ValueError(f"asset {self.link_id!r}: x_knots must be strictly increasing")
+        if self.y_low > self.y_high:
+            raise ValueError(
+                f"asset {self.link_id!r}: y_low ({self.y_low}) must be <= "
+                f"y_high ({self.y_high})"
+            )
+        if self.y_init is not None and len(self.y_init) != len(self.x_knots):
+            raise ValueError(
+                f"asset {self.link_id!r}: y_init must have one value per knot "
+                f"({len(self.x_knots)})"
+            )
+        return self
+
+
+class ControlCurveParams(_Params):
+    """Params for the C{control_curve} policy factory.
+
+    The decision vector is the C{y} setting at each knot of each asset
+    (asset-major, knot order); the C{x_knots} are fixed. Bounds come from each
+    asset's C{[y_low, y_high]}. A flat C{y = y_high} curve reproduces the
+    uncontrolled baseline for passive-open structures.
+
+    @ivar assets: One entry per controllable asset (required, non-empty).
+    @ivar x_normalized: Index curves by C{depth / full_depth} (recommended).
+    @ivar control_interval_steps: Recompute the curve every N control steps.
+    @ivar rate_limit: Optional max C{|Δsetting|} per control step; C{None} = off.
+    @ivar name: Action-space / decision key.
+    """
+
+    assets: list[ControlCurveAssetParams] = Field(min_length=1)
+    x_normalized: bool = True
+    control_interval_steps: int = Field(default=1, ge=1)
+    rate_limit: float | None = Field(default=None, gt=0.0)
+    name: str = "control_curve"
+
+
 # -- wrappers -----------------------------------------------------------------
 
 
@@ -413,6 +481,15 @@ for _spec in [
         NodeMaxDepthParams,
         "Design-time maximum node depth per node in [low,high].",
     ),
+    # policy factories (openswmm_gymnasium.spaces.control_curve)
+    KindSpec(
+        "control_curve",
+        "policy_factory",
+        "openswmm_gymnasium.spaces.control_curve:ControlCurvePolicySpace",
+        ControlCurveParams,
+        "Searchable reactive PWL control curves: tune the [0,1] setting at each "
+        "fixed knot per controlled link, indexed by an observed node's state.",
+    ),
     # wrappers (openswmm_gymnasium.wrappers)
     KindSpec(
         "record_trajectory",
@@ -575,9 +652,9 @@ def construct_kind(category: str, kind: str, params: dict[str, Any]) -> Any:
     @raise ToolError: C{VALIDATION_ERROR} for unknown kind/bad params or
         wrapper categories; C{DEPENDENCY_MISSING} without the gym extra.
     """
-    if category == "wrapper":
+    if category in ("wrapper", "policy_factory"):
         raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] Wrappers are applied by "
+            f"[{ErrorCode.VALIDATION_ERROR}] {category} kinds are applied by "
             "build_env, not constructed directly."
         )
     validated = validate_params(category, kind, params)

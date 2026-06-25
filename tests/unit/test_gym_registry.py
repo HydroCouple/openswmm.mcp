@@ -34,6 +34,7 @@ EXPECTED_KINDS = {
         "link_diameter",
         "node_max_depth",
     },
+    "policy_factory": {"control_curve"},
     "wrapper": {
         "record_trajectory",
         "rescale_box_actions",
@@ -103,6 +104,78 @@ def test_validate_params_accepts_valid_and_rejects_invalid():
 def test_construct_kind_refuses_wrappers():
     with pytest.raises(ToolError, match="VALIDATION_ERROR"):
         registry.construct_kind("wrapper", "mask_design", {})
+
+
+def test_construct_kind_refuses_policy_factory():
+    # policy_factory kinds (like wrappers) are built by build_env, not here.
+    with pytest.raises(ToolError, match="VALIDATION_ERROR"):
+        registry.construct_kind(
+            "policy_factory",
+            "control_curve",
+            {"assets": [{"link_id": "Or1", "obs_node": "J1", "x_knots": [0.0, 1.0]}]},
+        )
+
+
+def test_control_curve_schema_exposes_curve_fields():
+    spec = registry.get_kind("policy_factory", "control_curve")
+    schema = spec.params_model.model_json_schema()
+    top = set(schema["properties"])
+    assert {"assets", "x_normalized", "control_interval_steps", "rate_limit"} <= top
+    # The per-asset sub-schema lists the curve fields.
+    asset_schema = schema["$defs"]["ControlCurveAssetParams"]["properties"]
+    assert {"link_id", "obs_node", "x_knots", "y_low", "y_high", "monotonic"} <= set(
+        asset_schema
+    )
+
+
+def test_control_curve_params_validation():
+    base = {"assets": [{"link_id": "Or1", "obs_node": "J1", "x_knots": [0.0, 0.5, 1.0]}]}
+    ok = registry.validate_params("policy_factory", "control_curve", base)
+    assert ok.assets[0].link_id == "Or1"
+
+    # x_knots must be strictly increasing.
+    with pytest.raises(ToolError, match="VALIDATION_ERROR"):
+        registry.validate_params(
+            "policy_factory",
+            "control_curve",
+            {"assets": [{"link_id": "Or1", "obs_node": "J1", "x_knots": [0.0, 0.0]}]},
+        )
+    # y_low > y_high.
+    with pytest.raises(ToolError, match="VALIDATION_ERROR"):
+        registry.validate_params(
+            "policy_factory",
+            "control_curve",
+            {
+                "assets": [
+                    {
+                        "link_id": "Or1",
+                        "obs_node": "J1",
+                        "x_knots": [0.0, 1.0],
+                        "y_low": 0.9,
+                        "y_high": 0.1,
+                    }
+                ]
+            },
+        )
+    # y_init length mismatch.
+    with pytest.raises(ToolError, match="VALIDATION_ERROR"):
+        registry.validate_params(
+            "policy_factory",
+            "control_curve",
+            {
+                "assets": [
+                    {
+                        "link_id": "Or1",
+                        "obs_node": "J1",
+                        "x_knots": [0.0, 0.5, 1.0],
+                        "y_init": [1.0, 1.0],
+                    }
+                ]
+            },
+        )
+    # empty assets.
+    with pytest.raises(ToolError, match="VALIDATION_ERROR"):
+        registry.validate_params("policy_factory", "control_curve", {"assets": []})
 
 
 # ---------------------------------------------------------------------------

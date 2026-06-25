@@ -165,6 +165,15 @@ async def list_capabilities(ctx: Context) -> dict:
             "joint": "Combined design + runtime control (SwmmJointCIPRTCEnv).",
             "mo_rtc": "Multi-objective runtime control (SwmmMORTCEnv); requires "
             "ideal_point and reference_point.",
+            "market": "Tune a reactive market controller's cost-curve + PID "
+            "params (SwmmControlEnv); requires market_config.",
+            "schedule": "Open-loop full-event optimal control (SwmmControlEnv); "
+            "requires structure_ids, n_points, control_interval_seconds.",
+            "control_curve": "Tune a reactive piecewise-linear control policy "
+            "(SwmmControlEnv); requires a policy_factory and "
+            "control_interval_seconds. The decision vector is the per-knot "
+            "breakpoint settings, optimized to trace the cost curve (e.g. CSO "
+            "vs flooding volume).",
         },
         "capabilities": capabilities,
         "notes": [
@@ -172,6 +181,9 @@ async def list_capabilities(ctx: Context) -> dict:
             "are listed per element ID in 'observations'.",
             "reward_terms left empty means the env default: a single "
             "all-nodes flooding_volume term.",
+            "policy_factory 'control_curve' is searched by gym_start_optimization "
+            "just like design_factories; decode a result vector to per-asset "
+            "curves with gym_decode_policy.",
         ],
     }
 

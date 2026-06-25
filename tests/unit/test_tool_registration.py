@@ -77,6 +77,7 @@ class TestToolRegistration:
         "gym_list_jobs",
         "gym_cancel_job",
         "gym_get_job_results",
+        "gym_decode_policy",
         # Phase 5: scoring + model bridge.
         "gym_pareto_filter",
         "gym_score_front",

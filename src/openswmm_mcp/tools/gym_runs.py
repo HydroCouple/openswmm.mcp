@@ -260,7 +260,11 @@ async def start_optimization(
     """Start a background design-search job; returns immediately.
 
     The env config (stored I{name} or inline I{config}, exactly one)
-    must have design factories (env_type C{cip} or C{joint}).
+    must have a searchable static factory: design_factories (env_type
+    C{cip} or C{joint}) or a policy_factory (env_type C{control_curve},
+    C{market}, C{schedule}). For C{control_curve} the decision vector is
+    the per-knot breakpoint settings; decode a result with
+    C{gym_decode_policy}.
     I{optimization} sets the run, e.g.::
 
         {"algorithm": "random_search", "budget": 40, "seed": 7}
@@ -320,3 +324,83 @@ async def get_job_results(ctx: Context, job_id: str) -> dict:
     single best pick, and artifact paths.
     """
     return get_job_manager(ctx).results(job_id)
+
+
+def _decisions_to_vector(decisions: dict, labels: list[str]) -> list[float]:
+    """Flatten a logged C{decisions} payload back to a vector in *labels* order.
+
+    Each control-curve dimension is a single-component group keyed by its
+    label, so C{decisions[label]} is a one-element list.
+
+    @raise ToolError: C{VALIDATION_ERROR} if a label is missing.
+    """
+    vector: list[float] = []
+    for label in labels:
+        comp = decisions.get(label)
+        if comp is None:
+            raise ToolError(
+                f"[{ErrorCode.VALIDATION_ERROR}] Decision component '{label}' "
+                "missing from the logged evaluation; was this a control_curve job?"
+            )
+        vector.append(float(comp[0] if isinstance(comp, (list, tuple)) else comp))
+    return vector
+
+
+@gym_mcp.tool()
+async def decode_policy(ctx: Context, job_id: str, index: str = "best") -> dict:
+    """Decode a control-curve result vector into per-asset PWL curves.
+
+    For a finished C{control_curve} optimization job, maps a chosen decision
+    vector back onto each controlled link's human-readable curve — the applied
+    (monotonic-projected) C{y_values} at each fixed C{x_knot}, with the
+    observed node and attribute. I{index} selects which point: C{"best"} (the
+    convenience single pick) or an integer string indexing the Pareto front
+    (C{"0"}, C{"1"}, ...). Requires the gym extra.
+    """
+    require_gymnasium("gym_decode_policy")
+    from openswmm_gymnasium.spaces import ControlCurvePolicySpace
+
+    manager = get_job_manager(ctx)
+    env_config = manager.get_env_config(job_id)
+    if env_config.env_type != "control_curve" or env_config.policy_factory is None:
+        raise ToolError(
+            f"[{ErrorCode.VALIDATION_ERROR}] gym_decode_policy applies to "
+            f"'control_curve' jobs; job '{job_id}' is '{env_config.env_type}'."
+        )
+    results = manager.results(job_id)  # raises unless state == "done"
+
+    if index == "best":
+        evaluation = results.get("best")
+    else:
+        try:
+            i = int(index)
+        except ValueError as exc:
+            raise ToolError(
+                f"[{ErrorCode.VALIDATION_ERROR}] index must be 'best' or an "
+                f"integer Pareto-front position, got {index!r}."
+            ) from exc
+        front = results.get("pareto") or []
+        if not (0 <= i < len(front)):
+            raise ToolError(
+                f"[{ErrorCode.VALIDATION_ERROR}] Pareto index {i} out of range "
+                f"(front has {len(front)} entries)."
+            )
+        evaluation = front[i]
+    if not evaluation:
+        raise ToolError(
+            f"[{ErrorCode.VALIDATION_ERROR}] No evaluation to decode for job "
+            f"'{job_id}'."
+        )
+
+    space = ControlCurvePolicySpace.from_params(env_config.policy_factory.params)
+    vector = _decisions_to_vector(evaluation["decisions"], space.labels)
+    curves = space.decode_curves(vector)
+    return {
+        "job_id": job_id,
+        "index": index,
+        "objectives": evaluation.get("objectives", {}),
+        "x_normalized": space.x_normalized,
+        "rate_limit": space.rate_limit,
+        "control_interval_steps": space.control_interval_steps,
+        "curves": curves,
+    }

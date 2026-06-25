@@ -176,27 +176,61 @@ def _schedule_dimensions(env_config: EnvConfig) -> list[DesignDimension]:
     ]
 
 
+def _control_curve_dimensions(env_config: EnvConfig) -> list[DesignDimension]:
+    """Derive search dimensions from a reactive PWL control-curve policy.
+
+    Each per-knot setting becomes a single-component dimension bounded by its
+    asset's C{[y_low, y_high]} and labeled C{control_curve/<link_id>/y[<k>]}, so
+    a job's decision vector decodes straight back to per-asset curves.
+
+    @param env_config: A C{"control_curve"} env config.
+    @type env_config: L{EnvConfig}
+    @rtype: list of L{DesignDimension}
+    @raise ToolError: C{DEPENDENCY_MISSING} without the gym extra.
+    """
+    try:
+        from openswmm_gymnasium.spaces import ControlCurvePolicySpace
+    except ImportError as exc:
+        raise ToolError(
+            f"[{ErrorCode.DEPENDENCY_MISSING}] Control-curve optimization requires "
+            "the optional openswmm.gymnasium package. Install it with: "
+            "pip install 'openswmm.mcp[gym]'"
+        ) from exc
+
+    space = ControlCurvePolicySpace.from_params(env_config.policy_factory.params)
+    low, high = space.low, space.high
+    return [
+        DesignDimension(
+            key=label, labels=(label,), low=float(low[i]), high=float(high[i])
+        )
+        for i, label in enumerate(space.labels)
+    ]
+
+
 def design_dimensions(env_config: EnvConfig) -> list[DesignDimension]:
     """Derive labeled search-space dimensions from the config.
 
-    For C{"market"}/C{"schedule"} configs the dimensions come from the
-    controller policy space; otherwise from the design factories.
+    For C{"market"}/C{"schedule"}/C{"control_curve"} configs the dimensions
+    come from the controller policy space; otherwise from the design factories.
 
     @param env_config: Config whose factories / policy span the space.
     @type env_config: L{EnvConfig}
     @return: One entry per factory (or policy parameter), in config order.
     @rtype: list of L{DesignDimension}
-    @raise ToolError: C{VALIDATION_ERROR} when the config has nothing to
-        optimize.
+    @raise ToolError: C{VALIDATION_ERROR} when the config has no searchable
+        static factory (no design_factory and no policy_factory).
     """
     if env_config.env_type == "market":
         return _market_dimensions(env_config)
     if env_config.env_type == "schedule":
         return _schedule_dimensions(env_config)
+    if env_config.env_type == "control_curve":
+        return _control_curve_dimensions(env_config)
     if not env_config.design_factories:
         raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] Optimization requires an env "
-            "config with design_factories (env_type 'cip' or 'joint')."
+            f"[{ErrorCode.VALIDATION_ERROR}] Optimization requires an env config "
+            "with a searchable static factory: design_factories (env_type 'cip' "
+            "or 'joint') or a policy_factory (env_type 'control_curve')."
         )
     dims: list[DesignDimension] = []
     for spec in env_config.design_factories:
@@ -318,8 +352,13 @@ class _Evaluator:
         self._dims = dims
         self._env = build_env(job.env_config)
         self._is_cip = job.env_config.env_type == "cip"
-        # market + schedule are single-step envs whose action is the raw vector.
-        self._is_policy_env = job.env_config.env_type in ("market", "schedule")
+        # market/schedule/control_curve are single-step envs whose action is
+        # the raw policy vector (one step runs the whole closed-loop episode).
+        self._is_policy_env = job.env_config.env_type in (
+            "market",
+            "schedule",
+            "control_curve",
+        )
         self._directions = _term_directions(job.env_config)
         self.objective_names = list(self._directions)
         self.evaluations: list[dict[str, Any]] = []
