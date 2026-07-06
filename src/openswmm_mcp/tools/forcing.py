@@ -124,6 +124,10 @@ async def set_forcing(
     session = await sm.get_session(session_id)
     require_state(session, "running")
 
+    # Provenance for the C↔Python↔MCP parity matrix (build_matrix_provenance.py):
+    # this dispatcher aggregates the per-element forcing C entry points.
+    # wraps: swmm_forcing_node_lat_inflow swmm_forcing_node_head_boundary swmm_forcing_node_quality swmm_forcing_link_flow swmm_forcing_link_setting swmm_forcing_subcatch_rainfall swmm_forcing_subcatch_evap swmm_forcing_subcatch_snowfall swmm_forcing_gage_rainfall
+
     # Validate target_type
     target_lower = target_type.strip().lower()
     if target_lower not in _VALID_VARIABLES_BY_TYPE:
@@ -352,6 +356,9 @@ async def set_climate_forcing(
     session = await sm.get_session(session_id)
     require_new_engine(session, "Climate forcing")
     require_state(session, "running")
+
+    # Provenance for the parity matrix (build_matrix_provenance.py):
+    # wraps: swmm_forcing_climate_temperature swmm_forcing_climate_wind swmm_forcing_climate_evap
 
     var_lower = variable.strip().lower()
     method_name = _CLIMATE_SETTERS.get(var_lower)
