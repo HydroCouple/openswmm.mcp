@@ -438,3 +438,170 @@ class TestGageScaleFactor:
             await set_gage_scale_factor(
                 ctx, session_id="gsf_bad", gage_id="NOPE", scale_factor=1.0
             )
+
+
+# ---------------------------------------------------------------------------
+# get_gage_snow_factor / set_gage_snow_factor
+# ---------------------------------------------------------------------------
+
+
+class TestGageSnowFactor:
+    async def _open(self, session_manager, tmp_inp, session_id):
+        from openswmm_mcp.tools.lifecycle import open_model
+
+        ctx = MockContext(session_manager)
+        await open_model(ctx, inp_path=tmp_inp, session_id=session_id)
+        return ctx
+
+    async def test_set_then_get_roundtrips(self, session_manager, tmp_inp, reference_model):
+        from openswmm_mcp.tools.editing import get_gage_snow_factor, set_gage_snow_factor
+
+        ctx = await self._open(session_manager, tmp_inp, "gsnf_rt")
+        out = await set_gage_snow_factor(
+            ctx,
+            session_id="gsnf_rt",
+            gage_id=reference_model.GAGE_ID,
+            snow_factor=1.7,
+        )
+        assert out["status"] == "updated"
+        assert out["snow_factor"] == 1.7
+
+        got = await get_gage_snow_factor(
+            ctx, session_id="gsnf_rt", gage_id=reference_model.GAGE_ID
+        )
+        assert got["snow_factor"] == pytest.approx(1.7)
+
+    async def test_snow_factor_distinct_from_scale_factor(
+        self, session_manager, tmp_inp, reference_model
+    ):
+        from openswmm_mcp.tools.editing import (
+            get_gage_scale_factor,
+            get_gage_snow_factor,
+            set_gage_scale_factor,
+            set_gage_snow_factor,
+        )
+
+        ctx = await self._open(session_manager, tmp_inp, "gsnf_distinct")
+        await set_gage_snow_factor(
+            ctx, session_id="gsnf_distinct", gage_id=reference_model.GAGE_ID,
+            snow_factor=1.4,
+        )
+        await set_gage_scale_factor(
+            ctx, session_id="gsnf_distinct", gage_id=reference_model.GAGE_ID,
+            scale_factor=2.3,
+        )
+        snow = await get_gage_snow_factor(
+            ctx, session_id="gsnf_distinct", gage_id=reference_model.GAGE_ID
+        )
+        scale = await get_gage_scale_factor(
+            ctx, session_id="gsnf_distinct", gage_id=reference_model.GAGE_ID
+        )
+        assert snow["snow_factor"] == pytest.approx(1.4)
+        assert scale["scale_factor"] == pytest.approx(2.3)
+
+    async def test_get_empty_gage_id_raises(self, session_manager, tmp_inp):
+        from openswmm_mcp.tools.editing import get_gage_snow_factor
+
+        ctx = await self._open(session_manager, tmp_inp, "gsnf_noid")
+        with pytest.raises(ToolError, match="gage_id must not be empty"):
+            await get_gage_snow_factor(ctx, session_id="gsnf_noid", gage_id="")
+
+    async def test_set_unknown_gage_raises(self, session_manager, tmp_inp):
+        from openswmm_mcp.tools.editing import set_gage_snow_factor
+
+        ctx = await self._open(session_manager, tmp_inp, "gsnf_bad")
+        with pytest.raises(ToolError, match="not found"):
+            await set_gage_snow_factor(
+                ctx, session_id="gsnf_bad", gage_id="NOPE", snow_factor=1.0
+            )
+
+
+# ---------------------------------------------------------------------------
+# get/set_subcatch_{rain,snow}_scale_factor
+# ---------------------------------------------------------------------------
+
+
+class TestSubcatchScaleFactor:
+    async def _open(self, session_manager, tmp_inp, session_id):
+        from openswmm_mcp.tools.lifecycle import open_model
+
+        ctx = MockContext(session_manager)
+        await open_model(ctx, inp_path=tmp_inp, session_id=session_id)
+        return ctx
+
+    async def test_rain_set_then_get_roundtrips(self, session_manager, tmp_inp):
+        from openswmm_mcp.tools.editing import (
+            get_subcatch_rain_scale_factor,
+            set_subcatch_rain_scale_factor,
+        )
+
+        ctx = await self._open(session_manager, tmp_inp, "srsf_rt")
+        out = await set_subcatch_rain_scale_factor(
+            ctx, session_id="srsf_rt", subcatch_id="S1", scale_factor=0.5
+        )
+        assert out["status"] == "updated"
+        assert out["rain_scale_factor"] == 0.5
+
+        got = await get_subcatch_rain_scale_factor(
+            ctx, session_id="srsf_rt", subcatch_id="S1"
+        )
+        assert got["rain_scale_factor"] == pytest.approx(0.5)
+
+    async def test_snow_set_then_get_roundtrips(self, session_manager, tmp_inp):
+        from openswmm_mcp.tools.editing import (
+            get_subcatch_snow_scale_factor,
+            set_subcatch_snow_scale_factor,
+        )
+
+        ctx = await self._open(session_manager, tmp_inp, "sssf_rt")
+        out = await set_subcatch_snow_scale_factor(
+            ctx, session_id="sssf_rt", subcatch_id="S1", scale_factor=1.3
+        )
+        assert out["snow_scale_factor"] == 1.3
+
+        got = await get_subcatch_snow_scale_factor(
+            ctx, session_id="sssf_rt", subcatch_id="S1"
+        )
+        assert got["snow_scale_factor"] == pytest.approx(1.3)
+
+    async def test_rain_and_snow_are_independent(self, session_manager, tmp_inp):
+        from openswmm_mcp.tools.editing import (
+            get_subcatch_rain_scale_factor,
+            get_subcatch_snow_scale_factor,
+            set_subcatch_rain_scale_factor,
+            set_subcatch_snow_scale_factor,
+        )
+
+        ctx = await self._open(session_manager, tmp_inp, "ssf_indep")
+        await set_subcatch_rain_scale_factor(
+            ctx, session_id="ssf_indep", subcatch_id="S1", scale_factor=0.7
+        )
+        await set_subcatch_snow_scale_factor(
+            ctx, session_id="ssf_indep", subcatch_id="S1", scale_factor=1.9
+        )
+        rain = await get_subcatch_rain_scale_factor(
+            ctx, session_id="ssf_indep", subcatch_id="S1"
+        )
+        snow = await get_subcatch_snow_scale_factor(
+            ctx, session_id="ssf_indep", subcatch_id="S1"
+        )
+        assert rain["rain_scale_factor"] == pytest.approx(0.7)
+        assert snow["snow_scale_factor"] == pytest.approx(1.9)
+
+    async def test_empty_subcatch_id_raises(self, session_manager, tmp_inp):
+        from openswmm_mcp.tools.editing import get_subcatch_rain_scale_factor
+
+        ctx = await self._open(session_manager, tmp_inp, "ssf_noid")
+        with pytest.raises(ToolError, match="subcatch_id must not be empty"):
+            await get_subcatch_rain_scale_factor(
+                ctx, session_id="ssf_noid", subcatch_id=""
+            )
+
+    async def test_unknown_subcatch_raises(self, session_manager, tmp_inp):
+        from openswmm_mcp.tools.editing import set_subcatch_rain_scale_factor
+
+        ctx = await self._open(session_manager, tmp_inp, "ssf_bad")
+        with pytest.raises(ToolError, match="not found"):
+            await set_subcatch_rain_scale_factor(
+                ctx, session_id="ssf_bad", subcatch_id="NOPE", scale_factor=1.0
+            )

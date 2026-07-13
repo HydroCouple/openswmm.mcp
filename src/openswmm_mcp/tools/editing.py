@@ -965,6 +965,256 @@ async def set_gage_scale_factor(
     }
 
 
+@editing_mcp.tool()
+async def get_gage_snow_factor(
+    ctx: Context,
+    session_id: str = "default",
+    gage_id: str = "",
+) -> dict:
+    """Return a rain gage's snow catch factor (SCF).
+
+    The SCF corrects the physical gage's snow-catch deficiency: below the snow
+    temperature threshold, snowfall is multiplied by it. Distinct from the
+    rainfall :func:`get_gage_scale_factor` — SCF affects only the snow branch.
+    Valid in ``building``, ``opened``, or ``initialized`` state.
+
+    Parameters
+    ----------
+    gage_id:
+        Gage identifier.
+    """
+    if not gage_id:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] gage_id must not be empty.")
+
+    session = await _require_editable(ctx, session_id)
+    gages = session.gages
+
+    g_idx = await resolve_index(gages, gage_id, "Gage")
+    if g_idx < 0:
+        raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Gage '{gage_id}' not found.")
+
+    snow_factor = await asyncio.to_thread(lambda: gages[g_idx].snow_factor)
+    return {
+        "session_id": session_id,
+        "gage_id": gage_id,
+        "snow_factor": float(snow_factor),
+    }
+
+
+@editing_mcp.tool()
+async def set_gage_snow_factor(
+    ctx: Context,
+    session_id: str = "default",
+    gage_id: str = "",
+    snow_factor: float = 1.0,
+) -> dict:
+    """Set a rain gage's snow catch factor (SCF; must be > 0).
+
+    The SCF multiplies the gage's snowfall (the below-freezing branch of the
+    rain/snow split); it does not touch rainfall. Maps to the ``Gage.snow_factor``
+    attribute, distinct from :func:`set_gage_scale_factor`. Valid in
+    ``building``, ``opened``, or ``initialized`` state.
+
+    Parameters
+    ----------
+    gage_id:
+        Gage identifier.
+    snow_factor:
+        Multiplier applied to the gage's snowfall (1.0 = unchanged).
+    """
+    if not gage_id:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] gage_id must not be empty.")
+
+    session = await _require_editable(ctx, session_id)
+    gages = session.gages
+
+    g_idx = await resolve_index(gages, gage_id, "Gage")
+    if g_idx < 0:
+        raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Gage '{gage_id}' not found.")
+
+    sf = float(snow_factor)
+
+    def _apply() -> None:
+        gages[g_idx].snow_factor = sf
+
+    try:
+        await asyncio.to_thread(_apply)
+    except (RuntimeError, ValueError) as exc:
+        raise ToolError(f"[{ErrorCode.ENGINE_ERROR}] {exc}")
+
+    logger.info(
+        "Session '%s': gage '%s' snow_factor set to %s.", session_id, gage_id, sf
+    )
+    return {
+        "status": "updated",
+        "session_id": session_id,
+        "gage_id": gage_id,
+        "snow_factor": sf,
+    }
+
+
+# ===========================================================================
+# Per-subcatchment precipitation scale factors
+#
+# Optional [SUBCATCHMENTS] tokens 9/10, default 1.0. They compose
+# multiplicatively with the gage's own scale factor / snow catch factor and are
+# settable mid-run (calibration / RTC). Mirrors the gage scale-factor tools.
+# ===========================================================================
+
+
+async def _resolve_subcatch(ctx: Context, session_id: str, subcatch_id: str):
+    """Resolve (session, subcatchments accessor, index) or raise ToolError."""
+    if not subcatch_id:
+        raise ToolError(
+            f"[{ErrorCode.VALIDATION_ERROR}] subcatch_id must not be empty."
+        )
+    session = await _require_editable(ctx, session_id)
+    subcatchments = session.subcatchments
+    sc_idx = await resolve_index(subcatchments, subcatch_id, "Subcatchment")
+    if sc_idx < 0:
+        raise ToolError(
+            f"[{ErrorCode.ELEMENT_NOT_FOUND}] Subcatchment '{subcatch_id}' not found."
+        )
+    return subcatchments, sc_idx
+
+
+@editing_mcp.tool()
+async def get_subcatch_rain_scale_factor(
+    ctx: Context,
+    session_id: str = "default",
+    subcatch_id: str = "",
+) -> dict:
+    """Return a subcatchment's rainfall scale factor.
+
+    Optional ``[SUBCATCHMENTS]`` token 9 (default 1.0). Multiplies this
+    subcatchment's gage-derived rainfall only, composing with the gage's own
+    scale factor. Valid in ``building``, ``opened``, or ``initialized`` state.
+
+    Parameters
+    ----------
+    subcatch_id:
+        Subcatchment identifier.
+    """
+    subcatchments, sc_idx = await _resolve_subcatch(ctx, session_id, subcatch_id)
+    value = await asyncio.to_thread(lambda: subcatchments[sc_idx].rain_scale_factor)
+    return {
+        "session_id": session_id,
+        "subcatch_id": subcatch_id,
+        "rain_scale_factor": float(value),
+    }
+
+
+@editing_mcp.tool()
+async def set_subcatch_rain_scale_factor(
+    ctx: Context,
+    session_id: str = "default",
+    subcatch_id: str = "",
+    scale_factor: float = 1.0,
+) -> dict:
+    """Set a subcatchment's rainfall scale factor (must be > 0).
+
+    Optional ``[SUBCATCHMENTS]`` token 9. Settable mid-run for parameter
+    sweeps / RTC. Valid in ``building``, ``opened``, or ``initialized`` state.
+
+    Parameters
+    ----------
+    subcatch_id:
+        Subcatchment identifier.
+    scale_factor:
+        Multiplier applied to this subcatchment's rainfall (1.0 = unchanged).
+    """
+    subcatchments, sc_idx = await _resolve_subcatch(ctx, session_id, subcatch_id)
+    sf = float(scale_factor)
+
+    def _apply() -> None:
+        subcatchments[sc_idx].rain_scale_factor = sf
+
+    try:
+        await asyncio.to_thread(_apply)
+    except (RuntimeError, ValueError) as exc:
+        raise ToolError(f"[{ErrorCode.ENGINE_ERROR}] {exc}")
+
+    logger.info(
+        "Session '%s': subcatch '%s' rain_scale_factor set to %s.",
+        session_id, subcatch_id, sf,
+    )
+    return {
+        "status": "updated",
+        "session_id": session_id,
+        "subcatch_id": subcatch_id,
+        "rain_scale_factor": sf,
+    }
+
+
+@editing_mcp.tool()
+async def get_subcatch_snow_scale_factor(
+    ctx: Context,
+    session_id: str = "default",
+    subcatch_id: str = "",
+) -> dict:
+    """Return a subcatchment's snowfall scale factor.
+
+    Optional ``[SUBCATCHMENTS]`` token 10 (default 1.0). Composes with the gage
+    snow catch factor (SCF). Valid in ``building``, ``opened``, or
+    ``initialized`` state.
+
+    Parameters
+    ----------
+    subcatch_id:
+        Subcatchment identifier.
+    """
+    subcatchments, sc_idx = await _resolve_subcatch(ctx, session_id, subcatch_id)
+    value = await asyncio.to_thread(lambda: subcatchments[sc_idx].snow_scale_factor)
+    return {
+        "session_id": session_id,
+        "subcatch_id": subcatch_id,
+        "snow_scale_factor": float(value),
+    }
+
+
+@editing_mcp.tool()
+async def set_subcatch_snow_scale_factor(
+    ctx: Context,
+    session_id: str = "default",
+    subcatch_id: str = "",
+    scale_factor: float = 1.0,
+) -> dict:
+    """Set a subcatchment's snowfall scale factor (must be > 0).
+
+    Optional ``[SUBCATCHMENTS]`` token 10. Composes with the gage snow catch
+    factor (SCF); settable mid-run. Valid in ``building``, ``opened``, or
+    ``initialized`` state.
+
+    Parameters
+    ----------
+    subcatch_id:
+        Subcatchment identifier.
+    scale_factor:
+        Multiplier applied to this subcatchment's snowfall (1.0 = unchanged).
+    """
+    subcatchments, sc_idx = await _resolve_subcatch(ctx, session_id, subcatch_id)
+    sf = float(scale_factor)
+
+    def _apply() -> None:
+        subcatchments[sc_idx].snow_scale_factor = sf
+
+    try:
+        await asyncio.to_thread(_apply)
+    except (RuntimeError, ValueError) as exc:
+        raise ToolError(f"[{ErrorCode.ENGINE_ERROR}] {exc}")
+
+    logger.info(
+        "Session '%s': subcatch '%s' snow_scale_factor set to %s.",
+        session_id, subcatch_id, sf,
+    )
+    return {
+        "status": "updated",
+        "session_id": session_id,
+        "subcatch_id": subcatch_id,
+        "snow_scale_factor": sf,
+    }
+
+
 # ===========================================================================
 # Rename tools (Phase 2 wave 2 — close the three honest mcp-gaps)
 #
