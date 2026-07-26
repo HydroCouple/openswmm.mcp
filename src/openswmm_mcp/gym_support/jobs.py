@@ -117,14 +117,16 @@ class DesignDimension:
 
     @ivar key: Action-space key (the factory's C{name} param).
     @ivar labels: Per-component labels, C{"<kind>:<element_id>"}.
-    @ivar low: Scalar lower bound.
-    @ivar high: Scalar upper bound.
+    @ivar low: Lower bound — a scalar broadcast across all components, or a
+        per-component tuple (for factories whose components carry different
+        physical ranges, e.g. storage C{(a,b,c)} or RDII C{(R,dmax,drecov,dinit)}).
+    @ivar high: Upper bound, scalar or per-component like C{low}.
     """
 
     key: str
     labels: tuple[str, ...]
-    low: float
-    high: float
+    low: float | tuple[float, ...]
+    high: float | tuple[float, ...]
 
     @property
     def size(self) -> int:
@@ -194,7 +196,9 @@ def _schedule_dimensions(env_config: EnvConfig) -> list[DesignDimension]:
         env_config.structure_ids, env_config.n_points, low=float(lo), high=float(hi)
     )
     return [
-        DesignDimension(key=label, labels=(label,), low=float(space.low[i]), high=float(space.high[i]))
+        DesignDimension(
+            key=label, labels=(label,), low=float(space.low[i]), high=float(space.high[i])
+        )
         for i, label in enumerate(space.labels)
     ]
 
@@ -223,9 +227,7 @@ def _control_curve_dimensions(env_config: EnvConfig) -> list[DesignDimension]:
     space = ControlCurvePolicySpace.from_params(env_config.policy_factory.params)
     low, high = space.low, space.high
     return [
-        DesignDimension(
-            key=label, labels=(label,), low=float(low[i]), high=float(high[i])
-        )
+        DesignDimension(key=label, labels=(label,), low=float(low[i]), high=float(high[i]))
         for i, label in enumerate(space.labels)
     ]
 
@@ -257,14 +259,32 @@ def design_dimensions(env_config: EnvConfig) -> list[DesignDimension]:
         )
     dims: list[DesignDimension] = []
     for spec in env_config.design_factories:
+        # Construct the factory (no solver needed — the Box is built in
+        # __init__) and read its true flat shape + per-component bounds. This
+        # supports factories whose per-element component count and bounds vary
+        # (storage coeffs, LID sizing+type, RDII R+IA), not just uniform Box.
+        factory = spec.construct()
+        space = factory.space
+        lo = np.asarray(space.low, dtype=float).ravel()
+        hi = np.asarray(space.high, dtype=float).ravel()
+        size = int(lo.shape[0])
         params = spec.params
-        ids = params.get("link_ids") or params.get("node_ids") or []
+        ids = (
+            params.get("link_ids")
+            or params.get("node_ids")
+            or params.get("subcatch_ids")
+            or []
+        )
+        if len(ids) == size:
+            labels = tuple(f"{spec.kind}:{eid}" for eid in ids)
+        else:
+            labels = tuple(f"{spec.kind}[{i}]" for i in range(size))
         dims.append(
             DesignDimension(
                 key=params.get("name", spec.kind),
-                labels=tuple(f"{spec.kind}:{eid}" for eid in ids),
-                low=float(params["low"]),
-                high=float(params["high"]),
+                labels=labels,
+                low=tuple(lo.tolist()),
+                high=tuple(hi.tolist()),
             )
         )
     return dims
@@ -406,9 +426,7 @@ class _Evaluator:
         payload: dict[str, np.ndarray] = {}
         offset = 0
         for dim in self._dims:
-            payload[dim.key] = np.asarray(
-                vector[offset : offset + dim.size], dtype=np.float32
-            )
+            payload[dim.key] = np.asarray(vector[offset : offset + dim.size], dtype=np.float32)
             offset += dim.size
         return payload
 
@@ -441,16 +459,13 @@ class _Evaluator:
             components = dict(info.get("reward_components", {}))
             steps = 1
         else:  # joint: design fixed at reset, neutral runtime each step
-            self._env.reset(
-                seed=self._job.opt_config.seed, options={"design_action": design}
-            )
+            self._env.reset(seed=self._job.opt_config.seed, options={"design_action": design})
             neutral = build_action(self._env.action_space, None)
             components: dict[str, float] = {}
             steps = 0
             terminated = truncated = False
-            while (
-                steps < self._job.opt_config.max_steps_per_episode
-                and not (terminated or truncated)
+            while steps < self._job.opt_config.max_steps_per_episode and not (
+                terminated or truncated
             ):
                 _obs, _reward, terminated, truncated, info = self._env.step(neutral)
                 steps += 1
@@ -486,8 +501,12 @@ def _flat_bounds(dims: list[DesignDimension]) -> tuple[np.ndarray, np.ndarray]:
 
     @rtype: tuple of two L{numpy.ndarray}
     """
-    low = np.concatenate([np.full(d.size, d.low) for d in dims])
-    high = np.concatenate([np.full(d.size, d.high) for d in dims])
+    low = np.concatenate(
+        [np.broadcast_to(np.asarray(d.low, dtype=float), (d.size,)) for d in dims]
+    )
+    high = np.concatenate(
+        [np.broadcast_to(np.asarray(d.high, dtype=float), (d.size,)) for d in dims]
+    )
     return low, high
 
 
@@ -568,9 +587,7 @@ def _assemble_result(evaluator: _Evaluator) -> dict[str, Any]:
         from openswmm_gymnasium.scoring import pareto_front
 
         front = pareto_front(costs)
-        pareto_idxs = [
-            i for i, row in enumerate(costs) if any(np.allclose(row, f) for f in front)
-        ]
+        pareto_idxs = [i for i, row in enumerate(costs) if any(np.allclose(row, f) for f in front)]
         # Best by equal-weight sum as a convenient single pick.
         best_idx = int(np.argmin(costs.sum(axis=1)))
 
@@ -600,9 +617,7 @@ class JobManager:
         @type max_workers: int
         """
         self.max_workers = max_workers
-        self._executor = ThreadPoolExecutor(
-            max_workers=max_workers, thread_name_prefix="gym-job"
-        )
+        self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="gym-job")
         self._jobs: dict[str, Job] = {}
         self._lock = threading.Lock()
 
@@ -743,9 +758,7 @@ class JobManager:
         """
         with self._lock:
             jobs = list(self._jobs.values())
-        return sorted(
-            (j.snapshot() for j in jobs), key=lambda s: s["created_at"], reverse=True
-        )
+        return sorted((j.snapshot() for j in jobs), key=lambda s: s["created_at"], reverse=True)
 
     def cancel(self, job_id: str) -> dict[str, Any]:
         """Request cooperative cancellation of *job_id*.

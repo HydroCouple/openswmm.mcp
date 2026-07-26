@@ -40,14 +40,14 @@ class DesignDimension:
 
     @ivar key: Action-space key (factory C{name}).
     @ivar labels: Per-component C{"<kind>:<element_id>"} labels.
-    @ivar low: Scalar lower bound.
-    @ivar high: Scalar upper bound.
+    @ivar low: Lower bound — scalar (broadcast) or per-component tuple.
+    @ivar high: Upper bound — scalar (broadcast) or per-component tuple.
     """
 
     key: str
     labels: tuple[str, ...]
-    low: float
-    high: float
+    low: float | tuple[float, ...]
+    high: float | tuple[float, ...]
 
     @property
     def size(self) -> int:

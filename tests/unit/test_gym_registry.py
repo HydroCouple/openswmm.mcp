@@ -33,6 +33,10 @@ EXPECTED_KINDS = {
         "link_length",
         "link_diameter",
         "node_max_depth",
+        "subcatch_gw_outflow_coeff",
+        "storage_volume",
+        "lid_placement",
+        "rdii_unit_hydrograph",
     },
     "policy_factory": {"control_curve"},
     "wrapper": {
@@ -54,11 +58,7 @@ def test_list_kinds_covers_expected_vocabulary():
 
 def test_list_kinds_all_matches_union_of_categories():
     all_kinds = {(s.category, s.kind) for s in registry.list_kinds()}
-    expected = {
-        (category, kind)
-        for category, kinds in EXPECTED_KINDS.items()
-        for kind in kinds
-    }
+    expected = {(category, kind) for category, kinds in EXPECTED_KINDS.items() for kind in kinds}
     assert all_kinds == expected
 
 
@@ -123,9 +123,7 @@ def test_control_curve_schema_exposes_curve_fields():
     assert {"assets", "x_normalized", "control_interval_steps", "rate_limit"} <= top
     # The per-asset sub-schema lists the curve fields.
     asset_schema = schema["$defs"]["ControlCurveAssetParams"]["properties"]
-    assert {"link_id", "obs_node", "x_knots", "y_low", "y_high", "monotonic"} <= set(
-        asset_schema
-    )
+    assert {"link_id", "obs_node", "x_knots", "y_low", "y_high", "monotonic"} <= set(asset_schema)
 
 
 def test_control_curve_params_validation():
@@ -176,6 +174,79 @@ def test_control_curve_params_validation():
     # empty assets.
     with pytest.raises(ToolError, match="VALIDATION_ERROR"):
         registry.validate_params("policy_factory", "control_curve", {"assets": []})
+
+
+def test_storage_volume_params_validation():
+    # scalar mode: scalar bounds, high > low.
+    ok = registry.validate_params(
+        "design_factory", "storage_volume", {"node_ids": ["T1"], "low": 0.5, "high": 3.0}
+    )
+    assert ok.model_dump()["mode"] == "scalar"
+    # coeffs mode: length-3 (a, b, c) bounds.
+    registry.validate_params(
+        "design_factory",
+        "storage_volume",
+        {"node_ids": ["T1"], "low": [100.0, 0.0, 0.0], "high": [9000.0, 2.0, 500.0], "mode": "coeffs"},
+    )
+    for bad in (
+        {"node_ids": ["T1"], "low": 1.0, "high": 1.0},  # high <= low
+        {"node_ids": ["T1"], "low": [1, 2], "high": [3, 4], "mode": "coeffs"},  # len != 3
+        {"node_ids": ["T1"], "low": [1, 0, 0], "high": 9.0, "mode": "coeffs"},  # mixed shapes
+        {"node_ids": [], "low": 0.5, "high": 3.0},  # empty ids
+    ):
+        with pytest.raises(ToolError, match="VALIDATION_ERROR"):
+            registry.validate_params("design_factory", "storage_volume", bad)
+
+
+def test_lid_placement_params_validation():
+    ok = registry.validate_params(
+        "design_factory",
+        "lid_placement",
+        {"subcatch_ids": ["S1"], "lid_controls": ["BIO", "PAVE"], "area_low": 100.0, "area_high": 2000.0},
+    )
+    assert ok.model_dump()["number"] == 1
+    for bad in (
+        {"subcatch_ids": ["S1"], "lid_controls": [], "area_low": 100.0, "area_high": 2000.0},
+        {"subcatch_ids": ["S1"], "lid_controls": ["BIO"], "area_low": 200.0, "area_high": 100.0},
+        {"subcatch_ids": [], "lid_controls": ["BIO"], "area_low": 100.0, "area_high": 2000.0},
+    ):
+        with pytest.raises(ToolError, match="VALIDATION_ERROR"):
+            registry.validate_params("design_factory", "lid_placement", bad)
+
+
+def test_rdii_unit_hydrograph_params_validation():
+    # R-only is the default and needs no IA bounds.
+    ok = registry.validate_params(
+        "design_factory",
+        "rdii_unit_hydrograph",
+        {"targets": [["SanSewer", -1, 0]], "r_low": 0.0, "r_high": 0.5},
+    )
+    assert ok.model_dump()["include_ia"] is False
+    # Opt into IA with non-degenerate bounds.
+    registry.validate_params(
+        "design_factory",
+        "rdii_unit_hydrograph",
+        {
+            "targets": [["SanSewer", -1, 0]],
+            "r_low": 0.0,
+            "r_high": 0.5,
+            "include_ia": True,
+            "ia_low": [0.0, 0.0, 0.0],
+            "ia_high": [0.5, 2.0, 0.2],
+        },
+    )
+    for bad in (
+        {"targets": [["SanSewer", -1, 0]], "r_low": 0.5, "r_high": 0.5},  # r high <= low
+        {"targets": [], "r_low": 0.0, "r_high": 0.5},  # empty targets
+        {  # include_ia with degenerate IA bounds
+            "targets": [["SanSewer", -1, 0]],
+            "r_low": 0.0,
+            "r_high": 0.5,
+            "include_ia": True,
+        },
+    ):
+        with pytest.raises(ToolError, match="VALIDATION_ERROR"):
+            registry.validate_params("design_factory", "rdii_unit_hydrograph", bad)
 
 
 # ---------------------------------------------------------------------------

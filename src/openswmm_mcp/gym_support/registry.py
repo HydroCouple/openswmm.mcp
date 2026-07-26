@@ -223,6 +223,130 @@ class NodeMaxDepthParams(_Params):
     name: str = "node_max_depth"
 
 
+class SubcatchGWOutflowCoeffParams(_Params):
+    """Params for the C{subcatch_gw_outflow_coeff} design factory.
+
+    @ivar subcatch_ids: Symbolic IDs of subcatchments the design dimension
+        spans (each must have an aquifer assigned).
+    @ivar low: Lower bound of the groundwater outflow coefficient C{a1}.
+    @ivar high: Upper bound of C{a1}.
+    @ivar name: Action-space key for this factory.
+    """
+
+    subcatch_ids: list[str] = Field(min_length=1)
+    low: float
+    high: float
+    name: str = "subcatch_gw_outflow_coeff"
+
+
+class StorageVolumeParams(_Params):
+    """Params for the C{storage_volume} design factory.
+
+    Sizes FUNCTIONAL storage assets. In C{mode="scalar"} (default) C{low}/C{high}
+    are scalar footprint multipliers; in C{mode="coeffs"} they are length-3
+    C{(a, b, c)} bound sequences for the raw functional relation.
+
+    @ivar node_ids: STORAGE node IDs to size (each must be FUNCTIONAL shape).
+    @ivar low: Lower bound(s): a scalar (scalar mode) or C{[a, b, c]} (coeffs).
+    @ivar high: Upper bound(s), matching C{low}'s shape.
+    @ivar mode: C{"scalar"} or C{"coeffs"}.
+    @ivar name: Action-space key for this factory.
+    """
+
+    node_ids: list[str] = Field(min_length=1)
+    low: float | list[float]
+    high: float | list[float]
+    mode: Literal["scalar", "coeffs"] = "scalar"
+    name: str = "storage_volume"
+
+    @model_validator(mode="after")
+    def _check_mode_bounds(self) -> StorageVolumeParams:
+        scalar_low = isinstance(self.low, (int, float))
+        scalar_high = isinstance(self.high, (int, float))
+        if self.mode == "scalar":
+            if not (scalar_low and scalar_high):
+                raise ValueError("mode 'scalar' requires scalar low/high")
+            if self.high <= self.low:
+                raise ValueError("high must be strictly greater than low")
+        else:  # coeffs
+            if scalar_low or scalar_high or len(self.low) != 3 or len(self.high) != 3:
+                raise ValueError("mode 'coeffs' requires length-3 (a, b, c) low/high")
+        return self
+
+
+class LIDPlacementParams(_Params):
+    """Params for the C{lid_placement} design factory.
+
+    Sizes green-infrastructure / nature-based solutions and selects among
+    candidate LID control types per subcatchment.
+
+    @ivar subcatch_ids: Subcatchments to place GI on (required).
+    @ivar lid_controls: Existing LID-control IDs to choose among — the
+        selectable "types"; must be defined in the model (required).
+    @ivar area_low: Lower bound on placed LID area.
+    @ivar area_high: Upper bound on placed LID area.
+    @ivar number: Replicate LID units per placement.
+    @ivar width: Overland-flow width per unit (0 = engine default).
+    @ivar init_sat: Initial saturation fraction (0-100).
+    @ivar from_imperv: Percent of upstream impervious runoff routed onto the LID.
+    @ivar name: Action-space key for this factory.
+    """
+
+    subcatch_ids: list[str] = Field(min_length=1)
+    lid_controls: list[str] = Field(min_length=1)
+    area_low: float
+    area_high: float
+    number: int = 1
+    width: float = 0.0
+    init_sat: float = 0.0
+    from_imperv: float = 0.0
+    name: str = "lid_placement"
+
+    @model_validator(mode="after")
+    def _check_area(self) -> LIDPlacementParams:
+        if self.area_high <= self.area_low:
+            raise ValueError("area_high must be strictly greater than area_low")
+        return self
+
+
+class RDIIUnitHydrographParams(_Params):
+    """Params for the C{rdii_unit_hydrograph} design factory.
+
+    Sizes RDII response by editing the R fraction (and optionally the
+    initial-abstraction terms) of existing unit-hydrograph entries,
+    preserving T and K.
+
+    @ivar targets: C{(uh_name, month, response)} triples to size (required).
+    @ivar r_low: Lower bound on the R fraction.
+    @ivar r_high: Upper bound on the R fraction.
+    @ivar include_ia: Also search initial abstraction (dmax, drecov, dinit).
+    @ivar ia_low: Length-3 lower bounds C{(dmax, drecov, dinit)}.
+    @ivar ia_high: Length-3 upper bounds C{(dmax, drecov, dinit)}.
+    @ivar name: Action-space key for this factory.
+    """
+
+    targets: list[tuple[str, int, int]] = Field(min_length=1)
+    r_low: float
+    r_high: float
+    include_ia: bool = False
+    ia_low: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    ia_high: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    name: str = "rdii_unit_hydrograph"
+
+    @model_validator(mode="after")
+    def _check_bounds(self) -> RDIIUnitHydrographParams:
+        if self.r_high <= self.r_low:
+            raise ValueError("r_high must be strictly greater than r_low")
+        if self.include_ia and not any(
+            hi > lo for lo, hi in zip(self.ia_low, self.ia_high)
+        ):
+            raise ValueError(
+                "include_ia requires at least one of (dmax, drecov, dinit) to "
+                "have ia_high > ia_low"
+            )
+        return self
+
+
 # -- policy factories (searchable static control policies) --------------------
 
 
@@ -251,20 +375,15 @@ class ControlCurveAssetParams(_Params):
 
     @model_validator(mode="after")
     def _check_asset(self) -> ControlCurveAssetParams:
-        if any(
-            self.x_knots[i + 1] <= self.x_knots[i]
-            for i in range(len(self.x_knots) - 1)
-        ):
+        if any(self.x_knots[i + 1] <= self.x_knots[i] for i in range(len(self.x_knots) - 1)):
             raise ValueError(f"asset {self.link_id!r}: x_knots must be strictly increasing")
         if self.y_low > self.y_high:
             raise ValueError(
-                f"asset {self.link_id!r}: y_low ({self.y_low}) must be <= "
-                f"y_high ({self.y_high})"
+                f"asset {self.link_id!r}: y_low ({self.y_low}) must be <= y_high ({self.y_high})"
             )
         if self.y_init is not None and len(self.y_init) != len(self.x_knots):
             raise ValueError(
-                f"asset {self.link_id!r}: y_init must have one value per knot "
-                f"({len(self.x_knots)})"
+                f"asset {self.link_id!r}: y_init must have one value per knot ({len(self.x_knots)})"
             )
         return self
 
@@ -481,6 +600,40 @@ for _spec in [
         NodeMaxDepthParams,
         "Design-time maximum node depth per node in [low,high].",
     ),
+    KindSpec(
+        "subcatch_gw_outflow_coeff",
+        "design_factory",
+        "openswmm_gymnasium.spaces.design:SubcatchGWOutflowCoeff",
+        SubcatchGWOutflowCoeffParams,
+        "Design-time groundwater outflow coefficient (a1) per subcatchment "
+        "in [low,high]; other [GROUNDWATER] params preserved.",
+    ),
+    KindSpec(
+        "storage_volume",
+        "design_factory",
+        "openswmm_gymnasium.spaces.design:StorageVolume",
+        StorageVolumeParams,
+        "Design-time storage sizing per FUNCTIONAL storage node: a scalar "
+        "footprint multiplier (mode='scalar') or the raw (a,b,c) surface-area "
+        "coefficients (mode='coeffs').",
+    ),
+    KindSpec(
+        "lid_placement",
+        "design_factory",
+        "openswmm_gymnasium.spaces.design:LIDPlacement",
+        LIDPlacementParams,
+        "Design-time green-infrastructure sizing + type selection: place a "
+        "sized LID usage per subcatchment, choosing among candidate LID "
+        "control types defined in the model.",
+    ),
+    KindSpec(
+        "rdii_unit_hydrograph",
+        "design_factory",
+        "openswmm_gymnasium.spaces.design:RDIIUnitHydrograph",
+        RDIIUnitHydrographParams,
+        "Design-time RDII sizing: edit the R fraction (and optionally initial "
+        "abstraction) of existing unit-hydrograph entries, preserving T and K.",
+    ),
     # policy factories (openswmm_gymnasium.spaces.control_curve)
     KindSpec(
         "control_curve",
@@ -600,8 +753,7 @@ def validate_params(category: str, kind: str, params: dict[str, Any]) -> _Params
         return spec.params_model(**params)
     except Exception as exc:
         raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] Invalid params for {category} "
-            f"'{kind}': {exc}"
+            f"[{ErrorCode.VALIDATION_ERROR}] Invalid params for {category} '{kind}': {exc}"
         ) from exc
 
 
