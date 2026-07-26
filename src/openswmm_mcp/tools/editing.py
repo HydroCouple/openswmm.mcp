@@ -51,7 +51,11 @@ _LINK_TYPES: dict[str, int] = {
 _NODE_TYPE_NAMES: dict[int, str] = {v: k for k, v in _NODE_TYPES.items()}
 _LINK_TYPE_NAMES: dict[int, str] = {v: k for k, v in _LINK_TYPES.items()}
 
-_OBJECT_TYPES = {"node", "link", "subcatchment", "gage", "table", "transect"}
+_OBJECT_TYPES = {
+    "node", "link", "subcatchment", "gage", "table", "transect",
+    "pollutant", "pattern", "aquifer", "snowpack", "lid", "street",
+    "inlet", "landuse", "hydrograph",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -133,7 +137,8 @@ async def analyze_impact(
     ----------
     object_type:
         One of ``node``, ``link``, ``subcatchment``, ``gage``, ``table``,
-        ``transect``.
+        ``transect``, ``pollutant``, ``pattern``, ``aquifer``, ``snowpack``,
+        ``lid``, ``street``, ``inlet``, ``landuse``, ``hydrograph``.
     object_id:
         The object's string identifier (or a numeric index as a string for
         ``transect``).
@@ -165,6 +170,24 @@ async def analyze_impact(
                 impacts = await asyncio.to_thread(editor.analyze_table_impact, object_id)
             case "transect":
                 impacts = await asyncio.to_thread(editor.analyze_transect_impact, int(object_id))
+            case "pollutant":
+                impacts = await asyncio.to_thread(editor.analyze_pollutant_impact, object_id)
+            case "pattern":
+                impacts = await asyncio.to_thread(editor.analyze_pattern_impact, object_id)
+            case "aquifer":
+                impacts = await asyncio.to_thread(editor.analyze_aquifer_impact, object_id)
+            case "snowpack":
+                impacts = await asyncio.to_thread(editor.analyze_snowpack_impact, object_id)
+            case "lid":
+                impacts = await asyncio.to_thread(editor.analyze_lid_impact, object_id)
+            case "street":
+                impacts = await asyncio.to_thread(editor.analyze_street_impact, object_id)
+            case "inlet":
+                impacts = await asyncio.to_thread(editor.analyze_inlet_impact, object_id)
+            case "landuse":
+                impacts = await asyncio.to_thread(editor.analyze_landuse_impact, object_id)
+            case "hydrograph":
+                impacts = await asyncio.to_thread(editor.analyze_hydrograph_impact, object_id)
             case _:
                 impacts = []
     except (KeyError, ValueError) as exc:
@@ -216,7 +239,8 @@ async def delete_object(
     ----------
     object_type:
         One of ``node``, ``link``, ``subcatchment``, ``gage``, ``table``,
-        ``transect``.
+        ``transect``, ``pollutant``, ``pattern``, ``aquifer``, ``snowpack``,
+        ``lid``, ``street``, ``inlet``, ``landuse``, ``hydrograph``.
     object_id:
         String identifier of the object to delete, or a numeric index string
         for ``transect``.
@@ -250,6 +274,26 @@ async def delete_object(
                     impacts = await asyncio.to_thread(
                         editor.analyze_transect_impact, int(object_id)
                     )
+                case "pollutant":
+                    impacts = await asyncio.to_thread(editor.analyze_pollutant_impact, object_id)
+                case "pattern":
+                    impacts = await asyncio.to_thread(editor.analyze_pattern_impact, object_id)
+                case "aquifer":
+                    impacts = await asyncio.to_thread(editor.analyze_aquifer_impact, object_id)
+                case "snowpack":
+                    impacts = await asyncio.to_thread(editor.analyze_snowpack_impact, object_id)
+                case "lid":
+                    impacts = await asyncio.to_thread(editor.analyze_lid_impact, object_id)
+                case "street":
+                    impacts = await asyncio.to_thread(editor.analyze_street_impact, object_id)
+                case "inlet":
+                    impacts = await asyncio.to_thread(editor.analyze_inlet_impact, object_id)
+                case "landuse":
+                    impacts = await asyncio.to_thread(editor.analyze_landuse_impact, object_id)
+                case "hydrograph":
+                    impacts = await asyncio.to_thread(
+                        editor.analyze_hydrograph_impact, object_id
+                    )
                 case _:
                     impacts = []
         else:
@@ -266,6 +310,24 @@ async def delete_object(
                     impacts = await asyncio.to_thread(editor.delete_table, object_id)
                 case "transect":
                     impacts = await asyncio.to_thread(editor.delete_transect, int(object_id))
+                case "pollutant":
+                    impacts = await asyncio.to_thread(editor.delete_pollutant, object_id)
+                case "pattern":
+                    impacts = await asyncio.to_thread(editor.delete_pattern, object_id)
+                case "aquifer":
+                    impacts = await asyncio.to_thread(editor.delete_aquifer, object_id)
+                case "snowpack":
+                    impacts = await asyncio.to_thread(editor.delete_snowpack, object_id)
+                case "lid":
+                    impacts = await asyncio.to_thread(editor.delete_lid, object_id)
+                case "street":
+                    impacts = await asyncio.to_thread(editor.delete_street, object_id)
+                case "inlet":
+                    impacts = await asyncio.to_thread(editor.delete_inlet, object_id)
+                case "landuse":
+                    impacts = await asyncio.to_thread(editor.delete_landuse, object_id)
+                case "hydrograph":
+                    impacts = await asyncio.to_thread(editor.delete_hydrograph, object_id)
                 case _:
                     impacts = []
 

@@ -254,6 +254,61 @@ async def clear_rules(ctx: Context, session_id: str = "default") -> dict:
     return {"status": "ok", "session_id": session_id, "remaining": 0}
 
 
+@controls_mcp.tool()
+async def remove_rule(ctx: Context, session_id: str = "default", rule_index: int = 0) -> dict:
+    """Remove a single control rule by index (later rules shift down by one).
+
+    Wraps ``Controls.remove_rule``. Unlike :func:`clear_rules`, which drops
+    every rule, this deletes only the I{rule_index}-th rule; all rules after
+    it renumber down. Requires the engine to be in ``building`` or ``opened``
+    state.
+    """
+    _, controls, _ = await _get_controls_accessor(ctx, session_id)
+
+    def _remove() -> int:
+        controls.remove_rule(rule_index)
+        return len(controls)
+
+    try:
+        remaining = await asyncio.to_thread(_remove)
+    except IndexError:
+        raise ToolError(
+            f"[{ErrorCode.ELEMENT_NOT_FOUND}] rule_index {rule_index} is out of range."
+        )
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "rule_index": rule_index,
+        "remaining": remaining,
+    }
+
+
+@controls_mcp.tool()
+async def find_references(
+    ctx: Context, session_id: str = "default", object_name: str = ""
+) -> dict:
+    """Return the indices of control rules that reference an object by name.
+
+    Wraps ``Controls.find_references``. Scans each rule's clauses for an
+    object-type keyword (``NODE`` / ``LINK`` / ``CONDUIT`` / ``PUMP`` /
+    ``ORIFICE`` / ``WEIR`` / ``OUTLET``) immediately followed by
+    *object_name* (case-insensitive). Read-only — no rule text is edited.
+    Use this before deleting or renaming an object to find the rules that
+    would be affected.
+    """
+    if not object_name.strip():
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] object_name must not be empty.")
+    _, controls, _ = await _get_controls_accessor(ctx, session_id)
+    indices = await asyncio.to_thread(controls.find_references, object_name)
+    rule_indices = [int(i) for i in indices]
+    return {
+        "session_id": session_id,
+        "object_name": object_name,
+        "rule_indices": rule_indices,
+        "count": len(rule_indices),
+    }
+
+
 # ===========================================================================
 # Direct control actions (RUNNING state only)
 # ===========================================================================

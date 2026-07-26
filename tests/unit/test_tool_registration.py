@@ -122,6 +122,10 @@ class TestToolRegistration:
         "twod_get_edge_conveyance",
         "twod_set_edge_conveyance",
         "twod_reset_edge_conveyance",
+        # New-engine surface (lenient open, controls references / removal).
+        "lifecycle_get_open_diagnostics",
+        "controls_remove_rule",
+        "controls_find_references",
     }
 
     async def test_namespaces_and_new_tools_registered(self):

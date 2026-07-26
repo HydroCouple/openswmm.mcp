@@ -361,16 +361,20 @@ async def get_state_bulk(
     """Summarise a 2D state variable over the whole mesh.
 
     ``variable`` is one of ``"depth"``, ``"head"``, ``"vertex_head"``,
-    ``"coupling_flux"``, or ``"edge_flux"``. Returns count / min / max /
-    mean, plus the values in ``[offset, offset+limit)`` when ``limit`` > 0
-    (``edge_flux`` and the others are indexed per triangle except
-    ``vertex_head``, which is per vertex; ``edge_flux`` is ``[tri*3 +
-    edge]``).
+    ``"vertex_render_depth"``, ``"coupling_flux"``, or ``"edge_flux"``.
+    Returns count / min / max / mean, plus the values in
+    ``[offset, offset+limit)`` when ``limit`` > 0 (``edge_flux`` and the
+    others are indexed per triangle except ``vertex_head`` and
+    ``vertex_render_depth``, which are per vertex; ``edge_flux`` is ``[tri*3 +
+    edge]``). ``vertex_render_depth`` is the render-oriented signed vertex
+    water depth (``eta_v - z_v``) GUIs should interpolate for 2D
+    water-surface rendering.
     """
     readers = {
         "depth": "get_depths",
         "head": "get_heads",
         "vertex_head": "get_vertex_heads",
+        "vertex_render_depth": "get_vertex_render_depths",
         "coupling_flux": "get_coupling_fluxes",
         "edge_flux": "get_edge_flux_bulk",
     }

@@ -93,6 +93,58 @@ class TestOpenModel:
         with pytest.raises(ToolError, match="Unknown engine"):
             await open_model(fake_ctx, inp_path=inp_path, session_id="bad", engine="unknown")
 
+    async def test_open_model_lenient_stays_opened(self, fake_ctx, inp_path):
+        """lenient_open records validation issues and leaves the session in the
+        editable 'opened' state (it does not auto-initialise)."""
+        from openswmm_mcp.tools.lifecycle import open_model
+
+        result = await open_model(
+            fake_ctx, inp_path=inp_path, session_id="lenient", lenient_open=True
+        )
+        assert isinstance(result, ModelSummary)
+        assert result.state == "opened"
+        assert result.engine == "openswmm"
+
+
+# ---------------------------------------------------------------------------
+# get_open_diagnostics — read open_errors / open_warnings after lenient open
+# ---------------------------------------------------------------------------
+
+
+class TestOpenDiagnostics:
+    async def test_clean_model_reports_no_issues(self, fake_ctx, inp_path):
+        """A valid model records no errors; counts agree with the lists.
+
+        Warnings are *not* asserted empty: a model that opens cleanly can still
+        raise advisory warnings (e.g. WARNING 02, node max-depth increased).
+        """
+        from openswmm_mcp.tools.lifecycle import get_open_diagnostics, open_model
+
+        await open_model(
+            fake_ctx, inp_path=inp_path, session_id="diag", lenient_open=True
+        )
+        out = await get_open_diagnostics(fake_ctx, session_id="diag")
+        assert out["session_id"] == "diag"
+        assert isinstance(out["errors"], list)
+        assert isinstance(out["warnings"], list)
+        assert out["error_count"] == len(out["errors"])
+        assert out["warning_count"] == len(out["warnings"])
+
+    async def test_diagnostics_readable_after_strict_open(self, fake_ctx, inp_path):
+        """The accumulators are readable after a strict open too.
+
+        A strict open only succeeds when nothing was recorded as an error, so
+        ``errors`` is empty; warnings may still be present and are returned as
+        message strings.
+        """
+        from openswmm_mcp.tools.lifecycle import get_open_diagnostics, open_model
+
+        await open_model(fake_ctx, inp_path=inp_path, session_id="diag_strict")
+        out = await get_open_diagnostics(fake_ctx, session_id="diag_strict")
+        assert out["errors"] == []
+        assert isinstance(out["warnings"], list)
+        assert all(isinstance(w, str) for w in out["warnings"])
+
 
 # ---------------------------------------------------------------------------
 # TestRunSimulation — both engines

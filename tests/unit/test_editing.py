@@ -605,3 +605,88 @@ class TestSubcatchScaleFactor:
             await set_subcatch_rain_scale_factor(
                 ctx, session_id="ssf_bad", subcatch_id="NOPE", scale_factor=1.0
             )
+
+
+# ---------------------------------------------------------------------------
+# New-entity impact analysis + deletion (pollutant / pattern / aquifer /
+# snowpack / lid / street / inlet / landuse / hydrograph) via the shared
+# analyze_impact / delete_object dispatchers.
+#
+# A lenient open leaves the session in the editable 'opened' state so the
+# ModelEditor cascade tools apply (they reject 'initialized').  The reference
+# model carries a single pollutant (TSS).
+# ---------------------------------------------------------------------------
+
+
+class TestNewEntityImpacts:
+    async def _opened(self, session_manager, tmp_inp, session_id):
+        from openswmm_mcp.tools.lifecycle import open_model
+
+        ctx = MockContext(session_manager)
+        await open_model(
+            ctx, inp_path=tmp_inp, session_id=session_id, lenient_open=True
+        )
+        return ctx
+
+    async def test_analyze_pollutant_impact(
+        self, session_manager, tmp_inp, reference_model
+    ):
+        from openswmm_mcp.tools.editing import analyze_impact
+
+        ctx = await self._opened(session_manager, tmp_inp, "ai_poll")
+        result = await analyze_impact(
+            ctx,
+            session_id="ai_poll",
+            object_type="pollutant",
+            object_id=reference_model.POLLUTANT_ID,
+        )
+        assert isinstance(result, ImpactReportModel)
+        assert result.object_type == "pollutant"
+        assert result.object_id == reference_model.POLLUTANT_ID
+        assert result.dry_run is True
+
+    async def test_delete_pollutant_dry_run_does_not_mutate(
+        self, session_manager, tmp_inp, reference_model
+    ):
+        from openswmm_mcp.tools.editing import delete_object
+
+        ctx = await self._opened(session_manager, tmp_inp, "del_poll_dry")
+        result = await delete_object(
+            ctx,
+            session_id="del_poll_dry",
+            object_type="pollutant",
+            object_id=reference_model.POLLUTANT_ID,
+            dry_run=True,
+        )
+        assert result.dry_run is True
+        assert result.object_type == "pollutant"
+        assert isinstance(result.impacts, list)
+
+    async def test_analyze_unknown_pollutant_raises(self, session_manager, tmp_inp):
+        from openswmm_mcp.tools.editing import analyze_impact
+
+        ctx = await self._opened(session_manager, tmp_inp, "ai_poll_404")
+        with pytest.raises(ToolError, match="not found"):
+            await analyze_impact(
+                ctx,
+                session_id="ai_poll_404",
+                object_type="pollutant",
+                object_id="NO_SUCH_POLLUTANT",
+            )
+
+    def test_new_object_types_are_registered(self):
+        """Every new entity kind is a recognised analyze/delete object_type."""
+        from openswmm_mcp.tools.editing import _OBJECT_TYPES
+
+        for kind in (
+            "pollutant",
+            "pattern",
+            "aquifer",
+            "snowpack",
+            "lid",
+            "street",
+            "inlet",
+            "landuse",
+            "hydrograph",
+        ):
+            assert kind in _OBJECT_TYPES

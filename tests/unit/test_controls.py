@@ -143,6 +143,91 @@ class TestClearRules:
 
 
 # ===========================================================================
+# remove_rule — delete a single rule by index (BUILDING / OPENED state)
+# ===========================================================================
+
+
+async def _lenient_opened_session(session_manager, inp_path: str, session_id: str):
+    """Open leniently so the session stays in the editable 'opened' state.
+
+    ``remove_rule`` wraps the C API which requires BUILDING / OPENED — a
+    strict open lands in 'initialized', which the engine rejects.
+    """
+    from openswmm_mcp.tools.lifecycle import open_model
+
+    ctx = MockContext(session_manager)
+    await open_model(ctx, inp_path=inp_path, session_id=session_id, lenient_open=True)
+    return ctx
+
+
+class TestRemoveRule:
+    async def test_remove_rule_drops_one(self, session_manager, inp_path):
+        from openswmm_mcp.tools.controls import add_rule, count, remove_rule
+
+        ctx = await _lenient_opened_session(session_manager, inp_path, "ctl_rm")
+        await add_rule(ctx, session_id="ctl_rm", rule_text=SAMPLE_RULE)
+        await add_rule(
+            ctx,
+            session_id="ctl_rm",
+            rule_text="RULE R2\nIF NODE J1 DEPTH < 1\nTHEN CONDUIT C1 STATUS = CLOSED",
+        )
+        assert (await count(ctx, session_id="ctl_rm"))["count"] == 2
+
+        result = await remove_rule(ctx, session_id="ctl_rm", rule_index=0)
+        assert result["status"] == "ok"
+        assert result["rule_index"] == 0
+        assert result["remaining"] == 1
+        assert (await count(ctx, session_id="ctl_rm"))["count"] == 1
+
+    async def test_remove_rule_out_of_range_raises(self, session_manager, inp_path):
+        from openswmm_mcp.tools.controls import remove_rule
+
+        ctx = await _lenient_opened_session(session_manager, inp_path, "ctl_rm_oor")
+        with pytest.raises(ToolError, match="out of range"):
+            await remove_rule(ctx, session_id="ctl_rm_oor", rule_index=5)
+
+
+# ===========================================================================
+# find_references — locate rules referencing an object by name (read-only)
+# ===========================================================================
+
+
+class TestFindReferences:
+    async def test_find_references_locates_rule(self, session_manager, inp_path):
+        from openswmm_mcp.tools.controls import add_rule, find_references
+
+        ctx = await _opened_session(session_manager, inp_path, "ctl_fr")
+        await add_rule(
+            ctx,
+            session_id="ctl_fr",
+            rule_text="RULE R_C1\nIF NODE J1 DEPTH > 5\nTHEN CONDUIT C1 STATUS = CLOSED",
+        )
+        result = await find_references(ctx, session_id="ctl_fr", object_name="C1")
+        assert result["object_name"] == "C1"
+        assert 0 in result["rule_indices"]
+        assert result["count"] == len(result["rule_indices"])
+        assert result["count"] >= 1
+
+    async def test_find_references_none_for_unreferenced(self, session_manager, inp_path):
+        from openswmm_mcp.tools.controls import add_rule, find_references
+
+        ctx = await _opened_session(session_manager, inp_path, "ctl_fr_none")
+        await add_rule(ctx, session_id="ctl_fr_none", rule_text=SAMPLE_RULE)
+        result = await find_references(
+            ctx, session_id="ctl_fr_none", object_name="NO_SUCH_OBJECT"
+        )
+        assert result["rule_indices"] == []
+        assert result["count"] == 0
+
+    async def test_find_references_empty_name_raises(self, session_manager, inp_path):
+        from openswmm_mcp.tools.controls import find_references
+
+        ctx = await _opened_session(session_manager, inp_path, "ctl_fr_empty")
+        with pytest.raises(ToolError, match="object_name must not be empty"):
+            await find_references(ctx, session_id="ctl_fr_empty", object_name="")
+
+
+# ===========================================================================
 # Direct control actions (RUNNING state only)
 # ===========================================================================
 

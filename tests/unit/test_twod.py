@@ -209,6 +209,15 @@ class TestStateAndStats:
             assert out["summary"]["count"] == expected_n, variable
             assert len(out["values"]) == 4
 
+    async def test_get_state_bulk_vertex_render_depth(self, session_manager, twod_inp_path):
+        """vertex_render_depth is per-vertex, signed (eta_v - z_v) for rendering."""
+        ctx = await _open_and_step(session_manager, twod_inp_path)
+        out = await get_state_bulk(
+            ctx, session_id="twod", variable="vertex_render_depth", limit=4
+        )
+        assert out["summary"]["count"] == N_VERTICES
+        assert len(out["values"]) == 4
+
     async def test_get_state_bulk_invalid_variable(self, session_manager, twod_inp_path):
         ctx = await _open(session_manager, twod_inp_path)
         with pytest.raises(ToolError):

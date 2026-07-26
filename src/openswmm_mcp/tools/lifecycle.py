@@ -75,6 +75,7 @@ async def open_model(
     rpt_path: str | None = None,
     out_path: str | None = None,
     engine: str = "openswmm",
+    lenient_open: bool = False,
 ) -> ModelSummary:
     """Open a SWMM model file and initialise the engine.
 
@@ -98,6 +99,14 @@ async def open_model(
         advanced tools (model building, in-place editing, controls,
         infrastructure, quality, spatial, geopackage, output reader)
         return a ``NOT_SUPPORTED`` error.
+    lenient_open:
+        When ``True`` (new engine only), perform a permissive open that
+        records post-parse validation problems instead of raising, and leave
+        the session in the editable ``opened`` state (the model is *not*
+        initialised).  Read the recorded issues with
+        :func:`get_open_diagnostics` and fix them via the editing tools
+        before running.  Defaults to ``False`` (strict open followed by
+        initialise, landing in ``initialized``).
     """
     sm = get_session_manager(ctx)
 
@@ -110,11 +119,16 @@ async def open_model(
     )
 
     try:
+        if lenient_open:
+            await asyncio.to_thread(session.solver.set_lenient_open, True)
         await asyncio.to_thread(session.solver.open)
         session.state = "opened"
 
-        await asyncio.to_thread(session.solver.initialize)
-        session.state = "initialized"
+        # A lenient open leaves the session OPENED/editable so recorded
+        # validation problems can be inspected and fixed before running.
+        if not lenient_open:
+            await asyncio.to_thread(session.solver.initialize)
+            session.state = "initialized"
     except Exception as exc:
         # Clean up the partially-opened session so it doesn't leak
         try:
@@ -215,6 +229,35 @@ async def open_model(
         end_time=s["end_time"],
         routing_step=s["routing_step"],
     )
+
+
+@lifecycle_mcp.tool
+async def get_open_diagnostics(ctx: Context, session_id: str = "default") -> dict:
+    """Return validation errors and warnings recorded during a (lenient) open.
+
+    After ``open_model(..., lenient_open=True)`` the engine records post-parse
+    validation problems instead of raising, leaving the session in the
+    editable ``opened`` state. This tool reads those accumulators
+    (``Solver.open_errors`` / ``Solver.open_warnings``) so callers can inspect
+    and fix issues before initialising or editing the model. A strict open
+    that succeeds leaves both lists empty. New engine only.
+    """
+    sm = get_session_manager(ctx)
+    session = await sm.get_session(session_id)
+    require_new_engine(session, "Open diagnostics (open_errors / open_warnings)")
+    solver = session.solver
+
+    def _read() -> tuple[list[str], list[str]]:
+        return list(solver.open_errors), list(solver.open_warnings)
+
+    errors, warnings = await asyncio.to_thread(_read)
+    return {
+        "session_id": session_id,
+        "errors": errors,
+        "warnings": warnings,
+        "error_count": len(errors),
+        "warning_count": len(warnings),
+    }
 
 
 @lifecycle_mcp.tool(task=True)
