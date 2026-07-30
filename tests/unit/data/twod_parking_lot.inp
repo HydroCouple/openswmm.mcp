@@ -5,27 +5,18 @@
 ;; sloping gently from north (z = 101.0) to south (z = 100.0). The mesh
 ;; exercises every 2D input section the engine currently parses:
 ;;
-;;   [2D_OPTIONS]              — every documented key
-;;   [2D_VERTICES]             — 9 vertices
-;;   [2D_TRIANGLES]            — 8 triangles, Manning's n = 0.018 (asphalt)
-;;   [2D_VERTEX_NODE_MAP]      — center vertex couples to drain inlet J1
-;;   [2D_TRIANGLE_NODE_MAP]    — NE-corner triangle couples to street vault ST1
-;;   [2D_BOUNDARY_CONDITIONS]  — one row each for NORMAL_FLOW, SPECIFIED_STAGE,
-;;                               TS_STAGE, SPECIFIED_FLOW, RATING_CURVE
-;;   [2D_EDGE_CONVEYANCE]      — east-west "leaky berm" at y = 10 m (c = 0.30)
-;;
-;; The optional `;; UNITS:` and `;; SOURCE_CRS:` comment headers at the top of
-;; the file are read by the engine's prescan (see docs/2dModelStrategy.md §2A
-;; and §11A). With `;; UNITS: SI (m)`, the engine treats the mesh values as
-;; already-SI metres and skips its FLOW_UNITS-based ft→m scaling. For US-units
-;; projects (FLOW_UNITS = CFS/GPM/MGD) you would either remove the header (and
-;; let the engine multiply by 0.3048) or write mesh values in metres and keep
-;; the header (recommended for new projects).
-;;
-;; To use an external `.2dm` mesh file instead of inline sections, comment out
-;; the five [2D_*] mesh sections below and uncomment the [2D_MESH_FILE] block
-;; at the very bottom of this file.
-;;============================================================================
+;;   [2D_OPTIONS]
+;;Parameter             Value      ;; Notes
+MAX_TIMESTEP            10.0       ;; Max internal marcher step (s)
+DRY_DEPTH               0.001      ;; Wet/dry threshold (m)
+LIMITER_EPSILON         1.0e-6     ;; Jawahar-Kamath slope-limiter ε
+COUPLING_CD             0.65       ;; Default discharge coefficient (overridden per-row below)
+INTEGRATOR              EXPLICIT   ;; Explicit local-inertial FV marcher (the only 2D integrator)
+THETA                   0.8        ;; Local-inertial friction weighting
+CFL_NUMBER              0.7        ;; Marcher CFL number
+LTS_TIERS               4          ;; Local-timestepping tiers
+REPORT_2D               YES        ;; Toggle 2D reporting
+OUTPUT_FILE             2d_complete_example.h5   ;; HDF5 output (relative to this .inp)
 
 ;; UNITS: SI (m)
 ;; SOURCE_CRS: EPSG:32616
@@ -142,18 +133,14 @@ LINKS      ALL
 
 [2D_OPTIONS]
 ;;Parameter             Value      ;; Notes
-MAX_TIMESTEP            10.0       ;; Max CVODE internal step (s)
-MIN_TIMESTEP            0.001      ;; Min CVODE internal step (s)
-REL_TOLERANCE           1.0e-4     ;; CVODE relative tolerance
-ABS_TOLERANCE           1.0e-6     ;; CVODE absolute tolerance (m of depth)
+MAX_TIMESTEP            10.0       ;; Max internal marcher step (s)
 DRY_DEPTH               0.001      ;; Wet/dry threshold (m)
 LIMITER_EPSILON         1.0e-6     ;; Jawahar-Kamath slope-limiter ε
 COUPLING_CD             0.65       ;; Default discharge coefficient (overridden per-row below)
-LINEAR_SOLVER           GMRES      ;; GMRES (wired); BICGSTAB / TFQMR reserved
-PRECONDITIONER          JACOBI     ;; NONE | JACOBI (wired); ILU reserved
-MAX_KRYLOV_DIM          30         ;; Max Krylov subspace dim
-MAX_CVODE_STEPS         500        ;; Max CVODE steps per advance call
-COUPLING_INTERVAL       0          ;; 0 = couple every SWMM routing step
+INTEGRATOR              EXPLICIT   ;; Explicit local-inertial FV marcher (the only 2D integrator)
+THETA                   0.8        ;; Local-inertial friction weighting
+CFL_NUMBER              0.7        ;; Marcher CFL number
+LTS_TIERS               4          ;; Local-timestepping tiers
 REPORT_2D               YES        ;; Toggle 2D reporting
 OUTPUT_FILE             2d_complete_example.h5   ;; HDF5 output (relative to this .inp)
 

@@ -109,10 +109,7 @@ def _resolve_bc_type(bc_type: str) -> int:
 
 def _check_edge(edge: int) -> None:
     if edge not in (0, 1, 2):
-        raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] edge must be 0, 1, or 2 "
-            f"(got {edge})."
-        )
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] edge must be 0, 1, or 2 (got {edge}).")
 
 
 # ---------------------------------------------------------------------------
@@ -209,6 +206,111 @@ async def set_vertex_z(
     _, surface = await _get_surface(ctx, session_id)
     await asyncio.to_thread(surface.set_vertex_z, vertex, z)
     return {"status": "ok", "session_id": session_id, "vertex": vertex, "z": z}
+
+
+@twod_mcp.tool()
+async def set_triangle_mannings(
+    ctx: Context,
+    session_id: str = "default",
+    triangle: int = 0,
+    n: float = 0.0,
+) -> dict:
+    """Set Manning's roughness for a 2D mesh triangle (must be > 0).
+
+    Persists in the ``MANNINGS_N`` column of ``[2D_TRIANGLES]`` on save.
+    """
+    _, surface = await _get_surface(ctx, session_id)
+    await asyncio.to_thread(surface.set_triangle_mannings, triangle, float(n))
+    new_n = await asyncio.to_thread(surface.get_triangle_mannings, triangle)
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "triangle": triangle,
+        "mannings_n": float(new_n),
+    }
+
+
+@twod_mcp.tool()
+async def set_triangle_tag(
+    ctx: Context,
+    session_id: str = "default",
+    triangle: int = 0,
+    tag: str = "",
+) -> dict:
+    """Set the descriptive tag of a 2D triangle (``[2D_TRIANGLES]`` TAG).
+
+    An empty string clears the tag.
+    """
+    _, surface = await _get_surface(ctx, session_id)
+    await asyncio.to_thread(surface.set_triangle_tag, triangle, tag)
+    new_tag = await asyncio.to_thread(surface.get_triangle_tag, triangle)
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "triangle": triangle,
+        "tag": new_tag,
+    }
+
+
+@twod_mcp.tool()
+async def get_triangle_tag(ctx: Context, session_id: str = "default", triangle: int = 0) -> dict:
+    """Return the descriptive tag of a 2D triangle (empty if untagged)."""
+    _, surface = await _get_surface(ctx, session_id)
+    tag = await asyncio.to_thread(surface.get_triangle_tag, triangle)
+    return {"session_id": session_id, "triangle": triangle, "tag": tag}
+
+
+@twod_mcp.tool()
+async def set_vertex_tag(
+    ctx: Context,
+    session_id: str = "default",
+    vertex: int = 0,
+    tag: str = "",
+) -> dict:
+    """Set the descriptive tag of a 2D vertex (``[2D_VERTICES]`` TAG).
+
+    An empty string clears the tag. Distinct from the 1D<->2D coupling node.
+    """
+    _, surface = await _get_surface(ctx, session_id)
+    await asyncio.to_thread(surface.set_vertex_tag, vertex, tag)
+    new_tag = await asyncio.to_thread(surface.get_vertex_tag, vertex)
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "vertex": vertex,
+        "tag": new_tag,
+    }
+
+
+@twod_mcp.tool()
+async def get_vertex_tag(ctx: Context, session_id: str = "default", vertex: int = 0) -> dict:
+    """Return the descriptive tag of a 2D vertex (empty if untagged)."""
+    _, surface = await _get_surface(ctx, session_id)
+    tag = await asyncio.to_thread(surface.get_vertex_tag, vertex)
+    return {"session_id": session_id, "vertex": vertex, "tag": tag}
+
+
+@twod_mcp.tool()
+async def set_vertex_coupled_node(
+    ctx: Context,
+    session_id: str = "default",
+    vertex: int = 0,
+    node_name: str = "",
+) -> dict:
+    """Couple a 2D mesh vertex to a 1D SWMM node by name.
+
+    Establishes the per-vertex 1D<->2D exchange point. Pass an empty string
+    to clear the coupling.
+    """
+    _, surface = await _get_surface(ctx, session_id)
+    await asyncio.to_thread(surface.set_vertex_coupled_node, vertex, node_name)
+    new_node = await asyncio.to_thread(surface.get_vertex_coupled_node, vertex)
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "vertex": vertex,
+        "node_index": int(new_node),
+    }
 
 
 @twod_mcp.tool()
@@ -403,11 +505,11 @@ async def get_state_bulk(
 
 @twod_mcp.tool()
 async def get_totals(ctx: Context, session_id: str = "default") -> dict:
-    """Return whole-surface totals and CVODE sub-stepper diagnostics.
+    """Return whole-surface totals and internal-stepper diagnostics.
 
     Reports max depth over the surface (m), total ponded volume (m3),
-    total 1D<->2D exchange flow (m3/s), cumulative CVODE steps, and the
-    last CVODE internal step size (s).
+    total 1D<->2D exchange flow (m3/s), the explicit marcher's sub-step
+    count for the last advance, and its last sub-step size (s).
     """
     _, surface = await _get_surface(ctx, session_id)
 
@@ -416,8 +518,8 @@ async def get_totals(ctx: Context, session_id: str = "default") -> dict:
             "max_depth": float(surface.max_depth),
             "total_volume": float(surface.total_volume),
             "total_exchange_flow": float(surface.total_exchange_flow),
-            "cvode_steps": int(surface.cvode_steps),
-            "cvode_last_step": float(surface.cvode_last_step),
+            "solver_steps": int(surface.solver_steps),
+            "solver_last_step": float(surface.solver_last_step),
         }
 
     out = await asyncio.to_thread(_read)
@@ -438,8 +540,8 @@ async def get_stats(
 ) -> dict:
     """Return cumulative per-triangle statistics with worst-case hot spots.
 
-    For max depth (m), max velocity magnitude (m/s), and max |continuity
-    residual| (m3/s): summary statistics plus the ``top_n`` triangles with
+    For max depth (m), max velocity magnitude (m/s), and max absolute
+    continuity residual (m3/s): summary statistics plus the ``top_n`` triangles with
     the largest values (index + value), ranked descending.
     """
     _, surface = await _get_surface(ctx, session_id)
@@ -474,8 +576,9 @@ async def get_mass_balance(ctx: Context, session_id: str = "default") -> dict:
     """Return the global 2D mass-balance terms (m3) and continuity error.
 
     Terms: initial/final storage, rainfall in, 1D->2D coupling in,
-    2D->1D coupling out, outfall in, boundary in/out, and the overall
-    continuity error as a fraction of total inflow.
+    2D->1D coupling out, outfall in/out, evaporation out, boundary
+    in/out, and the overall continuity error as a fraction of total
+    inflow.
     """
     _, surface = await _get_surface(ctx, session_id)
     balance = await asyncio.to_thread(surface.get_mass_balance)
@@ -579,9 +682,7 @@ async def force_coupling_flux(
     mode_code = _resolve_forcing_mode(mode)
     _, surface = await _get_surface(ctx, session_id)
     await asyncio.to_thread(
-        lambda: surface.force_coupling_flux(
-            triangle, value, mode=mode_code, persist=int(persist)
-        )
+        lambda: surface.force_coupling_flux(triangle, value, mode=mode_code, persist=int(persist))
     )
     return {
         "status": "ok",
@@ -610,16 +711,17 @@ async def force_clear(ctx: Context, session_id: str = "default") -> dict:
 async def get_solver_params(ctx: Context, session_id: str = "default") -> dict:
     """Return the 2D solver parameters.
 
-    Reports the dry-depth threshold (m) and the CVODE relative / absolute
-    tolerances.
+    Reports the dry-depth threshold (m). The explicit-marcher
+    configuration (THETA, CFL_NUMBER, LTS_TIERS, H_MOVE, FROUDE_MAX,
+    COUPLING_AREA, ...) lives in ``[2D_OPTIONS]`` and is read with
+    ``model_get_option_ext``. The retired CVODE tolerances no longer
+    exist.
     """
     _, surface = await _get_surface(ctx, session_id)
 
     def _read() -> dict:
         return {
             "dry_depth": float(surface.dry_depth),
-            "rel_tolerance": float(surface.rel_tolerance),
-            "abs_tolerance": float(surface.abs_tolerance),
         }
 
     out = await asyncio.to_thread(_read)
@@ -632,32 +734,25 @@ async def set_solver_params(
     ctx: Context,
     session_id: str = "default",
     dry_depth: float | None = None,
-    rel_tolerance: float | None = None,
-    abs_tolerance: float | None = None,
 ) -> dict:
     """Set 2D solver parameters; omitted parameters are left unchanged.
 
-    ``dry_depth`` is the wet/dry threshold (m); ``rel_tolerance`` /
-    ``abs_tolerance`` control the CVODE sub-stepper.
+    ``dry_depth`` is the wet/dry threshold (m). The explicit-marcher
+    configuration (THETA, CFL_NUMBER, LTS_TIERS, H_MOVE, FROUDE_MAX,
+    COUPLING_AREA, ...) lives in ``[2D_OPTIONS]`` and is set with
+    ``model_set_option_ext``. The retired CVODE tolerances no longer
+    exist.
     """
-    if dry_depth is None and rel_tolerance is None and abs_tolerance is None:
+    if dry_depth is None:
         raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] Provide at least one of dry_depth, "
-            f"rel_tolerance, abs_tolerance."
+            f"[{ErrorCode.VALIDATION_ERROR}] Provide dry_depth."
         )
     _, surface = await _get_surface(ctx, session_id)
 
     def _apply() -> dict:
-        if dry_depth is not None:
-            surface.dry_depth = dry_depth
-        if rel_tolerance is not None:
-            surface.rel_tolerance = rel_tolerance
-        if abs_tolerance is not None:
-            surface.abs_tolerance = abs_tolerance
+        surface.dry_depth = dry_depth
         return {
             "dry_depth": float(surface.dry_depth),
-            "rel_tolerance": float(surface.rel_tolerance),
-            "abs_tolerance": float(surface.abs_tolerance),
         }
 
     out = await asyncio.to_thread(_apply)
@@ -738,8 +833,7 @@ async def set_edge_bc(
         and rating_curve_name is None
     ):
         raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] Provide bc_type and/or at least "
-            f"one BC parameter."
+            f"[{ErrorCode.VALIDATION_ERROR}] Provide bc_type and/or at least one BC parameter."
         )
     bc_code = _resolve_bc_type(bc_type) if bc_type else None
     _, surface = await _get_surface(ctx, session_id)
@@ -829,8 +923,7 @@ async def set_edge_conveyance(
     _check_edge(edge)
     if not 0.0 <= conveyance <= 1.0:
         raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] conveyance must be in [0, 1] "
-            f"(got {conveyance})."
+            f"[{ErrorCode.VALIDATION_ERROR}] conveyance must be in [0, 1] (got {conveyance})."
         )
     _, surface = await _get_surface(ctx, session_id)
     await asyncio.to_thread(surface.set_edge_conveyance, triangle, edge, conveyance)

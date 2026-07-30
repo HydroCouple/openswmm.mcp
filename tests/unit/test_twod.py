@@ -20,13 +20,12 @@ import pytest
 eng = pytest.importorskip("openswmm.engine")
 if not hasattr(eng.Solver, "surface2d"):
     pytest.skip(
-        "openswmm.engine build predates the Solver.surface2d view "
-        "(rebuild the engine wheel)",
+        "openswmm.engine build predates the Solver.surface2d view (rebuild the engine wheel)",
         allow_module_level=True,
     )
 
-from openswmm_mcp.errors import ToolError
-from openswmm_mcp.tools.twod import (
+from openswmm_mcp.errors import ToolError  # noqa: E402
+from openswmm_mcp.tools.twod import (  # noqa: E402
     force_clear,
     force_coupling_flux,
     force_evap,
@@ -154,9 +153,7 @@ class TestMesh:
 
     async def test_edge_geometry_bulk(self, session_manager, twod_inp_path):
         ctx = await _open(session_manager, twod_inp_path)
-        out = await get_edge_geometry_bulk(
-            ctx, session_id="twod", offset=0, limit=4
-        )
+        out = await get_edge_geometry_bulk(ctx, session_id="twod", offset=0, limit=4)
         for key in ("length", "nx", "ny"):
             assert out[key]["count"] == N_TRIANGLES * 3, key
         assert out["length"]["min"] > 0.0
@@ -203,18 +200,14 @@ class TestStateAndStats:
             ("coupling_flux", N_TRIANGLES),
             ("edge_flux", N_TRIANGLES * 3),
         ):
-            out = await get_state_bulk(
-                ctx, session_id="twod", variable=variable, limit=4
-            )
+            out = await get_state_bulk(ctx, session_id="twod", variable=variable, limit=4)
             assert out["summary"]["count"] == expected_n, variable
             assert len(out["values"]) == 4
 
     async def test_get_state_bulk_vertex_render_depth(self, session_manager, twod_inp_path):
         """vertex_render_depth is per-vertex, signed (eta_v - z_v) for rendering."""
         ctx = await _open_and_step(session_manager, twod_inp_path)
-        out = await get_state_bulk(
-            ctx, session_id="twod", variable="vertex_render_depth", limit=4
-        )
+        out = await get_state_bulk(ctx, session_id="twod", variable="vertex_render_depth", limit=4)
         assert out["summary"]["count"] == N_VERTICES
         assert len(out["values"]) == 4
 
@@ -228,7 +221,7 @@ class TestStateAndStats:
         out = await get_totals(ctx, session_id="twod")
         assert out["max_depth"] >= 0.0
         assert out["total_volume"] >= 0.0
-        assert out["cvode_steps"] >= 0
+        assert out["solver_steps"] >= 0
 
     async def test_get_stats(self, session_manager, twod_inp_path):
         ctx = await _open_and_step(session_manager, twod_inp_path)
@@ -249,6 +242,8 @@ class TestStateAndStats:
             "coupling_1d_to_2d_in",
             "coupling_2d_to_1d_out",
             "outfall_in",
+            "outfall_out",
+            "evap_out",
             "boundary_in",
             "boundary_out",
             "continuity_error",
@@ -274,9 +269,7 @@ class TestForcing:
 
     async def test_single_triangle_rainfall(self, session_manager, twod_inp_path):
         ctx = await _open_and_step(session_manager, twod_inp_path)
-        out = await force_rainfall(
-            ctx, session_id="twod", value=2.0e-5, triangle=1, mode="add"
-        )
+        out = await force_rainfall(ctx, session_id="twod", value=2.0e-5, triangle=1, mode="add")
         assert out["scope"] == "triangle 1"
 
     async def test_coupling_flux_forcing(self, session_manager, twod_inp_path):
@@ -289,9 +282,7 @@ class TestForcing:
 
     async def test_uniform_evap_forcing(self, session_manager, twod_inp_path):
         ctx = await _open_and_step(session_manager, twod_inp_path)
-        out = await force_evap(
-            ctx, session_id="twod", value=1.0e-6, mode="replace", persist=True
-        )
+        out = await force_evap(ctx, session_id="twod", value=1.0e-6, mode="replace", persist=True)
         assert out["status"] == "ok"
         assert out["scope"] == "uniform"
         cleared = await force_clear(ctx, session_id="twod")
@@ -299,9 +290,7 @@ class TestForcing:
 
     async def test_single_triangle_evap(self, session_manager, twod_inp_path):
         ctx = await _open_and_step(session_manager, twod_inp_path)
-        out = await force_evap(
-            ctx, session_id="twod", value=2.0e-6, triangle=1, mode="add"
-        )
+        out = await force_evap(ctx, session_id="twod", value=2.0e-6, triangle=1, mode="add")
         assert out["scope"] == "triangle 1"
 
     async def test_evap_invalid_mode_raises(self, session_manager, twod_inp_path):
@@ -325,12 +314,11 @@ class TestSolverParams:
         ctx = await _open(session_manager, twod_inp_path)
         before = await get_solver_params(ctx, session_id="twod")
         assert before["dry_depth"] > 0.0
-        out = await set_solver_params(
-            ctx, session_id="twod", dry_depth=before["dry_depth"] * 2.0
-        )
+        # Retired CVODE tolerances are gone from the tool surface.
+        assert "rel_tolerance" not in before
+        assert "abs_tolerance" not in before
+        out = await set_solver_params(ctx, session_id="twod", dry_depth=before["dry_depth"] * 2.0)
         assert out["dry_depth"] == pytest.approx(before["dry_depth"] * 2.0)
-        # Unchanged parameters keep their values.
-        assert out["rel_tolerance"] == pytest.approx(before["rel_tolerance"])
 
     async def test_no_params_raises(self, session_manager, twod_inp_path):
         ctx = await _open(session_manager, twod_inp_path)
@@ -394,9 +382,7 @@ class TestEdgeConveyance:
 
     async def test_set_mirrors_to_neighbour(self, session_manager, twod_inp_path):
         ctx = await _open(session_manager, twod_inp_path)
-        out = await set_edge_conveyance(
-            ctx, session_id="twod", triangle=0, edge=0, conveyance=0.5
-        )
+        out = await set_edge_conveyance(ctx, session_id="twod", triangle=0, edge=0, conveyance=0.5)
         assert out["status"] == "ok"
         got = await get_edge_conveyance(ctx, session_id="twod", triangle=0, edge=0)
         assert got["conveyance"] == pytest.approx(0.5)
@@ -404,9 +390,7 @@ class TestEdgeConveyance:
     async def test_out_of_range_value_raises(self, session_manager, twod_inp_path):
         ctx = await _open(session_manager, twod_inp_path)
         with pytest.raises(ToolError):
-            await set_edge_conveyance(
-                ctx, session_id="twod", triangle=0, edge=0, conveyance=1.5
-            )
+            await set_edge_conveyance(ctx, session_id="twod", triangle=0, edge=0, conveyance=1.5)
 
     async def test_reset(self, session_manager, twod_inp_path):
         ctx = await _open(session_manager, twod_inp_path)
