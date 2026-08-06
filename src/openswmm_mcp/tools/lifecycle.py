@@ -26,7 +26,9 @@ from openswmm_mcp.models import ModelSummary, SimulationResult, StepResult
 # cleanly when the engine wheel is not built.
 def _oadate_helpers() -> tuple:
     from openswmm.engine import datetime_to_oadate, oadate_to_datetime
+
     return oadate_to_datetime, datetime_to_oadate
+
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +60,7 @@ def _flow_units_name(code: int) -> str:
 
 def _route_model_name(code: int) -> str:
     """Map a RouteModel int to a human-readable string."""
-    _NAMES = {0: "STEADY", 1: "KINWAVE", 2: "DYNWAVE"}
+    _NAMES = {0: "STEADY", 1: "KINWAVE", 2: "DYNWAVE", 3: "FV"}
     return _NAMES.get(code, f"UNKNOWN({code})")
 
 
@@ -744,7 +746,9 @@ async def set_steady_state_skip(
 
 @lifecycle_mcp.tool()
 async def save_runoff_interface(
-    ctx: Context, session_id: str = "default", path: str = "",
+    ctx: Context,
+    session_id: str = "default",
+    path: str = "",
 ) -> dict:
     """Open the runoff interface file for writing (SAVE mode).
 
@@ -778,14 +782,12 @@ async def save_runoff_interface(
     session = await sm.get_session(session_id)
     require_new_engine(session, "Runoff interface file (Phase 1b)")
     if not path:
-        raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] path must be non-empty.")
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] path must be non-empty.")
     try:
         await asyncio.to_thread(session.solver.open_runoff_interface_write, path)
     except Exception as exc:
         raise ToolError(
-            f"[{ErrorCode.ENGINE_ERROR}] Failed to open runoff interface "
-            f"file for writing: {exc}"
+            f"[{ErrorCode.ENGINE_ERROR}] Failed to open runoff interface file for writing: {exc}"
         ) from exc
     return {
         "status": "ok",
@@ -797,7 +799,9 @@ async def save_runoff_interface(
 
 @lifecycle_mcp.tool()
 async def load_runoff_interface(
-    ctx: Context, session_id: str = "default", path: str = "",
+    ctx: Context,
+    session_id: str = "default",
+    path: str = "",
 ) -> dict:
     """Open the runoff interface file for reading (USE mode).
 
@@ -841,14 +845,12 @@ async def load_runoff_interface(
     session = await sm.get_session(session_id)
     require_new_engine(session, "Runoff interface file (Phase 1b)")
     if not path:
-        raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] path must be non-empty.")
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] path must be non-empty.")
     try:
         await asyncio.to_thread(session.solver.open_runoff_interface_read, path)
     except Exception as exc:
         raise ToolError(
-            f"[{ErrorCode.ENGINE_ERROR}] Failed to open runoff interface "
-            f"file for reading: {exc}"
+            f"[{ErrorCode.ENGINE_ERROR}] Failed to open runoff interface file for reading: {exc}"
         ) from exc
     return {
         "status": "ok",
@@ -909,9 +911,7 @@ async def stride(
         validation error.
     """
     if num_steps <= 0:
-        raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] num_steps must be > 0; got {num_steps}."
-        )
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] num_steps must be > 0; got {num_steps}.")
     sm = get_session_manager(ctx)
     session = await sm.get_session(session_id)
     require_new_engine(session, "Solver.stride")
@@ -948,9 +948,7 @@ async def stride(
 
     # Compute the current_time in days-since-start for the response shape.
     def _current_days() -> float:
-        return (
-            solver.current_datetime - solver.start_datetime
-        ).total_seconds() / 86400.0
+        return (solver.current_datetime - solver.start_datetime).total_seconds() / 86400.0
 
     current_time = await asyncio.to_thread(_current_days)
 
@@ -986,9 +984,7 @@ async def until_elapsed(
         start of the simulation (not from the current step).
     """
     if seconds <= 0.0:
-        raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] seconds must be > 0; got {seconds}."
-        )
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] seconds must be > 0; got {seconds}.")
     sm = get_session_manager(ctx)
     session = await sm.get_session(session_id)
     require_new_engine(session, "Solver.until (elapsed)")
@@ -1019,9 +1015,7 @@ async def until_elapsed(
     completed = state_int != RUNNING
 
     def _current_days() -> float:
-        return (
-            solver.current_datetime - solver.start_datetime
-        ).total_seconds() / 86400.0
+        return (solver.current_datetime - solver.start_datetime).total_seconds() / 86400.0
 
     current_time = await asyncio.to_thread(_current_days)
 
@@ -1064,8 +1058,7 @@ async def until_datetime(
         target_dt = _datetime.fromisoformat(target_iso)
     except ValueError as exc:
         raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] target_iso is not a valid ISO-8601 "
-            f"datetime: {exc}"
+            f"[{ErrorCode.VALIDATION_ERROR}] target_iso is not a valid ISO-8601 datetime: {exc}"
         ) from exc
 
     sm = get_session_manager(ctx)
@@ -1096,9 +1089,7 @@ async def until_datetime(
     completed = state_int != RUNNING
 
     def _current_days() -> float:
-        return (
-            solver.current_datetime - solver.start_datetime
-        ).total_seconds() / 86400.0
+        return (solver.current_datetime - solver.start_datetime).total_seconds() / 86400.0
 
     current_time = await asyncio.to_thread(_current_days)
 
@@ -1142,9 +1133,7 @@ async def run_for_steps(
         Emit progress every N steps (0 = no progress).
     """
     if max_steps <= 0:
-        raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] max_steps must be > 0; got {max_steps}."
-        )
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] max_steps must be > 0; got {max_steps}.")
     sm = get_session_manager(ctx)
     session = await sm.get_session(session_id)
     require_new_engine(session, "Solver.steps iterator")
@@ -1196,9 +1185,7 @@ async def run_for_steps(
     completed = state_int != RUNNING
 
     def _current_days() -> float:
-        return (
-            solver.current_datetime - solver.start_datetime
-        ).total_seconds() / 86400.0
+        return (solver.current_datetime - solver.start_datetime).total_seconds() / 86400.0
 
     current_time = await asyncio.to_thread(_current_days)
 

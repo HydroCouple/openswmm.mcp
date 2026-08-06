@@ -13,8 +13,8 @@ from typing import Any
 
 from fastmcp import Context, FastMCP
 
-from openswmm_mcp.dependencies import get_session_manager, require_state
 from openswmm_mcp._util.formatting import paginate_list
+from openswmm_mcp.dependencies import get_session_manager, require_state
 from openswmm_mcp.errors import ErrorCode, ToolError, resolve_index
 from openswmm_mcp.models import (
     ConduitGeometry,
@@ -332,12 +332,13 @@ def _build_all_node_infos_sync(session, nodes) -> list[NodeInfo]:
         # Runtime state — prefer bulks, scalar fallback for legacy.
         depth = float(depths[i]) if depths is not None else (node.depth if running else None)
         head = float(heads[i]) if heads is not None else (node.head if running else None)
-        volume = (float(volumes[i]) if volumes is not None
-                  else (node.volume if running else None))
-        lat_inflow = (float(lats[i]) if lats is not None
-                      else (node.lateral_inflow if running else None))
-        overflow = (float(overflows[i]) if overflows is not None
-                    else (node.overflow if running else None))
+        volume = float(volumes[i]) if volumes is not None else (node.volume if running else None)
+        lat_inflow = (
+            float(lats[i]) if lats is not None else (node.lateral_inflow if running else None)
+        )
+        overflow = (
+            float(overflows[i]) if overflows is not None else (node.overflow if running else None)
+        )
 
         outfall_route_to: int | None = None
         storage_geom: StorageGeometry | None = None
@@ -381,37 +382,38 @@ def _build_all_node_infos_sync(session, nodes) -> list[NodeInfo]:
                     pass
                 outfall_geom = OutfallGeometry(
                     outfall_type=outfall_type,
-                    outfall_type_name=_OUTFALL_TYPE_NAMES.get(
-                        outfall_type, f"TYPE_{outfall_type}"),
+                    outfall_type_name=_OUTFALL_TYPE_NAMES.get(outfall_type, f"TYPE_{outfall_type}"),
                     param=outfall_param,
                     flap_gate=bool(flap_gate),
                 )
             except Exception:
                 pass
 
-        results.append(NodeInfo(
-            node_id=ids[i],
-            index=i,
-            node_type=_NODE_TYPE_NAMES.get(type_code, f"UNKNOWN({type_code})"),
-            invert_elev=invert,
-            max_depth=max_depth,
-            crown_elev=crown_elev,
-            full_volume=full_volume,
-            surcharge_depth=surcharge_depth,
-            ponded_area=ponded_area,
-            degree=degree,
-            initial_depth=initial_depth,
-            losses=losses_val,
-            outflow=outflow_val,
-            storage=storage_geom,
-            outfall=outfall_geom,
-            depth=depth,
-            head=head,
-            volume=volume,
-            lateral_inflow=lat_inflow,
-            overflow=overflow,
-            outfall_route_to=outfall_route_to,
-        ))
+        results.append(
+            NodeInfo(
+                node_id=ids[i],
+                index=i,
+                node_type=_NODE_TYPE_NAMES.get(type_code, f"UNKNOWN({type_code})"),
+                invert_elev=invert,
+                max_depth=max_depth,
+                crown_elev=crown_elev,
+                full_volume=full_volume,
+                surcharge_depth=surcharge_depth,
+                ponded_area=ponded_area,
+                degree=degree,
+                initial_depth=initial_depth,
+                losses=losses_val,
+                outflow=outflow_val,
+                storage=storage_geom,
+                outfall=outfall_geom,
+                depth=depth,
+                head=head,
+                volume=volume,
+                lateral_inflow=lat_inflow,
+                overflow=overflow,
+                outfall_route_to=outfall_route_to,
+            )
+        )
     return results
 
 
@@ -648,10 +650,8 @@ def _build_all_link_infos_sync(session, links, nodes) -> list[LinkInfo]:
             to_idx = link.to_node.index
         except AttributeError:
             to_idx = -1
-        from_node_id = (node_ids[from_idx]
-                        if 0 <= from_idx < len(node_ids) else "")
-        to_node_id = (node_ids[to_idx]
-                      if 0 <= to_idx < len(node_ids) else "")
+        from_node_id = node_ids[from_idx] if 0 <= from_idx < len(node_ids) else ""
+        to_node_id = node_ids[to_idx] if 0 <= to_idx < len(node_ids) else ""
 
         length = link.length
         roughness = link.roughness
@@ -723,14 +723,14 @@ def _build_all_link_infos_sync(session, links, nodes) -> list[LinkInfo]:
                 pass
 
         # Runtime state — prefer bulks, scalar fallback.
-        flow = float(flows[i]) if flows is not None else (
-            link.flow if running else None)
-        depth = float(depths[i]) if depths is not None else (
-            link.depth if running else None)
-        velocity = float(velocities[i]) if velocities is not None else (
-            link.velocity if running else None)
-        capacity = float(capacities[i]) if capacities is not None else (
-            link.capacity if running else None)
+        flow = float(flows[i]) if flows is not None else (link.flow if running else None)
+        depth = float(depths[i]) if depths is not None else (link.depth if running else None)
+        velocity = (
+            float(velocities[i]) if velocities is not None else (link.velocity if running else None)
+        )
+        capacity = (
+            float(capacities[i]) if capacities is not None else (link.capacity if running else None)
+        )
         hydraulic_power = float(hyd_powers[i]) if hyd_powers is not None else None
         if hydraulic_power is None and running:
             try:
@@ -759,33 +759,35 @@ def _build_all_link_infos_sync(session, links, nodes) -> list[LinkInfo]:
                 except Exception:
                     pass
 
-        results.append(LinkInfo(
-            link_id=link_ids[i],
-            index=i,
-            link_type=_LINK_TYPE_NAMES.get(type_code, f"UNKNOWN({type_code})"),
-            from_node=from_node_id,
-            to_node=to_node_id,
-            length=length,
-            roughness=roughness,
-            slope=slope,
-            offset_up=offset_up,
-            offset_dn=offset_dn,
-            initial_flow=None,
-            max_flow=None,
-            xsect=xsect_info,
-            conduit=conduit_geom,
-            weir=weir_geom,
-            orifice=orifice_geom,
-            pump=pump_geom,
-            flow=flow,
-            depth=depth,
-            velocity=velocity,
-            capacity=capacity,
-            hydraulic_power=hydraulic_power,
-            pump_cycles=pump_cycles,
-            pump_on_time=pump_on_time,
-            pump_volume=pump_volume,
-        ))
+        results.append(
+            LinkInfo(
+                link_id=link_ids[i],
+                index=i,
+                link_type=_LINK_TYPE_NAMES.get(type_code, f"UNKNOWN({type_code})"),
+                from_node=from_node_id,
+                to_node=to_node_id,
+                length=length,
+                roughness=roughness,
+                slope=slope,
+                offset_up=offset_up,
+                offset_dn=offset_dn,
+                initial_flow=None,
+                max_flow=None,
+                xsect=xsect_info,
+                conduit=conduit_geom,
+                weir=weir_geom,
+                orifice=orifice_geom,
+                pump=pump_geom,
+                flow=flow,
+                depth=depth,
+                velocity=velocity,
+                capacity=capacity,
+                hydraulic_power=hydraulic_power,
+                pump_cycles=pump_cycles,
+                pump_on_time=pump_on_time,
+                pump_volume=pump_volume,
+            )
+        )
     return results
 
 
@@ -970,8 +972,7 @@ async def get_link_info(
     # link bulks for runtime state and an in-thread scalar loop for
     # static geometry / per-type blocks. Replaces N x ~10 ``to_thread``
     # submissions; see ``_build_all_link_infos_sync`` for the breakdown.
-    all_infos = await asyncio.to_thread(
-        _build_all_link_infos_sync, session, links, nodes)
+    all_infos = await asyncio.to_thread(_build_all_link_infos_sync, session, links, nodes)
     if start_index == 0 and limit is None:
         return all_infos
     sliced, _meta = paginate_list(all_infos, start_index=start_index, limit=limit)
@@ -1064,7 +1065,7 @@ async def get_system_summary(
     pollutants = session.pollutants
 
     _FLOW_UNITS = {0: "CFS", 1: "GPM", 2: "MGD", 3: "CMS", 4: "LPS", 5: "MLD"}
-    _ROUTE_MODELS = {0: "STEADY", 1: "KINWAVE", 2: "DYNWAVE"}
+    _ROUTE_MODELS = {0: "STEADY", 1: "KINWAVE", 2: "DYNWAVE", 3: "FV"}
 
     def _summary_static() -> dict[str, Any]:
         """Single-thread sweep of every static field.
@@ -1365,6 +1366,7 @@ async def get_pollutant_info(
         # v1: construct a Pollutants collection over the ModelBuilder for
         # property-style access pre-finalize.
         from openswmm.engine import Pollutants as _Pollutants
+
         pollutants = _Pollutants(session.model_builder)
     else:
         pollutants = session.pollutants

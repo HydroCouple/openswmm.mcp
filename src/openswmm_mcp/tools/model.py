@@ -194,7 +194,22 @@ async def set_option(
     key: str = "",
     value: str = "",
 ) -> dict:
-    """Set a SWMM option (string key, string value)."""
+    """Set a SWMM option (string key, string value).
+
+    Accepts any key the engine's option API recognizes, including the
+    ``FV_*`` family that configures the explicit finite-volume solver
+    (``FLOW_ROUTING`` = ``FV``): ``FV_CELL_LENGTH``, ``FV_MIN_CELLS``,
+    ``FV_CFL``, ``FV_RIEMANN``, ``FV_ORDER``, ``FV_LIMITER``,
+    ``FV_SCALAR_SCHEME``, ``FV_TIME_INTEGRATION``, ``FV_SLOT_CELERITY``,
+    ``FV_DISPERSION``, ``FV_STRUCTURE_COUPLING``, ``FV_COMPACTION``,
+    ``FV_BACKEND`` and ``FV_MIN_PARALLEL_CELLS``.  These are inert under
+    the other routing models rather than rejected, so they can be set
+    before ``FLOW_ROUTING`` is switched.
+
+    Note that finite-volume routing needs a resolved mesh to reproduce
+    dynamic-wave peak flows -- set ``FV_CELL_LENGTH`` rather than leaving
+    it at the one-cell-per-conduit default when peaks matter.
+    """
     if not key:
         raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] key must not be empty.")
     _, target = await _get_target(ctx, session_id)
@@ -254,10 +269,7 @@ async def get_unit_system(ctx: Context, session_id: str = "default") -> dict:
     elif token in _SI_FLOW_UNITS:
         system = "SI"
     else:
-        raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] Unrecognised FLOW_UNITS token "
-            f"{raw!r}."
-        )
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] Unrecognised FLOW_UNITS token {raw!r}.")
     return {
         "session_id": session_id,
         "flow_units": token,
@@ -271,8 +283,7 @@ async def _list_named_collection(ctx, session_id, attr, label):
     coll = getattr(target, attr, None)
     if coll is None:
         raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] {label} are not available in this "
-            f"session state."
+            f"[{ErrorCode.VALIDATION_ERROR}] {label} are not available in this session state."
         )
     ids = await asyncio.to_thread(lambda: list(coll))
     return {"session_id": session_id, "count": len(ids), "ids": ids}
@@ -316,8 +327,7 @@ async def get_pattern_factors(
     patterns = getattr(target, "patterns", None)
     if patterns is None:
         raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] Patterns are not available in this "
-            f"session state."
+            f"[{ErrorCode.VALIDATION_ERROR}] Patterns are not available in this session state."
         )
 
     def _read():
@@ -660,8 +670,7 @@ async def userflag_get_value(
     """
     if not obj_type or not obj_name or not flag_name:
         raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] obj_type, obj_name, and flag_name "
-            f"must not be empty."
+            f"[{ErrorCode.VALIDATION_ERROR}] obj_type, obj_name, and flag_name must not be empty."
         )
     _, target = await _get_target(ctx, session_id)
     ops = _UserFlagSchemaOps(target)
@@ -694,8 +703,7 @@ async def userflag_set_value(
     """
     if not obj_type or not obj_name or not flag_name:
         raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] obj_type, obj_name, and flag_name "
-            f"must not be empty."
+            f"[{ErrorCode.VALIDATION_ERROR}] obj_type, obj_name, and flag_name must not be empty."
         )
     _, target = await _get_target(ctx, session_id)
     ops = _UserFlagSchemaOps(target)
@@ -721,8 +729,7 @@ async def userflag_clear_value(
     """Remove the flag value assigned to a specific object (idempotent)."""
     if not obj_type or not obj_name or not flag_name:
         raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] obj_type, obj_name, and flag_name "
-            f"must not be empty."
+            f"[{ErrorCode.VALIDATION_ERROR}] obj_type, obj_name, and flag_name must not be empty."
         )
     _, target = await _get_target(ctx, session_id)
     ops = _UserFlagSchemaOps(target)

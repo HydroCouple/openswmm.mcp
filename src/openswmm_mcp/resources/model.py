@@ -7,7 +7,7 @@ import json
 
 from fastmcp import Context, FastMCP
 
-from openswmm_mcp.errors import ToolError
+from openswmm_mcp.errors import ToolError, resolve_index
 
 resources_mcp = FastMCP("resources")
 
@@ -30,7 +30,7 @@ def _get_session_manager(ctx: Context):
 _NODE_TYPE_NAMES = {0: "JUNCTION", 1: "OUTFALL", 2: "STORAGE", 3: "DIVIDER"}
 _LINK_TYPE_NAMES = {0: "CONDUIT", 1: "PUMP", 2: "ORIFICE", 3: "WEIR", 4: "OUTLET"}
 _FLOW_UNITS_NAMES = {0: "CFS", 1: "GPM", 2: "MGD", 3: "CMS", 4: "LPS", 5: "MLD"}
-_ROUTE_MODEL_NAMES = {0: "STEADY", 1: "KINWAVE", 2: "DYNWAVE"}
+_ROUTE_MODEL_NAMES = {0: "STEADY", 1: "KINWAVE", 2: "DYNWAVE", 3: "FV"}
 
 
 def _node_type_name(code) -> str:
@@ -91,13 +91,13 @@ async def session_summary(session_id: str, ctx: Context) -> str:
     subcatchments = session.subcatchments
 
     try:
-        raw_units = await asyncio.to_thread(solver.get_option, "FLOW_UNITS")
+        raw_units = await asyncio.to_thread(lambda: solver.options["FLOW_UNITS"])
         flow_units = _flow_units_name(raw_units)
     except Exception:
         flow_units = "UNKNOWN"
 
     try:
-        raw_route = await asyncio.to_thread(solver.get_option, "FLOW_ROUTING")
+        raw_route = await asyncio.to_thread(lambda: solver.options["FLOW_ROUTING"])
         route_model = _route_model_name(raw_route)
     except Exception:
         route_model = "UNKNOWN"
@@ -105,14 +105,14 @@ async def session_summary(session_id: str, ctx: Context) -> str:
     summary = {
         "session_id": session_id,
         "state": session.state,
-        "node_count": await asyncio.to_thread(nodes.count),
-        "link_count": await asyncio.to_thread(links.count),
-        "subcatchment_count": await asyncio.to_thread(subcatchments.count),
+        "node_count": await asyncio.to_thread(len, nodes),
+        "link_count": await asyncio.to_thread(len, links),
+        "subcatchment_count": await asyncio.to_thread(len, subcatchments),
         "flow_units": flow_units,
         "route_model": route_model,
-        "start_time": await asyncio.to_thread(solver.get_start_time),
-        "end_time": await asyncio.to_thread(solver.get_end_time),
-        "routing_step": await asyncio.to_thread(solver.get_routing_step),
+        "start_time": await asyncio.to_thread(lambda: solver.sim_start_time.isoformat()),
+        "end_time": await asyncio.to_thread(lambda: solver.sim_end_time.isoformat()),
+        "routing_step": await asyncio.to_thread(lambda: solver.routing_step.total_seconds()),
     }
 
     return json.dumps(summary, indent=2)
@@ -134,7 +134,7 @@ async def list_nodes(session_id: str, ctx: Context) -> str:
     def _build_sync() -> list[dict]:
         ids = session.meta.node_ids
         return [
-            {"node_id": ids[i], "type": _node_type_name(nodes.get_type(i)), "index": i}
+            {"node_id": ids[i], "type": _node_type_name(int(nodes[i].type)), "index": i}
             for i in range(len(ids))
         ]
 
@@ -149,26 +149,26 @@ async def node_detail(session_id: str, node_id: str, ctx: Context) -> str:
     session = await sm.get_session(session_id)
     nodes = session.nodes
 
-    index = await asyncio.to_thread(nodes.get_index, node_id)
-    node_type_code = await asyncio.to_thread(nodes.get_type, index)
-    invert = await asyncio.to_thread(nodes.get_invert_elev, index)
-    max_depth = await asyncio.to_thread(nodes.get_max_depth, index)
+    index = await resolve_index(nodes, node_id, "Node")
 
-    detail: dict = {
-        "node_id": node_id,
-        "index": index,
-        "node_type": _node_type_name(node_type_code),
-        "invert_elev": invert,
-        "max_depth": max_depth,
-    }
+    def _build() -> dict:
+        node = nodes[index]
+        d: dict = {
+            "node_id": node_id,
+            "index": index,
+            "node_type": _node_type_name(int(node.type)),
+            "invert_elev": node.invert_elev,
+            "max_depth": node.max_depth,
+        }
+        if session.state in ("running", "ended"):
+            d["depth"] = node.depth
+            d["head"] = node.head
+            d["volume"] = node.volume
+            d["lateral_inflow"] = node.lateral_inflow
+            d["overflow"] = node.overflow
+        return d
 
-    if session.state in ("running", "ended"):
-        detail["depth"] = await asyncio.to_thread(nodes.get_depth, index)
-        detail["head"] = await asyncio.to_thread(nodes.get_head, index)
-        detail["volume"] = await asyncio.to_thread(nodes.get_volume, index)
-        detail["lateral_inflow"] = await asyncio.to_thread(nodes.get_lateral_inflow, index)
-        detail["overflow"] = await asyncio.to_thread(nodes.get_overflow, index)
-
+    detail = await asyncio.to_thread(_build)
     return json.dumps(detail, indent=2)
 
 
@@ -185,7 +185,7 @@ async def list_links(session_id: str, ctx: Context) -> str:
     def _build_sync() -> list[dict]:
         ids = session.meta.link_ids
         return [
-            {"link_id": ids[i], "type": _link_type_name(links.get_type(i)), "index": i}
+            {"link_id": ids[i], "type": _link_type_name(int(links[i].type)), "index": i}
             for i in range(len(ids))
         ]
 
@@ -199,33 +199,28 @@ async def link_detail(session_id: str, link_id: str, ctx: Context) -> str:
     sm = _get_session_manager(ctx)
     session = await sm.get_session(session_id)
     links = session.links
-    nodes = session.nodes
 
-    index = await asyncio.to_thread(links.get_index, link_id)
-    link_type_code = await asyncio.to_thread(links.get_type, index)
-    from_node_idx = await asyncio.to_thread(links.get_from_node, index)
-    to_node_idx = await asyncio.to_thread(links.get_to_node, index)
-    from_node = await asyncio.to_thread(nodes.get_id, from_node_idx)
-    to_node = await asyncio.to_thread(nodes.get_id, to_node_idx)
-    length = await asyncio.to_thread(links.get_length, index)
-    roughness = await asyncio.to_thread(links.get_roughness, index)
+    index = await resolve_index(links, link_id, "Link")
 
-    detail: dict = {
-        "link_id": link_id,
-        "index": index,
-        "link_type": _link_type_name(link_type_code),
-        "from_node": from_node,
-        "to_node": to_node,
-        "length": length,
-        "roughness": roughness,
-    }
+    def _build() -> dict:
+        link = links[index]
+        d: dict = {
+            "link_id": link_id,
+            "index": index,
+            "link_type": _link_type_name(int(link.type)),
+            "from_node": link.from_node.id,
+            "to_node": link.to_node.id,
+            "length": link.length,
+            "roughness": link.roughness,
+        }
+        if session.state in ("running", "ended"):
+            d["flow"] = link.flow
+            d["depth"] = link.depth
+            d["velocity"] = link.velocity
+            d["capacity"] = link.capacity
+        return d
 
-    if session.state in ("running", "ended"):
-        detail["flow"] = await asyncio.to_thread(links.get_flow, index)
-        detail["depth"] = await asyncio.to_thread(links.get_depth, index)
-        detail["velocity"] = await asyncio.to_thread(links.get_velocity, index)
-        detail["capacity"] = await asyncio.to_thread(links.get_capacity, index)
-
+    detail = await asyncio.to_thread(_build)
     return json.dumps(detail, indent=2)
 
 
@@ -256,8 +251,8 @@ async def mass_balance(session_id: str, ctx: Context) -> str:
     session = await sm.get_session(session_id)
     mb = session.mass_balance
 
-    runoff_error = await asyncio.to_thread(mb.get_runoff_continuity_error)
-    routing_error = await asyncio.to_thread(mb.get_routing_continuity_error)
+    runoff_error = await asyncio.to_thread(lambda: mb.runoff_continuity_error)
+    routing_error = await asyncio.to_thread(lambda: mb.routing_continuity_error)
 
     result: dict = {
         "session_id": session_id,
@@ -266,7 +261,7 @@ async def mass_balance(session_id: str, ctx: Context) -> str:
     }
 
     try:
-        quality_error = await asyncio.to_thread(mb.get_quality_continuity_error, 0)
+        quality_error = await asyncio.to_thread(mb.quality_continuity_error, 0)
         result["quality_continuity_error"] = quality_error
     except Exception:
         result["quality_continuity_error"] = None
@@ -276,7 +271,7 @@ async def mass_balance(session_id: str, ctx: Context) -> str:
 
         runoff_total = {}
         for comp in RunoffTotal:
-            val = await asyncio.to_thread(mb.get_runoff_total, comp)
+            val = await asyncio.to_thread(mb.runoff_total, comp)
             runoff_total[comp.name.lower()] = val
         result["runoff_total"] = runoff_total
     except Exception:
@@ -287,7 +282,7 @@ async def mass_balance(session_id: str, ctx: Context) -> str:
 
         routing_total = {}
         for comp in RoutingTotal:
-            val = await asyncio.to_thread(mb.get_routing_total, comp)
+            val = await asyncio.to_thread(mb.routing_total, comp)
             routing_total[comp.name.lower()] = val
         result["routing_total"] = routing_total
     except Exception:
@@ -304,13 +299,13 @@ async def simulation_options(session_id: str, ctx: Context) -> str:
     solver = session.solver
 
     try:
-        raw_units = await asyncio.to_thread(solver.get_option, "FLOW_UNITS")
+        raw_units = await asyncio.to_thread(lambda: solver.options["FLOW_UNITS"])
         flow_units = _flow_units_name(raw_units)
     except Exception:
         flow_units = "UNKNOWN"
 
     try:
-        raw_route = await asyncio.to_thread(solver.get_option, "FLOW_ROUTING")
+        raw_route = await asyncio.to_thread(lambda: solver.options["FLOW_ROUTING"])
         route_model = _route_model_name(raw_route)
     except Exception:
         route_model = "UNKNOWN"
@@ -319,9 +314,9 @@ async def simulation_options(session_id: str, ctx: Context) -> str:
         "session_id": session_id,
         "flow_units": flow_units,
         "route_model": route_model,
-        "start_time": await asyncio.to_thread(solver.get_start_time),
-        "end_time": await asyncio.to_thread(solver.get_end_time),
-        "routing_step": await asyncio.to_thread(solver.get_routing_step),
+        "start_time": await asyncio.to_thread(lambda: solver.sim_start_time.isoformat()),
+        "end_time": await asyncio.to_thread(lambda: solver.sim_end_time.isoformat()),
+        "routing_step": await asyncio.to_thread(lambda: solver.routing_step.total_seconds()),
     }
 
     return json.dumps(options, indent=2)
