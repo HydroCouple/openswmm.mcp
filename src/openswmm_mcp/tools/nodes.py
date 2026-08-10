@@ -7,8 +7,11 @@ aggregate getter doesn't serve well:
 * **Statistics** — post-simulation peak / duration metrics (4 tools).
 * **Bulk array accessors** — read/write all-node arrays in a single call
   (7 tools). Critical for visualization and batched edits.
-* **Storage-node subtype** — curve / functional / seep / exfiltration
-  (8 tools, getter+setter pairs).
+* **Storage-node subtype** — curve / functional / seep / exfiltration /
+  shape+geometry (10 tools, getter+setter pairs).
+* **Virtual junctions** — ``is_virtual`` predicate and the ``virtual_eligible``
+  dry-run rule check (2 tools). Writing the flag goes through the editing
+  tools.
 * **Outfall-node subtype** — type / stage / tidal / timeseries / flap_gate
   / route_to (8 tools).
 * **Divider-node subtype** — type get/set (2 tools).
@@ -68,6 +71,17 @@ _DIVIDER_TYPES: dict[str, int] = {
 }
 
 
+# StorageShape enum codes per the engine. Only the four *geometric* shapes
+# take raw dimensions (see ``set_storage_geometry``); TABULAR takes a curve
+# and FUNCTIONAL the a/b/c coefficients, both of which have their own tools.
+_STORAGE_SHAPES: dict[str, int] = {
+    "cylindrical": 2,
+    "conical": 3,
+    "paraboloid": 4,
+    "pyramidal": 5,
+}
+
+
 def _resolve_outfall_type(name: str | int) -> int:
     if isinstance(name, int):
         return name
@@ -121,9 +135,7 @@ async def _resolve_node(session: SimSession, node_id: str | int) -> int:
 
 
 @nodes_mcp.tool()
-async def get_tag(
-    ctx: Context, session_id: str = "default", node_id: str | int = ""
-) -> dict:
+async def get_tag(ctx: Context, session_id: str = "default", node_id: str | int = "") -> dict:
     """Return the free-form tag string for a node (empty if untagged).
 
     Tags come from the INP ``[TAGS]`` section, are keyed by index, and
@@ -187,6 +199,7 @@ async def stat_max_depth(
     ctx: Context, session_id: str = "default", node_id: str | int = ""
 ) -> dict:
     """Return the peak depth recorded for a node over the simulation."""
+    # wraps: swmm_node_get_stat_max_depth
     session = await _get_session(ctx, session_id)
     idx = await _resolve_node(session, node_id)
     value = await asyncio.to_thread(lambda: session.nodes[idx].stats.max_depth)
@@ -203,6 +216,7 @@ async def stat_max_overflow(
     ctx: Context, session_id: str = "default", node_id: str | int = ""
 ) -> dict:
     """Return the peak overflow rate for a node over the simulation."""
+    # wraps: swmm_node_get_stat_max_overflow
     session = await _get_session(ctx, session_id)
     idx = await _resolve_node(session, node_id)
     value = await asyncio.to_thread(lambda: session.nodes[idx].stats.max_overflow)
@@ -219,6 +233,7 @@ async def stat_vol_flooded(
     ctx: Context, session_id: str = "default", node_id: str | int = ""
 ) -> dict:
     """Return the total flooded volume for a node over the simulation."""
+    # wraps: swmm_node_get_stat_vol_flooded
     session = await _get_session(ctx, session_id)
     idx = await _resolve_node(session, node_id)
     value = await asyncio.to_thread(lambda: session.nodes[idx].stats.vol_flooded)
@@ -235,6 +250,7 @@ async def stat_time_flooded(
     ctx: Context, session_id: str = "default", node_id: str | int = ""
 ) -> dict:
     """Return the total flooded duration (hours) for a node."""
+    # wraps: swmm_node_get_stat_time_flooded
     session = await _get_session(ctx, session_id)
     idx = await _resolve_node(session, node_id)
     value = await asyncio.to_thread(lambda: session.nodes[idx].stats.time_flooded)
@@ -530,9 +546,7 @@ async def get_exfil_params(
     """Return Green-Ampt exfiltration params ``(suction, ksat, imd)`` for a storage node."""
     session = await _get_session(ctx, session_id)
     idx = await _resolve_node(session, node_id)
-    suction, ksat, imd = await asyncio.to_thread(
-        lambda: session.nodes[idx].storage.exfil_params
-    )
+    suction, ksat, imd = await asyncio.to_thread(lambda: session.nodes[idx].storage.exfil_params)
     return {
         "session_id": session_id,
         "node_id": node_id,
@@ -579,6 +593,159 @@ async def set_exfil_params(
         "suction": suction,
         "ksat": ksat,
         "imd": imd,
+    }
+
+
+@nodes_mcp.tool()
+async def get_storage_geometry(
+    ctx: Context, session_id: str = "default", node_id: str | int = ""
+) -> dict:
+    """Return a storage node's surface-area relation and its raw dimensions.
+
+    ``shape`` is the engine's ``StorageShape``: ``tabular`` (curve, see
+    ``get_storage_curve``), ``functional`` (``a``/``b``/``c``, see
+    ``get_storage_functional``), or one of the four *geometric* shapes, whose
+    three raw dimensions ``p1``/``p2``/``p3`` this tool returns:
+
+    * ``cylindrical`` — p1 = major axis, p2 = minor axis.
+    * ``conical`` — p1, p2 = base axes, p3 = side slope.
+    * ``paraboloid`` — p1, p2 = top axes, p3 = height.
+    * ``pyramidal`` — p1 = length, p2 = width, p3 = side slope.
+
+    ``p1``/``p2``/``p3`` are zero for a non-geometric shape.
+    """
+    # wraps: swmm_node_get_storage_shape swmm_node_get_storage_geometry
+    session = await _get_session(ctx, session_id)
+    idx = await _resolve_node(session, node_id)
+
+    def _read() -> tuple[int, str, float, float, float]:
+        storage = session.nodes[idx].storage
+        shape = storage.shape
+        p1, p2, p3 = storage.geometry
+        return int(shape), shape.name.lower(), float(p1), float(p2), float(p3)
+
+    code, name, p1, p2, p3 = await asyncio.to_thread(_read)
+    return {
+        "session_id": session_id,
+        "node_id": node_id,
+        "node_index": idx,
+        "shape": name,
+        "shape_code": code,
+        "p1": p1,
+        "p2": p2,
+        "p3": p3,
+    }
+
+
+@nodes_mcp.tool()
+async def set_storage_geometry(
+    ctx: Context,
+    session_id: str = "default",
+    node_id: str | int = "",
+    shape: str = "",
+    p1: float = 0.0,
+    p2: float = 0.0,
+    p3: float = 0.0,
+) -> dict:
+    """Set a storage node's geometric surface-area relation.
+
+    When ``shape`` is given it is applied first — which detaches any storage
+    curve and re-derives the internal area coefficients — then ``p1``/``p2``/
+    ``p3`` are supplied. Leave ``shape`` empty to redimension the node's
+    current shape. See ``get_storage_geometry`` for the per-shape meaning of
+    the three dimensions.
+
+    Valid shapes here are the geometric ones: ``cylindrical``, ``conical``,
+    ``paraboloid``, ``pyramidal``. Use ``set_storage_curve`` for ``tabular``
+    and ``set_storage_functional`` for ``functional``.
+
+    The engine requires p1 > 0, p2 > 0, p3 >= 0, and p3 != 0 for
+    ``paraboloid``.
+    """
+    # wraps: swmm_node_set_storage_shape swmm_node_set_storage_geometry
+    shape_code: int | None = None
+    if shape:
+        key = shape.strip().lower()
+        if key not in _STORAGE_SHAPES:
+            valid = ", ".join(sorted(_STORAGE_SHAPES))
+            raise ToolError(
+                f"[{ErrorCode.VALIDATION_ERROR}] Unknown storage shape '{shape}'. Valid: {valid}."
+            )
+        shape_code = _STORAGE_SHAPES[key]
+
+    session = await _get_session(ctx, session_id)
+    idx = await _resolve_node(session, node_id)
+    dims = (float(p1), float(p2), float(p3))
+
+    def _set() -> None:
+        storage = session.nodes[idx].storage
+        if shape_code is not None:
+            storage.shape = shape_code
+        storage.geometry = dims
+
+    await asyncio.to_thread(_set)
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "node_id": node_id,
+        "node_index": idx,
+        "shape": shape,
+        "p1": p1,
+        "p2": p2,
+        "p3": p3,
+    }
+
+
+# ===========================================================================
+# Virtual junctions
+# ===========================================================================
+
+
+@nodes_mcp.tool()
+async def is_virtual(ctx: Context, session_id: str = "default", node_id: str | int = "") -> dict:
+    """Report whether a node is a virtual junction.
+
+    A virtual junction is a zero-storage, momentum-transmitting JUNCTION
+    connecting exactly two conduits of identical cross-section (INP
+    ``[VIRTUAL_JUNCTIONS]``). Use ``virtual_eligible`` to test whether a
+    non-virtual node could be converted.
+    """
+    # wraps: swmm_node_is_virtual
+    session = await _get_session(ctx, session_id)
+    idx = await _resolve_node(session, node_id)
+    value = await asyncio.to_thread(lambda: session.nodes[idx].is_virtual)
+    return {
+        "session_id": session_id,
+        "node_id": node_id,
+        "node_index": idx,
+        "is_virtual": bool(value),
+    }
+
+
+@nodes_mcp.tool()
+async def virtual_eligible(
+    ctx: Context, session_id: str = "default", node_id: str | int = ""
+) -> dict:
+    """Dry-run check of the virtual-junction usage rules for a node.
+
+    Read-only; nothing is changed. ``eligible`` is ``True`` (``rule_code`` 0)
+    when the node satisfies every structural rule — exactly two attached
+    conduits of identical cross-section, zero offsets, no lateral inflow
+    sources, dynamic-wave routing — so converting it would succeed. Otherwise
+    ``rule_code`` is the distinct ERR_VJ_* code identifying the violated rule
+    (609 = not exactly two conduits, 611 = cross-section mismatch, 613 =
+    nonzero offset, 617 = a lateral inflow source targets the node).
+    """
+    # wraps: swmm_node_virtual_eligible
+    session = await _get_session(ctx, session_id)
+    idx = await _resolve_node(session, node_id)
+    code = await asyncio.to_thread(lambda: session.nodes[idx].virtual_rule_violation)
+    return {
+        "session_id": session_id,
+        "node_id": node_id,
+        "node_index": idx,
+        "eligible": int(code) == 0,
+        "rule_code": int(code),
     }
 
 
@@ -669,9 +836,7 @@ async def set_outfall_stage(
     session = await _get_session(ctx, session_id)
     idx = await _resolve_node(session, node_id)
     stage_value = float(stage)
-    await asyncio.to_thread(
-        lambda: session.nodes[idx].outfall.set_stage(stage_value)
-    )
+    await asyncio.to_thread(lambda: session.nodes[idx].outfall.set_stage(stage_value))
     return {
         "status": "ok",
         "session_id": session_id,
@@ -691,9 +856,7 @@ async def set_outfall_tidal(
     """Assign a tidal curve to a TIDAL outfall (hour-of-day vs stage)."""
     session = await _get_session(ctx, session_id)
     idx = await _resolve_node(session, node_id)
-    await asyncio.to_thread(
-        lambda: session.nodes[idx].outfall.set_tidal_curve(curve_index)
-    )
+    await asyncio.to_thread(lambda: session.nodes[idx].outfall.set_tidal_curve(curve_index))
     return {
         "status": "ok",
         "session_id": session_id,
@@ -713,9 +876,7 @@ async def set_outfall_timeseries(
     """Assign a time series to a TIMESERIES outfall (time vs stage)."""
     session = await _get_session(ctx, session_id)
     idx = await _resolve_node(session, node_id)
-    await asyncio.to_thread(
-        lambda: session.nodes[idx].outfall.set_timeseries(timeseries_index)
-    )
+    await asyncio.to_thread(lambda: session.nodes[idx].outfall.set_timeseries(timeseries_index))
     return {
         "status": "ok",
         "session_id": session_id,
@@ -735,9 +896,7 @@ async def get_outfall_tidal(
     """
     session = await _get_session(ctx, session_id)
     idx = await _resolve_node(session, node_id)
-    curve_idx = await asyncio.to_thread(
-        lambda: session.nodes[idx].outfall.get_tidal_curve()
-    )
+    curve_idx = await asyncio.to_thread(lambda: session.nodes[idx].outfall.get_tidal_curve())
     return {
         "session_id": session_id,
         "node_id": node_id,
@@ -756,9 +915,7 @@ async def get_outfall_timeseries(
     """
     session = await _get_session(ctx, session_id)
     idx = await _resolve_node(session, node_id)
-    ts_idx = await asyncio.to_thread(
-        lambda: session.nodes[idx].outfall.get_timeseries()
-    )
+    ts_idx = await asyncio.to_thread(lambda: session.nodes[idx].outfall.get_timeseries())
     return {
         "session_id": session_id,
         "node_id": node_id,
@@ -919,9 +1076,7 @@ async def get_quality(
     """Return the current concentration of a pollutant at a node."""
     session = await _get_session(ctx, session_id)
     idx = await _resolve_node(session, node_id)
-    conc = await asyncio.to_thread(
-        lambda: session.nodes[idx].quality(pollutant_index)
-    )
+    conc = await asyncio.to_thread(lambda: session.nodes[idx].quality(pollutant_index))
     return {
         "session_id": session_id,
         "node_id": node_id,
@@ -976,9 +1131,7 @@ async def set_head_boundary(
     require_state(session, "running")
     idx = await _resolve_node(session, node_id)
     head_value = float(head)
-    await asyncio.to_thread(
-        lambda: session.nodes[idx].set_head_boundary(head_value)
-    )
+    await asyncio.to_thread(lambda: session.nodes[idx].set_head_boundary(head_value))
     return {
         "status": "ok",
         "session_id": session_id,
@@ -1002,9 +1155,7 @@ async def depth_from_volume(
     session = await _get_session(ctx, session_id)
     idx = await _resolve_node(session, node_id)
     volume_value = float(volume)
-    depth = await asyncio.to_thread(
-        lambda: session.nodes[idx].depth_from_volume(volume_value)
-    )
+    depth = await asyncio.to_thread(lambda: session.nodes[idx].depth_from_volume(volume_value))
     return {
         "session_id": session_id,
         "node_id": node_id,

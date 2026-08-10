@@ -244,6 +244,7 @@ async def get_open_diagnostics(ctx: Context, session_id: str = "default") -> dic
     and fix issues before initialising or editing the model. A strict open
     that succeeds leaves both lists empty. New engine only.
     """
+    # wraps: swmm_get_error_count swmm_get_error_at swmm_get_warning_count swmm_get_warning_at
     sm = get_session_manager(ctx)
     session = await sm.get_session(session_id)
     require_new_engine(session, "Open diagnostics (open_errors / open_warnings)")
@@ -572,6 +573,7 @@ async def list_sessions(ctx: Context) -> list[dict]:
 @lifecycle_mcp.tool()
 async def events_count(ctx: Context, session_id: str = "default") -> dict:
     """Return the number of [EVENTS] rows in the model."""
+    # wraps: swmm_events_count
     sm = get_session_manager(ctx)
     session = await sm.get_session(session_id)
     require_new_engine(session, "Events editor")
@@ -582,6 +584,7 @@ async def events_count(ctx: Context, session_id: str = "default") -> dict:
 @lifecycle_mcp.tool()
 async def events_get(ctx: Context, session_id: str = "default", index: int = 0) -> dict:
     """Return the start/end OADate of the I{index}-th event."""
+    # wraps: swmm_events_get
     sm = get_session_manager(ctx)
     session = await sm.get_session(session_id)
     require_new_engine(session, "Events editor")
@@ -646,6 +649,7 @@ async def events_set(
     end_oadate: float = 0.0,
 ) -> dict:
     """Overwrite the I{index}-th event window."""
+    # wraps: swmm_events_set
     if end_oadate <= start_oadate:
         raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] end_oadate must be > start_oadate.")
     sm = get_session_manager(ctx)
@@ -671,6 +675,7 @@ async def events_set(
 @lifecycle_mcp.tool()
 async def events_remove(ctx: Context, session_id: str = "default", index: int = 0) -> dict:
     """Remove the I{index}-th event; trailing entries shift down."""
+    # wraps: swmm_events_remove
     sm = get_session_manager(ctx)
     session = await sm.get_session(session_id)
     require_new_engine(session, "Events editor")

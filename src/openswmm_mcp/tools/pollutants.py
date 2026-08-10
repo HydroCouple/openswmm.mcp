@@ -254,9 +254,7 @@ async def set_gw_conc(
     gw_conc: float = 0.0,
 ) -> dict:
     """Set the groundwater concentration."""
-    return await _attr_set(
-        ctx, session_id, pollutant_id, "gw_conc", gw_conc, "gw_conc", float
-    )
+    return await _attr_set(ctx, session_id, pollutant_id, "gw_conc", gw_conc, "gw_conc", float)
 
 
 @pollutants_mcp.tool()
@@ -285,6 +283,7 @@ async def get_dwf_conc(
     ctx: Context, session_id: str = "default", pollutant_id: str | int = ""
 ) -> dict:
     """Return the concentration of this pollutant in dry-weather flow."""
+    # wraps: swmm_pollutant_get_dwf_conc
     return await _attr_get(ctx, session_id, pollutant_id, "dwf_conc", "dwf_conc", float)
 
 
@@ -296,9 +295,8 @@ async def set_dwf_conc(
     dwf_conc: float = 0.0,
 ) -> dict:
     """Set the dry-weather-flow concentration."""
-    return await _attr_set(
-        ctx, session_id, pollutant_id, "dwf_conc", dwf_conc, "dwf_conc", float
-    )
+    # wraps: swmm_pollutant_set_dwf_conc
+    return await _attr_set(ctx, session_id, pollutant_id, "dwf_conc", dwf_conc, "dwf_conc", float)
 
 
 @pollutants_mcp.tool()
@@ -363,9 +361,7 @@ async def set_snow_only(
     snow_only: bool = False,
 ) -> dict:
     """Set the snow-only flag for a pollutant."""
-    return await _attr_set(
-        ctx, session_id, pollutant_id, "snow_only", snow_only, "snow_only", bool
-    )
+    return await _attr_set(ctx, session_id, pollutant_id, "snow_only", snow_only, "snow_only", bool)
 
 
 @pollutants_mcp.tool()
@@ -464,9 +460,7 @@ async def set_node_quality(
     conc = float(concentration)
     # v1 keeps set_node_quality on the Pollutants collection (it's a
     # cross-domain operation, not on a single Pollutant wrapper).
-    await asyncio.to_thread(
-        accessor.set_node_quality, node_idx, pollut_idx, conc
-    )
+    await asyncio.to_thread(accessor.set_node_quality, node_idx, pollut_idx, conc)
     return {
         "status": "ok",
         "session_id": session_id,
@@ -497,9 +491,7 @@ async def set_link_quality(
     pollut_idx = await _resolve_pollutant(session, pollutant_id)
     accessor = _pollutants_accessor(session)
     conc = float(concentration)
-    await asyncio.to_thread(
-        accessor.set_link_quality, link_idx, pollut_idx, conc
-    )
+    await asyncio.to_thread(accessor.set_link_quality, link_idx, pollut_idx, conc)
     return {
         "status": "ok",
         "session_id": session_id,

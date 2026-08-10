@@ -16,8 +16,10 @@ Module coverage (17 of 17 Python ``Infrastructure`` runtime methods):
   ``add_transect_station``.
 * Streets: ``street_count``, ``add_street``, ``set_street_params``.
 * Inlets: ``inlet_count``, ``add_inlet``, ``set_inlet_params``.
-* LID controls: ``lid_count``, ``add_lid``, ``set_lid_surface``,
-  ``set_lid_soil``, ``set_lid_storage``, ``set_lid_drain``.
+* LID controls: ``lid_count``, ``add_lid``, and per-layer setters/getters for
+  all six layers — ``{set,get}_lid_surface``, ``{set,get}_lid_soil``,
+  ``{set,get}_lid_storage``, ``{set,get}_lid_drain``,
+  ``{set,get}_lid_pavement``, ``{set,get}_lid_drainmat``.
 * LID usage: ``add_lid_usage`` (accepts subcatch_id string).
 
 State handling: the helper accepts any non-closed state. For ``building``
@@ -132,6 +134,15 @@ async def _resolve_subcatch_idx(subcatchments: Any, subcatch_id: str | int) -> i
     return idx
 
 
+async def _resolve_lid_idx(lids: Any, lid_index: str | int) -> int:
+    """Translate a string LID-control ID to integer index; pass through ints."""
+    if isinstance(lid_index, int):
+        return lid_index
+    if not lid_index:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] lid_index must not be empty.")
+    return await resolve_index(lids, lid_index, "LID control")
+
+
 # ===========================================================================
 # [TRANSECTS]
 # ===========================================================================
@@ -140,6 +151,7 @@ async def _resolve_subcatch_idx(subcatchments: Any, subcatch_id: str | int) -> i
 @infrastructure_mcp.tool()
 async def transect_count(ctx: Context, session_id: str = "default") -> dict:
     """Return the number of transects defined in the model."""
+    # wraps: swmm_transect_count
     _, infra, _ = await _get_accessors(ctx, session_id)
     n = await asyncio.to_thread(lambda: len(infra.transects))
     return {"session_id": session_id, "count": n}
@@ -227,9 +239,7 @@ async def clear_stations(
 
 
 @infrastructure_mcp.tool()
-async def station_count(
-    ctx: Context, session_id: str = "default", transect_index: int = 0
-) -> dict:
+async def station_count(ctx: Context, session_id: str = "default", transect_index: int = 0) -> dict:
     """Return the number of (station, elevation) points in a transect's profile."""
     _, infra, _ = await _get_accessors(ctx, session_id)
     n = await asyncio.to_thread(infra.transects.station_count, transect_index)
@@ -323,9 +333,7 @@ async def get_encroachment_stations(
 ) -> dict:
     """Read back a transect's left/right encroachment station positions."""
     _, infra, _ = await _get_accessors(ctx, session_id)
-    left, right = await asyncio.to_thread(
-        infra.transects.get_encroachment_stations, transect_index
-    )
+    left, right = await asyncio.to_thread(infra.transects.get_encroachment_stations, transect_index)
     return {
         "session_id": session_id,
         "transect_index": transect_index,
@@ -357,9 +365,7 @@ async def set_encroachment_stations(
 
 
 @infrastructure_mcp.tool()
-async def get_modifiers(
-    ctx: Context, session_id: str = "default", transect_index: int = 0
-) -> dict:
+async def get_modifiers(ctx: Context, session_id: str = "default", transect_index: int = 0) -> dict:
     """Read back a transect's roughness / station / elevation modifier factors."""
     _, infra, _ = await _get_accessors(ctx, session_id)
     n_factor, x_factor, y_factor = await asyncio.to_thread(
@@ -407,9 +413,7 @@ async def set_modifiers(
 
 
 @infrastructure_mcp.tool()
-async def get_comments(
-    ctx: Context, session_id: str = "default", transect_index: int = 0
-) -> dict:
+async def get_comments(ctx: Context, session_id: str = "default", transect_index: int = 0) -> dict:
     """Read back the comment text attached to a transect."""
     _, infra, _ = await _get_accessors(ctx, session_id)
     text = await asyncio.to_thread(infra.transects.get_comments, transect_index)
@@ -451,6 +455,7 @@ async def remove_transect(
 @infrastructure_mcp.tool()
 async def street_count(ctx: Context, session_id: str = "default") -> dict:
     """Return the number of street cross-sections in the model."""
+    # wraps: swmm_street_count
     _, infra, _ = await _get_accessors(ctx, session_id)
     n = await asyncio.to_thread(lambda: len(infra.streets))
     return {"session_id": session_id, "count": n}
@@ -552,6 +557,7 @@ async def get_street_params(
 @infrastructure_mcp.tool()
 async def inlet_count(ctx: Context, session_id: str = "default") -> dict:
     """Return the number of inlets defined in the model."""
+    # wraps: swmm_inlet_count
     _, infra, _ = await _get_accessors(ctx, session_id)
     n = await asyncio.to_thread(lambda: len(infra.inlets))
     return {"session_id": session_id, "count": n}
@@ -630,6 +636,7 @@ async def set_inlet_params(
 @infrastructure_mcp.tool()
 async def lid_count(ctx: Context, session_id: str = "default") -> dict:
     """Return the number of LID controls defined in the model."""
+    # wraps: swmm_lid_count
     _, infra, _ = await _get_accessors(ctx, session_id)
     n = await asyncio.to_thread(lambda: len(infra.lids))
     return {"session_id": session_id, "count": n}
@@ -793,6 +800,190 @@ async def set_lid_drain(
     }
 
 
+@infrastructure_mcp.tool()
+async def set_lid_pavement(
+    ctx: Context,
+    session_id: str = "default",
+    lid_index: str | int = 0,
+    thick: float = 0.0,
+    void_ratio: float = 0.0,
+    frac_imperv: float = 0.0,
+    ksat: float = 0.0,
+    clog_factor: float = 0.0,
+    regen_days: float = 0.0,
+) -> dict:
+    """Set LID porous-pavement layer parameters (``perm_pavement`` LIDs).
+
+    Parameters
+    ----------
+    lid_index:
+        Target LID control (string ID or integer index).
+    thick:
+        Pavement layer thickness.
+    void_ratio:
+        Void volume / solids volume (a *ratio*, not a fraction).
+    frac_imperv:
+        Impervious surface fraction of the pavement in [0.0, 1.0].
+    ksat:
+        Saturated hydraulic conductivity of the pavement.
+    clog_factor, regen_days:
+        Clogging factor and the pavement regeneration interval in days.
+    """
+    _, infra, _ = await _get_accessors(ctx, session_id)
+    idx = await _resolve_lid_idx(infra.lids, lid_index)
+    # wraps: swmm_lid_set_pavement
+    await asyncio.to_thread(
+        infra.lids.set_pavement,
+        idx,
+        thick=float(thick),
+        void_ratio=float(void_ratio),
+        frac_imperv=float(frac_imperv),
+        ksat=float(ksat),
+        clog_factor=float(clog_factor),
+        regen_days=float(regen_days),
+    )
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "lid_index": idx,
+    }
+
+
+@infrastructure_mcp.tool()
+async def set_lid_drainmat(
+    ctx: Context,
+    session_id: str = "default",
+    lid_index: str | int = 0,
+    thick: float = 0.0,
+    void_frac: float = 0.0,
+    roughness: float = 0.0,
+) -> dict:
+    """Set LID drainage-mat layer parameters (``green_roof`` LIDs).
+
+    ``lid_index`` accepts a string LID ID or an integer index. The mat is
+    described by its thickness, void fraction, and Manning's roughness.
+    """
+    _, infra, _ = await _get_accessors(ctx, session_id)
+    idx = await _resolve_lid_idx(infra.lids, lid_index)
+    # wraps: swmm_lid_set_drainmat
+    await asyncio.to_thread(
+        infra.lids.set_drainmat,
+        idx,
+        thick=float(thick),
+        void_frac=float(void_frac),
+        roughness=float(roughness),
+    )
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "lid_index": idx,
+    }
+
+
+@infrastructure_mcp.tool()
+async def get_lid_surface(
+    ctx: Context,
+    session_id: str = "default",
+    lid_index: str | int = 0,
+) -> dict:
+    """Read LID surface-layer parameters. Inverse of :func:`set_lid_surface`.
+
+    Returns ``storage``, ``roughness``, ``slope`` — the same keys
+    :func:`set_lid_surface` accepts.
+    """
+    _, infra, _ = await _get_accessors(ctx, session_id)
+    idx = await _resolve_lid_idx(infra.lids, lid_index)
+    # wraps: swmm_lid_get_surface
+    layer = await asyncio.to_thread(infra.lids.get_surface, idx)
+    return {"session_id": session_id, "lid_index": idx, **layer}
+
+
+@infrastructure_mcp.tool()
+async def get_lid_soil(
+    ctx: Context,
+    session_id: str = "default",
+    lid_index: str | int = 0,
+) -> dict:
+    """Read LID soil-layer parameters. Inverse of :func:`set_lid_soil`.
+
+    Returns ``thick``, ``porosity``, ``fc``, ``wp``, ``ksat``, ``kslope``.
+    """
+    _, infra, _ = await _get_accessors(ctx, session_id)
+    idx = await _resolve_lid_idx(infra.lids, lid_index)
+    # wraps: swmm_lid_get_soil
+    layer = await asyncio.to_thread(infra.lids.get_soil, idx)
+    return {"session_id": session_id, "lid_index": idx, **layer}
+
+
+@infrastructure_mcp.tool()
+async def get_lid_storage(
+    ctx: Context,
+    session_id: str = "default",
+    lid_index: str | int = 0,
+) -> dict:
+    """Read LID storage-layer parameters. Inverse of :func:`set_lid_storage`.
+
+    Returns ``thick``, ``void_frac``, ``ksat``.
+    """
+    _, infra, _ = await _get_accessors(ctx, session_id)
+    idx = await _resolve_lid_idx(infra.lids, lid_index)
+    # wraps: swmm_lid_get_storage
+    layer = await asyncio.to_thread(infra.lids.get_storage, idx)
+    return {"session_id": session_id, "lid_index": idx, **layer}
+
+
+@infrastructure_mcp.tool()
+async def get_lid_drain(
+    ctx: Context,
+    session_id: str = "default",
+    lid_index: str | int = 0,
+) -> dict:
+    """Read LID underdrain parameters. Inverse of :func:`set_lid_drain`.
+
+    Returns ``coeff``, ``expon``, ``offset``.
+    """
+    _, infra, _ = await _get_accessors(ctx, session_id)
+    idx = await _resolve_lid_idx(infra.lids, lid_index)
+    # wraps: swmm_lid_get_drain
+    layer = await asyncio.to_thread(infra.lids.get_drain, idx)
+    return {"session_id": session_id, "lid_index": idx, **layer}
+
+
+@infrastructure_mcp.tool()
+async def get_lid_pavement(
+    ctx: Context,
+    session_id: str = "default",
+    lid_index: str | int = 0,
+) -> dict:
+    """Read LID porous-pavement parameters. Inverse of :func:`set_lid_pavement`.
+
+    Returns ``thick``, ``void_ratio``, ``frac_imperv``, ``ksat``,
+    ``clog_factor``, ``regen_days``.
+    """
+    _, infra, _ = await _get_accessors(ctx, session_id)
+    idx = await _resolve_lid_idx(infra.lids, lid_index)
+    # wraps: swmm_lid_get_pavement
+    layer = await asyncio.to_thread(infra.lids.get_pavement, idx)
+    return {"session_id": session_id, "lid_index": idx, **layer}
+
+
+@infrastructure_mcp.tool()
+async def get_lid_drainmat(
+    ctx: Context,
+    session_id: str = "default",
+    lid_index: str | int = 0,
+) -> dict:
+    """Read LID drainage-mat parameters. Inverse of :func:`set_lid_drainmat`.
+
+    Returns ``thick``, ``void_frac``, ``roughness``.
+    """
+    _, infra, _ = await _get_accessors(ctx, session_id)
+    idx = await _resolve_lid_idx(infra.lids, lid_index)
+    # wraps: swmm_lid_get_drainmat
+    layer = await asyncio.to_thread(infra.lids.get_drainmat, idx)
+    return {"session_id": session_id, "lid_index": idx, **layer}
+
+
 # ===========================================================================
 # [LID_USAGE]
 # ===========================================================================
@@ -864,4 +1055,43 @@ async def add_lid_usage(
         "lid_index": lid_index,
         "number": number,
         "area": area,
+    }
+
+
+@infrastructure_mcp.tool()
+async def lid_usage_count(ctx: Context, session_id: str = "default") -> dict:
+    """Return the number of ``[LID_USAGE]`` placement rows across all subcatchments."""
+    _, infra, _ = await _get_accessors(ctx, session_id)
+    n = await asyncio.to_thread(infra.lids.usage_count)
+    return {"session_id": session_id, "count": n}
+
+
+@infrastructure_mcp.tool()
+async def lid_usage_get(ctx: Context, session_id: str = "default", usage_index: int = 0) -> dict:
+    """Read one ``[LID_USAGE]`` placement row by global index.
+
+    Returns the owning subcatchment/LID indices and the placement
+    parameters (``number``, ``area``, ``width``, ``init_sat``,
+    ``from_imperv``, ``to_perv``, ``from_perv``).
+    """
+    _, infra, _ = await _get_accessors(ctx, session_id)
+    row = await asyncio.to_thread(infra.lids.usage_get, int(usage_index))
+    return {
+        "session_id": session_id,
+        "usage_index": int(usage_index),
+        **row,
+    }
+
+
+@infrastructure_mcp.tool()
+async def lid_usage_remove(ctx: Context, session_id: str = "default", usage_index: int = 0) -> dict:
+    """Remove one ``[LID_USAGE]`` placement row by global index."""
+    _, infra, _ = await _get_accessors(ctx, session_id)
+    await asyncio.to_thread(infra.lids.usage_remove, int(usage_index))
+    n = await asyncio.to_thread(infra.lids.usage_count)
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "usage_index": int(usage_index),
+        "count": n,
     }

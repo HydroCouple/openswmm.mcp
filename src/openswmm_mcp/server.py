@@ -67,6 +67,7 @@ from openswmm_mcp.tools.spatial_quality import spatial_quality_mcp  # noqa: E402
 from openswmm_mcp.tools.subcatchments import subcatchments_mcp  # noqa: E402
 from openswmm_mcp.tools.tables import tables_mcp  # noqa: E402
 from openswmm_mcp.tools.twod import twod_mcp  # noqa: E402
+from openswmm_mcp.tools.xsect import xsect_mcp  # noqa: E402
 
 mcp.mount(lifecycle_mcp, namespace="lifecycle")
 mcp.mount(query_mcp, namespace="query")
@@ -90,6 +91,7 @@ mcp.mount(model_mcp, namespace="model")
 mcp.mount(quality_mcp, namespace="quality")
 mcp.mount(twod_mcp, namespace="twod")
 mcp.mount(datetime_mcp, namespace="datetime")
+mcp.mount(xsect_mcp, namespace="xsect")
 mcp.mount(gym_mcp, namespace="gym")
 
 # ---------------------------------------------------------------------------

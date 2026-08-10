@@ -26,6 +26,8 @@ if not hasattr(eng.Solver, "surface2d"):
 
 from openswmm_mcp.errors import ToolError  # noqa: E402
 from openswmm_mcp.tools.twod import (  # noqa: E402
+    add_triangle_coupling,
+    clear_triangle_couplings,
     force_clear,
     force_coupling_flux,
     force_evap,
@@ -42,11 +44,15 @@ from openswmm_mcp.tools.twod import (  # noqa: E402
     get_state_bulk,
     get_stats,
     get_totals,
+    get_triangle_initial_conditions,
+    get_vertex_coupling_params,
     get_vertex_head,
     reset_edge_conveyance,
     set_edge_bc,
     set_edge_conveyance,
     set_solver_params,
+    set_triangle_initial_conditions,
+    set_vertex_coupling_params,
     set_vertex_z,
 )
 
@@ -55,6 +61,10 @@ _TWOD_INP = (Path(__file__).parent / "data" / "twod_parking_lot.inp").resolve()
 # Fixture mesh constants (see the [2D_*] sections of twod_parking_lot.inp).
 N_VERTICES = 9
 N_TRIANGLES = 8
+# [2D_VERTEX_NODE_MAP]: v4 -> J1, CD 0.65, AREA 2.0.
+COUPLED_VERTEX = 4
+# [2D_TRIANGLE_NODE_MAP]: tag "vault" (= T6) -> ST1, CD 0.60, AREA 10.0.
+COUPLED_TRIANGLE = 6
 
 
 class MockContext:
@@ -150,6 +160,14 @@ class TestMesh:
         assert len(out["vertex_couplings"]) >= 1
         assert len(out["triangle_couplings"]) >= 1
         assert all(c["node_index"] >= 0 for c in out["vertex_couplings"])
+        # The fixture's single [2D_TRIANGLE_NODE_MAP] row (tag "vault" -> T6).
+        rows = out["triangle_coupling_rows"]
+        assert len(rows) == 1
+        assert rows[0]["row"] == 0
+        assert rows[0]["triangle"] == COUPLED_TRIANGLE
+        assert rows[0]["node_index"] >= 0
+        assert rows[0]["cd"] == pytest.approx(0.60)
+        assert rows[0]["area"] == pytest.approx(10.0)
 
     async def test_edge_geometry_bulk(self, session_manager, twod_inp_path):
         ctx = await _open(session_manager, twod_inp_path)
@@ -399,3 +417,145 @@ class TestEdgeConveyance:
         got = await get_edge_conveyance(ctx, session_id="twod")
         assert got["summary"]["min"] == pytest.approx(1.0)
         assert got["restricted_edges"] == []
+
+
+# ---------------------------------------------------------------------------
+# Triangle initial conditions
+# ---------------------------------------------------------------------------
+
+
+class TestTriangleInitialConditions:
+    async def test_defaults_are_dry_and_still(self, session_manager, twod_inp_path):
+        ctx = await _open(session_manager, twod_inp_path)
+        out = await get_triangle_initial_conditions(ctx, session_id="twod", triangle=0)
+        assert out["init_depth"] == pytest.approx(0.0)
+        assert out["init_u"] == pytest.approx(0.0)
+        assert out["init_v"] == pytest.approx(0.0)
+
+    async def test_set_depth_roundtrip(self, session_manager, twod_inp_path):
+        # The fixture is a CMS project with ";; UNITS: SI (m)", so INIT_DEPTH
+        # is metres here; on a US-FLOW_UNITS project it would be feet.
+        ctx = await _open(session_manager, twod_inp_path)
+        out = await set_triangle_initial_conditions(
+            ctx, session_id="twod", triangle=0, depth=0.25
+        )
+        assert out["status"] == "ok"
+        got = await get_triangle_initial_conditions(ctx, session_id="twod", triangle=0)
+        assert got["init_depth"] == pytest.approx(0.25)
+
+    async def test_set_velocity_roundtrip(self, session_manager, twod_inp_path):
+        ctx = await _open(session_manager, twod_inp_path)
+        out = await set_triangle_initial_conditions(
+            ctx, session_id="twod", triangle=1, u=0.4, v=-0.2
+        )
+        assert out["status"] == "ok"
+        got = await get_triangle_initial_conditions(ctx, session_id="twod", triangle=1)
+        assert got["init_u"] == pytest.approx(0.4)
+        assert got["init_v"] == pytest.approx(-0.2)
+
+    async def test_no_params_raises(self, session_manager, twod_inp_path):
+        ctx = await _open(session_manager, twod_inp_path)
+        with pytest.raises(ToolError):
+            await set_triangle_initial_conditions(ctx, session_id="twod", triangle=0)
+
+    async def test_half_a_velocity_raises(self, session_manager, twod_inp_path):
+        ctx = await _open(session_manager, twod_inp_path)
+        with pytest.raises(ToolError):
+            await set_triangle_initial_conditions(ctx, session_id="twod", triangle=0, u=0.4)
+
+    async def test_negative_depth_raises(self, session_manager, twod_inp_path):
+        ctx = await _open(session_manager, twod_inp_path)
+        with pytest.raises(ToolError):
+            await set_triangle_initial_conditions(ctx, session_id="twod", triangle=0, depth=-1.0)
+
+
+# ---------------------------------------------------------------------------
+# Coupling authoring
+# ---------------------------------------------------------------------------
+
+
+class TestTriangleCoupling:
+    async def test_add_appends_rows(self, session_manager, twod_inp_path):
+        # add() appends: a triangle may carry several rows, one per node.
+        ctx = await _open(session_manager, twod_inp_path)
+        first = await add_triangle_coupling(
+            ctx, session_id="twod", triangle=0, node_name="J1", cd=0.7, area=3.0
+        )
+        assert first["status"] == "ok"
+        second = await add_triangle_coupling(
+            ctx, session_id="twod", triangle=0, node_name="ST1", cd=0.5, area=1.5
+        )
+        # 1 authored fixture row + 2 added.
+        assert second["coupling_rows"] == first["coupling_rows"] + 1 == 3
+        rows = (await get_coupling_map(ctx, session_id="twod"))["triangle_coupling_rows"]
+        assert [r["triangle"] for r in rows] == [COUPLED_TRIANGLE, 0, 0]
+        assert rows[2]["cd"] == pytest.approx(0.5)
+        assert rows[2]["area"] == pytest.approx(1.5)
+
+    async def test_clear_removes_every_row(self, session_manager, twod_inp_path):
+        ctx = await _open(session_manager, twod_inp_path)
+        await add_triangle_coupling(ctx, session_id="twod", triangle=0, node_name="J1")
+        out = await clear_triangle_couplings(ctx, session_id="twod")
+        assert out["status"] == "cleared"
+        assert out["rows_removed"] == 2
+        got = await get_coupling_map(ctx, session_id="twod")
+        assert got["triangle_coupling_rows"] == []
+        # The legacy per-triangle mirror is reset too; vertex couplings survive.
+        assert got["triangle_couplings"] == []
+        assert len(got["vertex_couplings"]) >= 1
+
+    async def test_missing_node_name_raises(self, session_manager, twod_inp_path):
+        ctx = await _open(session_manager, twod_inp_path)
+        with pytest.raises(ToolError):
+            await add_triangle_coupling(ctx, session_id="twod", triangle=0)
+
+    async def test_nonpositive_cd_or_area_raises(self, session_manager, twod_inp_path):
+        ctx = await _open(session_manager, twod_inp_path)
+        with pytest.raises(ToolError):
+            await add_triangle_coupling(ctx, session_id="twod", triangle=0, node_name="J1", cd=0.0)
+        with pytest.raises(ToolError):
+            await add_triangle_coupling(
+                ctx, session_id="twod", triangle=0, node_name="J1", area=-1.0
+            )
+
+
+class TestVertexCouplingParams:
+    async def test_authored_params_read_back(self, session_manager, twod_inp_path):
+        ctx = await _open(session_manager, twod_inp_path)
+        out = await get_vertex_coupling_params(ctx, session_id="twod", vertex=COUPLED_VERTEX)
+        assert out["cd"] == pytest.approx(0.65)
+        assert out["area"] == pytest.approx(2.0)
+
+    async def test_set_roundtrip(self, session_manager, twod_inp_path):
+        ctx = await _open(session_manager, twod_inp_path)
+        out = await set_vertex_coupling_params(
+            ctx, session_id="twod", vertex=COUPLED_VERTEX, cd=0.8, area=4.5
+        )
+        assert out["status"] == "ok"
+        assert out["cd"] == pytest.approx(0.8)
+        assert out["area"] == pytest.approx(4.5)
+        got = await get_vertex_coupling_params(ctx, session_id="twod", vertex=COUPLED_VERTEX)
+        assert got["cd"] == pytest.approx(0.8)
+        assert got["area"] == pytest.approx(4.5)
+
+    async def test_partial_update_leaves_the_other_alone(self, session_manager, twod_inp_path):
+        ctx = await _open(session_manager, twod_inp_path)
+        out = await set_vertex_coupling_params(
+            ctx, session_id="twod", vertex=COUPLED_VERTEX, cd=0.9
+        )
+        assert out["cd"] == pytest.approx(0.9)
+        assert out["area"] == pytest.approx(2.0)
+
+    async def test_no_params_raises(self, session_manager, twod_inp_path):
+        ctx = await _open(session_manager, twod_inp_path)
+        with pytest.raises(ToolError):
+            await set_vertex_coupling_params(ctx, session_id="twod", vertex=COUPLED_VERTEX)
+
+    async def test_nonpositive_values_raise(self, session_manager, twod_inp_path):
+        ctx = await _open(session_manager, twod_inp_path)
+        with pytest.raises(ToolError):
+            await set_vertex_coupling_params(ctx, session_id="twod", vertex=COUPLED_VERTEX, cd=0.0)
+        with pytest.raises(ToolError):
+            await set_vertex_coupling_params(
+                ctx, session_id="twod", vertex=COUPLED_VERTEX, area=-2.0
+            )

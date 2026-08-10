@@ -66,6 +66,7 @@ async def save_hotstart(
     if not path:
         path = str(session.working_dir / f"{session_id}.hsf")
 
+    # wraps: swmm_hotstart_save
     await asyncio.to_thread(session.hotstart.save, session.solver, path)
 
     return HotStartResult(
@@ -208,10 +209,53 @@ async def seed_hotstart_state(
         status="seeded",
         path=str(resolved),
         message=(
-            f"Seeded {n_overrides} element override(s) from hot-start into "
-            f"session '{session_id}'."
+            f"Seeded {n_overrides} element override(s) from hot-start into session '{session_id}'."
         ),
     )
+
+
+@hotstart_mcp.tool()
+async def get_file_sim_time(ctx: Context, session_id: str = "default", path: str = "") -> dict:
+    """Return the simulation moment stored *inside* a hot-start file.
+
+    This is the timestamp the state was captured at, read from the file's
+    header — not the live clock. ``lifecycle_get_simulation_time`` reports the
+    running session's current time; this tool answers "what point in the run
+    does this checkpoint represent?" without applying it to anything.
+
+    No session state is touched; ``session_id`` is accepted only so the tool
+    is uniform with the rest of the namespace.
+
+    Parameters
+    ----------
+    path:
+        Path to an existing hot-start file.
+    """
+    # wraps: swmm_hotstart_get_sim_time
+    from openswmm.engine import datetime_to_oadate
+
+    if not path:
+        raise ToolError("A hot-start file path must be provided.")
+    resolved = Path(path).expanduser().resolve()
+    if not resolved.exists():
+        raise ToolError(f"Hot-start file not found: {resolved}")
+
+    sm = _get_session_manager(ctx)
+    session = await sm.get_session(session_id)
+    require_new_engine(session, "Hot-start file metadata")
+
+    def _read() -> tuple[str, float]:
+        hs = session.hotstart.open(str(resolved))
+        when = hs.sim_datetime
+        return when.isoformat(), datetime_to_oadate(when)
+
+    iso, oadate = await asyncio.to_thread(_read)
+    return {
+        "session_id": session_id,
+        "path": str(resolved),
+        "sim_datetime": iso,
+        "sim_datetime_oadate": oadate,
+    }
 
 
 @hotstart_mcp.tool()
@@ -297,6 +341,7 @@ async def clone_session(
 @hotstart_mcp.tool()
 async def saves_count(ctx: Context, session_id: str = "default") -> dict:
     """Return the number of scheduled SAVE HOTSTART entries in [FILES]."""
+    # wraps: swmm_hotstart_saves_count
     sm = _get_session_manager(ctx)
     session = await sm.get_session(session_id)
     require_new_engine(session, "Hotstart saves management")
@@ -307,6 +352,7 @@ async def saves_count(ctx: Context, session_id: str = "default") -> dict:
 @hotstart_mcp.tool()
 async def saves_get(ctx: Context, session_id: str = "default", index: int = 0) -> dict:
     """Return the path + datetime of the I{index}-th scheduled save."""
+    # wraps: swmm_hotstart_saves_get_path swmm_hotstart_saves_get_datetime
     from openswmm.engine import datetime_to_oadate
 
     sm = _get_session_manager(ctx)
@@ -376,6 +422,7 @@ async def saves_set(
     Fields not supplied (None) are left unchanged.  v1 SaveSchedule
     requires a full entry replacement, so we read-modify-write.
     """
+    # wraps: swmm_hotstart_saves_set_path swmm_hotstart_saves_set_datetime swmm_hotstart_saves_get_path swmm_hotstart_saves_get_datetime  # noqa: E501
     from openswmm.engine import datetime_to_oadate, oadate_to_datetime
 
     sm = _get_session_manager(ctx)
@@ -407,6 +454,7 @@ async def saves_set(
 @hotstart_mcp.tool()
 async def saves_remove(ctx: Context, session_id: str = "default", index: int = 0) -> dict:
     """Remove the I{index}-th scheduled save. Trailing entries shift down."""
+    # wraps: swmm_hotstart_saves_remove
     sm = _get_session_manager(ctx)
     session = await sm.get_session(session_id)
     require_new_engine(session, "Hotstart saves management")

@@ -330,6 +330,7 @@ async def get_point(
     point_index: int = 0,
 ) -> dict:
     """Read a single ``(x, y)`` data point from a table by point index."""
+    # wraps: swmm_table_get_point swmm_table_get_point_count
     if isinstance(table_id, str) and not table_id:
         raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] table_id must not be empty.")
     _, tables = await _get_tables_accessor(ctx, session_id)
@@ -362,6 +363,7 @@ async def get_point_count(
     table_id: str | int = "",
 ) -> dict:
     """Return the number of data points in a table."""
+    # wraps: swmm_table_get_point_count
     if isinstance(table_id, str) and not table_id:
         raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] table_id must not be empty.")
     _, tables = await _get_tables_accessor(ctx, session_id)
@@ -454,9 +456,7 @@ def _patterns_accessor(session: SimSession):
     """
     if session.state == "building":
         if session.model_builder is None:
-            raise ToolError(
-                f"[{ErrorCode.INVALID_STATE}] Building session has no ModelBuilder."
-            )
+            raise ToolError(f"[{ErrorCode.INVALID_STATE}] Building session has no ModelBuilder.")
         return Patterns(session.model_builder)
     return session.patterns
 

@@ -67,8 +67,7 @@ def _zip_link_results(session: SimSession, values: list[float]) -> list[dict[str
     links = session.links
     n = len(links)
     return [
-        {"id": links.get_id(i), "index": i, "value": values[i]}
-        for i in range(min(n, len(values)))
+        {"id": links.get_id(i), "index": i, "value": values[i]} for i in range(min(n, len(values)))
     ]
 
 
@@ -103,6 +102,7 @@ async def stat_max_velocity(
     ctx: Context, session_id: str = "default", link_id: str | int = ""
 ) -> dict:
     """Return the peak velocity for a link."""
+    # wraps: swmm_link_get_stat_max_velocity
     return await _read_stat(ctx, session_id, link_id, "max_velocity", "max_velocity")
 
 
@@ -117,6 +117,7 @@ async def stat_max_filling(
 @links_mcp.tool()
 async def stat_vol_flow(ctx: Context, session_id: str = "default", link_id: str | int = "") -> dict:
     """Return the total volume conveyed through a link."""
+    # wraps: swmm_link_get_stat_vol_flow
     return await _read_stat(ctx, session_id, link_id, "vol_flow", "vol_flow")
 
 
@@ -125,6 +126,7 @@ async def stat_surcharge_time(
     ctx: Context, session_id: str = "default", link_id: str | int = ""
 ) -> dict:
     """Return total surcharge duration (hours) for a link."""
+    # wraps: swmm_link_get_stat_surcharge_time
     return await _read_stat(ctx, session_id, link_id, "surcharge_time", "surcharge_time_hours")
 
 
@@ -807,9 +809,7 @@ async def get_quality(
     """Return the current concentration of a pollutant in a link."""
     session = await _get_session(ctx, session_id)
     idx = await _resolve_link(session, link_id)
-    conc = await asyncio.to_thread(
-        lambda: session.links[idx].quality(pollutant_index)
-    )
+    conc = await asyncio.to_thread(lambda: session.links[idx].quality(pollutant_index))
     return {
         "session_id": session_id,
         "link_id": link_id,
@@ -923,9 +923,7 @@ async def get_outlet_rating_type(
     session = await _get_session(ctx, session_id)
     idx = await _resolve_link(session, link_id)
     # v1 OutletView.rating_type returns an OutletRatingType IntEnum.
-    type_code = await asyncio.to_thread(
-        lambda: int(session.links[idx].outlet.rating_type)
-    )
+    type_code = await asyncio.to_thread(lambda: int(session.links[idx].outlet.rating_type))
     name_map = {
         0: "functional_head",
         1: "functional_depth",
@@ -1113,11 +1111,10 @@ async def get_xsect(ctx: Context, session_id: str = "default", link_id: str | in
     value. ``g1..g4`` are the shape-dependent geometry values (for most
     closed conduits g1 is the full depth / max height).
     """
+    # wraps: swmm_link_get_xsect
     session = await _get_session(ctx, session_id)
     idx = await _resolve_link(session, link_id)
-    shape, g1, g2, g3, g4 = await asyncio.to_thread(
-        lambda: session.links[idx].xsect.as_tuple()
-    )
+    shape, g1, g2, g3, g4 = await asyncio.to_thread(lambda: session.links[idx].xsect.as_tuple())
     return {
         "session_id": session_id,
         "link_id": link_id,

@@ -231,6 +231,89 @@ async def set_triangle_mannings(
 
 
 @twod_mcp.tool()
+async def get_triangle_initial_conditions(
+    ctx: Context,
+    session_id: str = "default",
+    triangle: int = 0,
+) -> dict:
+    """Return the initial water depth and velocity of a 2D triangle.
+
+    ``init_depth`` is the ``[2D_TRIANGLES]`` INIT_DEPTH column in **mesh
+    length units** — feet on a US-FLOW_UNITS project, metres on an SI
+    project (the same convention as the vertex Z column), *not* the SI
+    metres used by the run-time state tools. ``init_u`` / ``init_v`` are
+    the ``[2D_INITIAL_VELOCITY]`` components and are always in m/s.
+    """
+    # wraps: swmm_2d_triangle_get_init_depth swmm_2d_triangle_get_init_velocity
+    _, surface = await _get_surface(ctx, session_id)
+
+    def _read() -> dict:
+        u, v = surface.get_triangle_init_velocity(triangle)
+        return {
+            "triangle": triangle,
+            "init_depth": float(surface.get_triangle_init_depth(triangle)),
+            "init_u": float(u),
+            "init_v": float(v),
+        }
+
+    out = await asyncio.to_thread(_read)
+    out["session_id"] = session_id
+    return out
+
+
+@twod_mcp.tool()
+async def set_triangle_initial_conditions(
+    ctx: Context,
+    session_id: str = "default",
+    triangle: int = 0,
+    depth: float | None = None,
+    u: float | None = None,
+    v: float | None = None,
+) -> dict:
+    """Set the initial depth and/or velocity of a 2D triangle.
+
+    ``depth`` (>= 0) is in **mesh length units** — feet on a US-FLOW_UNITS
+    project, metres on an SI project, matching the vertex Z column — and
+    persists in the ``INIT_DEPTH`` column of ``[2D_TRIANGLES]``. ``u`` and
+    ``v`` are the initial velocity components in **m/s** and must be given
+    together; they persist as ``[2D_INITIAL_VELOCITY]`` rows. Both are
+    applied when the 2D surface initializes (t = 0 only — a hotstart still
+    zeroes face momentum), so set them before the run starts.
+    """
+    # wraps: swmm_2d_set_triangle_init_depth swmm_2d_set_triangle_init_velocity
+    if depth is None and u is None and v is None:
+        raise ToolError(
+            f"[{ErrorCode.VALIDATION_ERROR}] Provide depth and/or both u and v."
+        )
+    if (u is None) != (v is None):
+        raise ToolError(
+            f"[{ErrorCode.VALIDATION_ERROR}] Initial velocity needs both u and v "
+            f"(got u={u}, v={v})."
+        )
+    if depth is not None and depth < 0.0:
+        raise ToolError(
+            f"[{ErrorCode.VALIDATION_ERROR}] depth must be >= 0 (got {depth})."
+        )
+    _, surface = await _get_surface(ctx, session_id)
+
+    def _apply() -> None:
+        if depth is not None:
+            surface.set_triangle_init_depth(triangle, depth)
+        if u is not None:
+            surface.set_triangle_init_velocity(triangle, u, v)
+
+    await asyncio.to_thread(_apply)
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "triangle": triangle,
+        "init_depth": depth,
+        "init_u": u,
+        "init_v": v,
+    }
+
+
+@twod_mcp.tool()
 async def set_triangle_tag(
     ctx: Context,
     session_id: str = "default",
@@ -314,6 +397,141 @@ async def set_vertex_coupled_node(
 
 
 @twod_mcp.tool()
+async def get_vertex_coupling_params(
+    ctx: Context,
+    session_id: str = "default",
+    vertex: int = 0,
+) -> dict:
+    """Return the 1D<->2D exchange parameters of a mesh vertex.
+
+    Reports the ``[2D_VERTEX_NODE_MAP]`` CD (discharge coefficient,
+    default 0.65) and AREA (effective exchange area in m2, default 1.0)
+    columns. Use ``twod_get_coupling_map`` for which node each vertex is
+    coupled to.
+    """
+    # wraps: swmm_2d_get_vertex_coupling_cd swmm_2d_get_vertex_coupling_area
+    _, surface = await _get_surface(ctx, session_id)
+
+    def _read() -> dict:
+        return {
+            "vertex": vertex,
+            "cd": float(surface.get_vertex_coupling_cd(vertex)),
+            "area": float(surface.get_vertex_coupling_area(vertex)),
+        }
+
+    out = await asyncio.to_thread(_read)
+    out["session_id"] = session_id
+    return out
+
+
+@twod_mcp.tool()
+async def set_vertex_coupling_params(
+    ctx: Context,
+    session_id: str = "default",
+    vertex: int = 0,
+    cd: float | None = None,
+    area: float | None = None,
+) -> dict:
+    """Set the 1D<->2D exchange parameters of a mesh vertex.
+
+    ``cd`` is the orifice/weir discharge coefficient (must be > 0, engine
+    default 0.65) and ``area`` the effective exchange area in **m2** (must
+    be > 0, default 1.0). Omitted parameters are left unchanged. Both
+    persist in ``[2D_VERTEX_NODE_MAP]``; pair with
+    ``twod_set_vertex_coupled_node``, which establishes the coupling
+    itself.
+    """
+    # wraps: swmm_2d_set_vertex_coupling_cd swmm_2d_set_vertex_coupling_area
+    if cd is None and area is None:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] Provide cd and/or area.")
+    if cd is not None and cd <= 0.0:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] cd must be > 0 (got {cd}).")
+    if area is not None and area <= 0.0:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] area must be > 0 m2 (got {area}).")
+    _, surface = await _get_surface(ctx, session_id)
+
+    def _apply() -> dict:
+        if cd is not None:
+            surface.set_vertex_coupling_cd(vertex, cd)
+        if area is not None:
+            surface.set_vertex_coupling_area(vertex, area)
+        return {
+            "cd": float(surface.get_vertex_coupling_cd(vertex)),
+            "area": float(surface.get_vertex_coupling_area(vertex)),
+        }
+
+    out = await asyncio.to_thread(_apply)
+    out["status"] = "ok"
+    out["session_id"] = session_id
+    out["vertex"] = vertex
+    return out
+
+
+@twod_mcp.tool()
+async def add_triangle_coupling(
+    ctx: Context,
+    session_id: str = "default",
+    triangle: int = 0,
+    node_name: str = "",
+    cd: float = 0.65,
+    area: float = 1.0,
+) -> dict:
+    """Couple a 2D mesh triangle to a 1D SWMM node (node->cell exchange).
+
+    Appends one ``[2D_TRIANGLE_NODE_MAP]`` row; it does **not** overwrite,
+    so a triangle may carry several rows (one per node). ``cd`` is the
+    discharge coefficient (> 0, default 0.65) and ``area`` the effective
+    exchange area in **m2** (> 0, default 1.0). Use
+    ``twod_clear_triangle_couplings`` to re-author the whole set.
+    """
+    # wraps: swmm_2d_add_triangle_coupling
+    if not node_name.strip():
+        raise ToolError(
+            f"[{ErrorCode.VALIDATION_ERROR}] node_name is required (the 1D node id "
+            f"to couple triangle {triangle} to)."
+        )
+    if cd <= 0.0:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] cd must be > 0 (got {cd}).")
+    if area <= 0.0:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] area must be > 0 m2 (got {area}).")
+    _, surface = await _get_surface(ctx, session_id)
+
+    def _apply() -> int:
+        surface.add_triangle_coupling(triangle, node_name, cd, area)
+        return int(surface.triangle_coupling_rows)
+
+    rows = await asyncio.to_thread(_apply)
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "triangle": triangle,
+        "node_name": node_name,
+        "cd": cd,
+        "area": area,
+        "coupling_rows": rows,
+    }
+
+
+@twod_mcp.tool()
+async def clear_triangle_couplings(ctx: Context, session_id: str = "default") -> dict:
+    """Remove every authored triangle (node->cell) coupling row.
+
+    Also resets the legacy per-triangle mirror read by
+    ``twod_get_coupling_map``. Vertex couplings are untouched.
+    """
+    # wraps: swmm_2d_clear_triangle_couplings
+    _, surface = await _get_surface(ctx, session_id)
+
+    def _apply() -> int:
+        removed = int(surface.triangle_coupling_rows)
+        surface.clear_triangle_couplings()
+        return removed
+
+    removed = await asyncio.to_thread(_apply)
+    return {"status": "cleared", "session_id": session_id, "rows_removed": removed}
+
+
+@twod_mcp.tool()
 async def get_coupling_map(ctx: Context, session_id: str = "default") -> dict:
     """List every 2D mesh entity coupled to a 1D node.
 
@@ -321,7 +539,14 @@ async def get_coupling_map(ctx: Context, session_id: str = "default") -> dict:
     ``triangle_couplings`` (triangle index -> node index). These are the
     exchange points where the 2D surface trades flow with the drainage
     network.
+
+    ``triangle_coupling_rows`` is the authoritative
+    ``[2D_TRIANGLE_NODE_MAP]`` row list — ``{row, triangle, node_index,
+    cd, area}`` — and is what ``twod_add_triangle_coupling`` writes. Prefer
+    it over ``triangle_couplings``, which is a lossy per-triangle mirror
+    showing only one node per triangle.
     """
+    # wraps: swmm_2d_triangle_coupling_rows swmm_2d_get_triangle_coupling_row
     _, surface = await _get_surface(ctx, session_id)
 
     def _read() -> dict:
@@ -335,9 +560,22 @@ async def get_coupling_map(ctx: Context, session_id: str = "default") -> dict:
             node = surface.get_triangle_coupled_node(t)
             if node >= 0:
                 triangle_couplings.append({"triangle": t, "node_index": int(node)})
+        rows = []
+        for r in range(surface.triangle_coupling_rows):
+            tri, node, cd, area = surface.get_triangle_coupling_row(r)
+            rows.append(
+                {
+                    "row": r,
+                    "triangle": int(tri),
+                    "node_index": int(node),
+                    "cd": float(cd),
+                    "area": float(area),
+                }
+            )
         return {
             "vertex_couplings": vertex_couplings,
             "triangle_couplings": triangle_couplings,
+            "triangle_coupling_rows": rows,
         }
 
     out = await asyncio.to_thread(_read)
@@ -472,6 +710,7 @@ async def get_state_bulk(
     water depth (``eta_v - z_v``) GUIs should interpolate for 2D
     water-surface rendering.
     """
+    # wraps: swmm_2d_get_depths_bulk swmm_2d_get_heads_bulk swmm_2d_vertex_get_heads_bulk swmm_2d_vertex_get_render_depths_bulk swmm_2d_get_coupling_fluxes_bulk swmm_2d_get_edge_flux_bulk  # noqa: E501
     readers = {
         "depth": "get_depths",
         "head": "get_heads",

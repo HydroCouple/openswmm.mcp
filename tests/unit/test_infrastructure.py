@@ -149,9 +149,7 @@ class TestTransectEditing:
         c = await station_count(ctx, session_id="infra_tx_st", transect_index=0)
         assert c["count"] == 3
 
-        pt = await get_station(
-            ctx, session_id="infra_tx_st", transect_index=0, station_index=1
-        )
+        pt = await get_station(ctx, session_id="infra_tx_st", transect_index=0, station_index=1)
         assert pt["station"] == 10.0
         assert pt["elevation"] == 95.0
 
@@ -214,9 +212,7 @@ class TestTransectEditing:
         await set_encroachment_stations(
             ctx, session_id="infra_tx_en", transect_index=0, left=5.0, right=25.0
         )
-        r = await get_encroachment_stations(
-            ctx, session_id="infra_tx_en", transect_index=0
-        )
+        r = await get_encroachment_stations(ctx, session_id="infra_tx_en", transect_index=0)
         assert r["left"] == pytest.approx(5.0)
         assert r["right"] == pytest.approx(25.0)
 
@@ -484,6 +480,184 @@ class TestLidControls:
         )
         for r in (r1, r2, r3, r4):
             assert r["status"] == "ok"
+
+
+class TestLidLayerRoundTrip:
+    """Write-then-read-back for all six LID layers (P5).
+
+    Before the getters existed a LID configuration could be written but not
+    verified. Each test asserts the getter returns exactly the keys the
+    matching setter accepts, with the values just written.
+    """
+
+    async def test_surface_round_trip(self, session_manager):
+        from openswmm_mcp.tools.infrastructure import (
+            add_lid,
+            get_lid_surface,
+            set_lid_surface,
+        )
+
+        ctx = await _create_building_session(session_manager, "infra_lid_rt_su")
+        await add_lid(ctx, session_id="infra_lid_rt_su", lid_id="L_SU", lid_type="bio_cell")
+        await set_lid_surface(
+            ctx,
+            session_id="infra_lid_rt_su",
+            lid_index=0,
+            storage=6.0,
+            roughness=0.1,
+            slope=0.01,
+        )
+        r = await get_lid_surface(ctx, session_id="infra_lid_rt_su", lid_index=0)
+        assert r["storage"] == pytest.approx(6.0)
+        assert r["roughness"] == pytest.approx(0.1)
+        assert r["slope"] == pytest.approx(0.01)
+
+    async def test_soil_round_trip(self, session_manager):
+        from openswmm_mcp.tools.infrastructure import add_lid, get_lid_soil, set_lid_soil
+
+        ctx = await _create_building_session(session_manager, "infra_lid_rt_so")
+        await add_lid(ctx, session_id="infra_lid_rt_so", lid_id="L_SO", lid_type="bio_cell")
+        await set_lid_soil(
+            ctx,
+            session_id="infra_lid_rt_so",
+            lid_index=0,
+            thick=12.0,
+            porosity=0.5,
+            fc=0.2,
+            wp=0.1,
+            ksat=0.5,
+            kslope=10.0,
+        )
+        r = await get_lid_soil(ctx, session_id="infra_lid_rt_so", lid_index=0)
+        assert r["thick"] == pytest.approx(12.0)
+        assert r["porosity"] == pytest.approx(0.5)
+        assert r["fc"] == pytest.approx(0.2)
+        assert r["wp"] == pytest.approx(0.1)
+        assert r["ksat"] == pytest.approx(0.5)
+        assert r["kslope"] == pytest.approx(10.0)
+
+    async def test_storage_round_trip(self, session_manager):
+        from openswmm_mcp.tools.infrastructure import (
+            add_lid,
+            get_lid_storage,
+            set_lid_storage,
+        )
+
+        ctx = await _create_building_session(session_manager, "infra_lid_rt_st")
+        await add_lid(ctx, session_id="infra_lid_rt_st", lid_id="L_ST", lid_type="bio_cell")
+        await set_lid_storage(
+            ctx,
+            session_id="infra_lid_rt_st",
+            lid_index=0,
+            thick=12.0,
+            void_frac=0.75,
+            ksat=0.5,
+        )
+        r = await get_lid_storage(ctx, session_id="infra_lid_rt_st", lid_index=0)
+        assert r["thick"] == pytest.approx(12.0)
+        assert r["void_frac"] == pytest.approx(0.75)
+        assert r["ksat"] == pytest.approx(0.5)
+
+    async def test_drain_round_trip(self, session_manager):
+        from openswmm_mcp.tools.infrastructure import add_lid, get_lid_drain, set_lid_drain
+
+        ctx = await _create_building_session(session_manager, "infra_lid_rt_dr")
+        await add_lid(ctx, session_id="infra_lid_rt_dr", lid_id="L_DR", lid_type="bio_cell")
+        await set_lid_drain(
+            ctx,
+            session_id="infra_lid_rt_dr",
+            lid_index=0,
+            coeff=0.5,
+            expon=0.5,
+            offset=2.0,
+        )
+        r = await get_lid_drain(ctx, session_id="infra_lid_rt_dr", lid_index=0)
+        assert r["coeff"] == pytest.approx(0.5)
+        assert r["expon"] == pytest.approx(0.5)
+        assert r["offset"] == pytest.approx(2.0)
+
+    async def test_pavement_round_trip(self, session_manager):
+        from openswmm_mcp.tools.infrastructure import (
+            add_lid,
+            get_lid_pavement,
+            set_lid_pavement,
+        )
+
+        ctx = await _create_building_session(session_manager, "infra_lid_rt_pv")
+        await add_lid(
+            ctx, session_id="infra_lid_rt_pv", lid_id="L_PV", lid_type="perm_pavement"
+        )
+        await set_lid_pavement(
+            ctx,
+            session_id="infra_lid_rt_pv",
+            lid_index=0,
+            thick=6.0,
+            void_ratio=0.15,
+            frac_imperv=0.0,
+            ksat=100.0,
+            clog_factor=8.0,
+            regen_days=30.0,
+        )
+        r = await get_lid_pavement(ctx, session_id="infra_lid_rt_pv", lid_index=0)
+        assert r["thick"] == pytest.approx(6.0)
+        assert r["void_ratio"] == pytest.approx(0.15)
+        assert r["frac_imperv"] == pytest.approx(0.0)
+        assert r["ksat"] == pytest.approx(100.0)
+        assert r["clog_factor"] == pytest.approx(8.0)
+        assert r["regen_days"] == pytest.approx(30.0)
+
+    async def test_drainmat_round_trip(self, session_manager):
+        from openswmm_mcp.tools.infrastructure import (
+            add_lid,
+            get_lid_drainmat,
+            set_lid_drainmat,
+        )
+
+        ctx = await _create_building_session(session_manager, "infra_lid_rt_dm")
+        await add_lid(ctx, session_id="infra_lid_rt_dm", lid_id="L_DM", lid_type="green_roof")
+        await set_lid_drainmat(
+            ctx,
+            session_id="infra_lid_rt_dm",
+            lid_index=0,
+            thick=3.0,
+            void_frac=0.5,
+            roughness=0.1,
+        )
+        r = await get_lid_drainmat(ctx, session_id="infra_lid_rt_dm", lid_index=0)
+        assert r["thick"] == pytest.approx(3.0)
+        assert r["void_frac"] == pytest.approx(0.5)
+        assert r["roughness"] == pytest.approx(0.1)
+
+    async def test_getter_accepts_string_lid_id(self, session_manager):
+        from openswmm_mcp.tools.infrastructure import (
+            add_lid,
+            get_lid_surface,
+            set_lid_surface,
+        )
+
+        ctx = await _create_building_session(session_manager, "infra_lid_rt_id")
+        await add_lid(ctx, session_id="infra_lid_rt_id", lid_id="BY_ID", lid_type="bio_cell")
+        await set_lid_surface(
+            ctx, session_id="infra_lid_rt_id", lid_index=0, storage=4.0, roughness=0.0, slope=0.0
+        )
+        r = await get_lid_surface(ctx, session_id="infra_lid_rt_id", lid_index="BY_ID")
+        assert r["lid_index"] == 0
+        assert r["storage"] == pytest.approx(4.0)
+
+    async def test_unknown_lid_id_rejected(self, session_manager):
+        from openswmm_mcp.tools.infrastructure import add_lid, get_lid_surface
+
+        ctx = await _create_building_session(session_manager, "infra_lid_rt_bad")
+        await add_lid(ctx, session_id="infra_lid_rt_bad", lid_id="ONLY", lid_type="bio_cell")
+        with pytest.raises(ToolError, match="ELEMENT_NOT_FOUND|not found"):
+            await get_lid_surface(ctx, session_id="infra_lid_rt_bad", lid_index="NOSUCH")
+
+    async def test_empty_lid_id_rejected(self, session_manager):
+        from openswmm_mcp.tools.infrastructure import get_lid_surface
+
+        ctx = await _create_building_session(session_manager, "infra_lid_rt_e")
+        with pytest.raises(ToolError, match="lid_index must not be empty"):
+            await get_lid_surface(ctx, session_id="infra_lid_rt_e", lid_index="")
 
 
 # ===========================================================================

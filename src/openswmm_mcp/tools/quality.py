@@ -133,6 +133,7 @@ async def landuse_add(ctx: Context, session_id: str = "default", landuse_id: str
     if not landuse_id:
         raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] landuse_id must not be empty.")
     session = await _get_session(ctx, session_id)
+
     # v1 Landuses.add(name) returns a Landuse wrapper.
     def _add() -> int:
         return session.quality.landuses.add(landuse_id).index
@@ -440,6 +441,38 @@ async def treatment_get(
         "pollutant_id": pollutant_id,
         "pollutant_index": pollut_idx,
         "expression": expr or "",
+    }
+
+
+@quality_mcp.tool()
+async def treatment_validate_expression(
+    ctx: Context,
+    session_id: str = "default",
+    expression: str = "",
+) -> dict:
+    """Check a treatment expression parses, without writing it to the model.
+
+    Nothing in the engine is modified. Call this before
+    ``spatial_set_treatment`` so a malformed expression is caught here rather
+    than surfacing much later as an opaque run-time error.
+
+    Returns ``valid``; when ``False``, ``message`` is the engine's diagnostic
+    and ``column`` is the 0-based character offset in ``expression`` where the
+    parse failed (``-1`` when the failure is not attributable to a position).
+    """
+    # wraps: swmm_treatment_validate_expression
+    if not expression:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] expression must not be empty.")
+    session = await _get_session(ctx, session_id)
+    ok, message, col = await asyncio.to_thread(
+        session.quality.validate_treatment_expression, expression
+    )
+    return {
+        "session_id": session_id,
+        "expression": expression,
+        "valid": bool(ok),
+        "message": message,
+        "column": int(col),
     }
 
 
