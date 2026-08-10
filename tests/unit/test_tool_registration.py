@@ -1,6 +1,6 @@
 """Tool-surface drift guards.
 
-Two cheap invariants that have each been violated once before:
+Three cheap invariants that have each been violated once before:
 
 1. **Forcing-mode codes.** The MCP string modes must map onto the engine's
    ``ForcingMode`` / ``SurfaceForcingMode`` C codes (``REPLACE/OVERRIDE = 1``,
@@ -13,12 +13,22 @@ Two cheap invariants that have each been violated once before:
    (``twod_*``, user-flag schema, typed file-path slots, climate-evap
    read-back) remain present.
 
+3. **``wraps:`` provenance markers.** Aggregating tools pin the C symbols they
+   dispatch to with a ``# wraps: swmm_x swmm_y`` line, which the engine's
+   ``plans/parity/build_matrix_provenance.py`` reads to clear false
+   ``mcp-review`` rows. The builder's regex only sees symbols on the *same*
+   line as the ``wraps:`` token, so a marker wrapped across lines by a
+   formatter is silently ignored — the failure mode this guards.
+
 The registration check imports the full server module graph, which imports
 ``openswmm.engine`` — it skips when the engine is not installed. The
-mode-code check is pure Python and always runs.
+mode-code and marker checks are pure Python and always run.
 """
 
 from __future__ import annotations
+
+import re
+from pathlib import Path
 
 import pytest
 
@@ -47,12 +57,113 @@ class TestForcingModeCodes:
         assert _FORCING_MODES["add"] == int(eng.SurfaceForcingMode.ADD)
 
 
+class TestXsectShapeCodes:
+    """Shape names must map onto the engine's post-6.0 ``XSectShape`` codes.
+
+    The maps that previously lived in ``tools/editing.py`` and
+    ``tools/building.py`` carried the legacy SWMM 5 ``XsectType`` ordering,
+    so every shape except ``circular`` resolved to a different geometry than
+    the caller asked for -- ``trapezoidal`` was stored as ``RECT_OPEN``,
+    ``irregular`` as ``RECT_ROUND``. Both now share
+    ``_util.xsect_shapes``, which derives its map from the enum.
+    """
+
+    def test_map_is_derived_from_the_engine_enum(self):
+        eng = pytest.importorskip("openswmm.engine")
+        from openswmm_mcp._util.xsect_shapes import LEGACY_ALIASES, shape_codes
+
+        codes = shape_codes()
+        for shape in eng.XSectShape:
+            assert codes[shape.name.lower()] == int(shape)
+        for alias, target in LEGACY_ALIASES.items():
+            assert codes[alias] == codes[target]
+
+    def test_the_renumbered_shapes_resolve_correctly(self):
+        eng = pytest.importorskip("openswmm.engine")
+        from openswmm_mcp._util.xsect_shapes import resolve_shape
+
+        # The four the legacy map got most visibly wrong.
+        assert resolve_shape("trapezoidal") == int(eng.XSectShape.TRAPEZOIDAL)
+        assert resolve_shape("irregular") == int(eng.XSectShape.IRREGULAR)
+        assert resolve_shape("force_main") == int(eng.XSectShape.FORCE_MAIN)
+        assert resolve_shape("filled_circular") == int(eng.XSectShape.FILLED_CIRCULAR)
+
+    def test_editing_and_building_share_the_map(self):
+        pytest.importorskip("openswmm.engine")
+        from openswmm_mcp._util.xsect_shapes import resolve_shape
+        from openswmm_mcp.tools.building import _resolve_xsect_shape
+
+        assert _resolve_xsect_shape("trapezoidal") == resolve_shape("trapezoidal")
+
+    def test_unknown_shape_raises(self):
+        pytest.importorskip("openswmm.engine")
+        from openswmm_mcp._util.xsect_shapes import resolve_shape
+        from openswmm_mcp.errors import ToolError
+
+        with pytest.raises(ToolError):
+            resolve_shape("not_a_shape")
+
+
+class TestWrapsMarkers:
+    """``# wraps:`` markers must stay machine-readable by the parity builder."""
+
+    # Verbatim from plans/parity/tools/build_matrix_provenance.py.
+    _WRAPS_RE = re.compile(r"wraps:\s*((?:swmm_[a-z0-9_]+\s*,?\s*)+)", re.IGNORECASE)
+    _SRC = Path(__file__).resolve().parents[2] / "src" / "openswmm_mcp"
+
+    def _marker_lines(self) -> list[tuple[Path, int, str]]:
+        out: list[tuple[Path, int, str]] = []
+        for sub in ("tools", "resources", "prompts"):
+            d = self._SRC / sub
+            if not d.is_dir():
+                continue
+            for path in sorted(d.glob("*.py")):
+                for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                    if "wraps:" in line:
+                        out.append((path, n, line))
+        return out
+
+    def test_markers_exist(self):
+        assert self._marker_lines(), "no `wraps:` markers found — did the tools tree move?"
+
+    def test_every_marker_is_parsed_by_the_builder(self):
+        for path, lineno, line in self._marker_lines():
+            match = self._WRAPS_RE.search(line)
+            assert match, f"{path.name}:{lineno} `wraps:` marker names no swmm_* symbol: {line!r}"
+            # The regex stops at the first non-symbol token, so a symbol listed
+            # after a comma-and-newline (or any prose) would be dropped.
+            named = set(re.findall(r"swmm_[a-z0-9_]+", match.group(1)))
+            on_line = set(re.findall(r"swmm_[a-z0-9_]+", line))
+            assert named == on_line, (
+                f"{path.name}:{lineno} the builder would only see {sorted(named)} "
+                f"but the line names {sorted(on_line)} — keep every symbol on one line"
+            )
+
+
 class TestToolRegistration:
     _EXPECTED_NAMESPACES = {
-        "lifecycle", "query", "forcing", "analysis", "building", "editing",
-        "hotstart", "spatial", "geopackage", "tables", "inflows", "controls",
-        "infrastructure", "nodes", "links", "subcatchments", "pollutants",
-        "model", "quality", "twod", "gym",
+        "lifecycle",
+        "query",
+        "forcing",
+        "analysis",
+        "building",
+        "editing",
+        "hotstart",
+        "spatial",
+        "geopackage",
+        "tables",
+        "inflows",
+        "controls",
+        "infrastructure",
+        "nodes",
+        "links",
+        "subcatchments",
+        "pollutants",
+        "model",
+        "quality",
+        "twod",
+        "gym",
+        "xsect",
     }
 
     # Gym tool domain (GYMNASIUM_INTEGRATION_PLAN.md Phase 2).
@@ -102,6 +213,22 @@ class TestToolRegistration:
         "forcing_get_climate_state",
         "subcatchments_set_gw_state",
         "subcatchments_set_snow_state",
+        "subcatchments_get_aquifer",
+        "subcatchments_set_aquifer",
+        "subcatchments_get_gw_node",
+        "subcatchments_set_gw_node",
+        "subcatchments_get_gw_params",
+        "subcatchments_set_gw_params",
+        "subcatchments_set_infil_model",
+        "infrastructure_lid_usage_count",
+        "infrastructure_lid_usage_get",
+        "infrastructure_lid_usage_remove",
+        "twod_set_triangle_mannings",
+        "twod_set_triangle_tag",
+        "twod_get_triangle_tag",
+        "twod_set_vertex_tag",
+        "twod_get_vertex_tag",
+        "twod_set_vertex_coupled_node",
         "twod_force_evap",
         "twod_get_mesh_summary",
         "twod_get_mesh_geometry",

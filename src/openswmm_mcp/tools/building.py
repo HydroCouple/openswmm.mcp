@@ -14,6 +14,7 @@ from pathlib import Path
 from fastmcp import Context, FastMCP
 from openswmm.engine import ModelBuilder, Pollutants, Tables
 
+from openswmm_mcp._util.xsect_shapes import resolve_shape
 from openswmm_mcp.backends.openswmm import OpenSwmmBackend
 from openswmm_mcp.dependencies import get_session_manager, require_new_engine
 from openswmm_mcp.errors import ErrorCode, ToolError, resolve_index
@@ -44,13 +45,6 @@ _LINK_TYPES: dict[str, int] = {
     "outlet": 4,
 }
 
-_XSECT_SHAPES: dict[str, int] = {
-    "circular": 0,
-    "rect_closed": 1,
-    "rect_open": 2,
-    "trapezoidal": 3,
-    "triangular": 4,
-}
 
 # v1 ``Tables.add_curve(name, curve_type_int)`` takes the integer CurveType
 # enum code.  The mapping matches the SWMM 5.x source-order constants.
@@ -95,13 +89,7 @@ def _resolve_link_type(name: str) -> int:
 
 def _resolve_xsect_shape(name: str) -> int:
     """Map a human-readable cross-section shape string to its engine enum value."""
-    key = name.strip().lower()
-    if key not in _XSECT_SHAPES:
-        valid = ", ".join(sorted(_XSECT_SHAPES))
-        raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] Unknown xsect_shape '{name}'. Valid shapes: {valid}."
-        )
-    return _XSECT_SHAPES[key]
+    return resolve_shape(name)
 
 
 def _resolve_curve_type(name: str) -> int:
@@ -862,7 +850,9 @@ async def write_model(
                     except Exception:
                         logger.warning(
                             "Could not apply deferred option '%s'='%s'",
-                            opt, val, exc_info=True,
+                            opt,
+                            val,
+                            exc_info=True,
                         )
 
             if pending:

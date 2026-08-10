@@ -14,6 +14,7 @@ import logging
 from fastmcp import Context, FastMCP
 from openswmm.engine import ModelEditor
 
+from openswmm_mcp._util.xsect_shapes import resolve_shape
 from openswmm_mcp.dependencies import get_session_manager, require_new_engine
 from openswmm_mcp.errors import ErrorCode, ToolError, resolve_index
 from openswmm_mcp.models import (
@@ -52,9 +53,21 @@ _NODE_TYPE_NAMES: dict[int, str] = {v: k for k, v in _NODE_TYPES.items()}
 _LINK_TYPE_NAMES: dict[int, str] = {v: k for k, v in _LINK_TYPES.items()}
 
 _OBJECT_TYPES = {
-    "node", "link", "subcatchment", "gage", "table", "transect",
-    "pollutant", "pattern", "aquifer", "snowpack", "lid", "street",
-    "inlet", "landuse", "hydrograph",
+    "node",
+    "link",
+    "subcatchment",
+    "gage",
+    "table",
+    "transect",
+    "pollutant",
+    "pattern",
+    "aquifer",
+    "snowpack",
+    "lid",
+    "street",
+    "inlet",
+    "landuse",
+    "hydrograph",
 }
 
 
@@ -143,6 +156,7 @@ async def analyze_impact(
         The object's string identifier (or a numeric index as a string for
         ``transect``).
     """
+    # wraps: swmm_node_analyze_impact swmm_link_analyze_impact swmm_subcatch_analyze_impact swmm_gage_analyze_impact swmm_table_analyze_impact swmm_transect_analyze_impact swmm_pollutant_analyze_impact swmm_pattern_analyze_impact swmm_aquifer_analyze_impact swmm_snowpack_analyze_impact swmm_lid_analyze_impact swmm_street_analyze_impact swmm_inlet_analyze_impact swmm_landuse_analyze_impact swmm_hydrograph_analyze_impact  # noqa: E501
     if not object_id:
         raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] object_id must not be empty.")
 
@@ -247,6 +261,7 @@ async def delete_object(
     dry_run:
         When ``True``, return the impact report without mutating the model.
     """
+    # wraps: swmm_node_delete swmm_link_delete swmm_subcatch_delete swmm_gage_delete swmm_table_delete swmm_transect_delete swmm_pollutant_delete swmm_pattern_delete swmm_aquifer_delete swmm_snowpack_delete swmm_lid_delete swmm_street_delete swmm_inlet_delete swmm_landuse_delete swmm_hydrograph_delete  # noqa: E501
     if not object_id:
         raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] object_id must not be empty.")
 
@@ -291,9 +306,7 @@ async def delete_object(
                 case "landuse":
                     impacts = await asyncio.to_thread(editor.analyze_landuse_impact, object_id)
                 case "hydrograph":
-                    impacts = await asyncio.to_thread(
-                        editor.analyze_hydrograph_impact, object_id
-                    )
+                    impacts = await asyncio.to_thread(editor.analyze_hydrograph_impact, object_id)
                 case _:
                     impacts = []
         else:
@@ -462,30 +475,6 @@ async def convert_link(
 # Tools — in-place property updates
 # ---------------------------------------------------------------------------
 
-_XSECT_SHAPES: dict[str, int] = {
-    "circular": 0,
-    "rect_closed": 1,
-    "rect_open": 2,
-    "trapezoidal": 3,
-    "triangular": 4,
-    "parabolic": 5,
-    "powerfunc": 6,
-    "rect_triang": 7,
-    "rect_round": 8,
-    "modbaskethandle": 9,
-    "egg": 10,
-    "horseshoe": 11,
-    "gothic": 12,
-    "catenary": 13,
-    "semielliptical": 14,
-    "baskethandle": 15,
-    "semicircular": 16,
-    "irregular": 17,
-    "custom": 18,
-    "force_main": 19,
-    "filled_circular": 20,
-}
-
 _GAGE_RAIN_TYPES: dict[str, int] = {
     "intensity": 0,
     "volume": 1,
@@ -496,6 +485,16 @@ _GAGE_DATA_SOURCES: dict[str, int] = {
     "timeseries": 0,
     "file": 1,
 }
+
+# Rain-depth units declared for a file-based gage. A *different* concept from
+# ``_GAGE_RAIN_TYPES`` (intensity / volume / cumulative), which describes how
+# the values are to be read rather than what depth unit they carry.
+_GAGE_RAIN_UNITS: dict[str, int] = {
+    "in": 0,
+    "mm": 1,
+}
+
+_GAGE_RAIN_UNIT_NAMES: dict[int, str] = {v: k for k, v in _GAGE_RAIN_UNITS.items()}
 
 
 async def _require_editable(ctx: Context, session_id: str) -> SimSession:
@@ -649,14 +648,7 @@ async def set_link_properties(
     # Pre-validate shape key (raises ToolError outside the thread).
     shape_code: int | None = None
     if xsect_shape is not None:
-        shape_key = xsect_shape.strip().lower()
-        if shape_key not in _XSECT_SHAPES:
-            valid = ", ".join(sorted(_XSECT_SHAPES))
-            raise ToolError(
-                f"[{ErrorCode.VALIDATION_ERROR}] Unknown xsect_shape '{xsect_shape}'. "
-                f"Valid: {valid}."
-            )
-        shape_code = _XSECT_SHAPES[shape_key]
+        shape_code = resolve_shape(xsect_shape)
 
     def _apply() -> None:
         link = links[idx]
@@ -888,8 +880,7 @@ async def configure_gage(
         if key not in _GAGE_RAIN_TYPES:
             valid = ", ".join(sorted(_GAGE_RAIN_TYPES))
             raise ToolError(
-                f"[{ErrorCode.VALIDATION_ERROR}] Unknown rain_type '{rain_type}'. "
-                f"Valid: {valid}."
+                f"[{ErrorCode.VALIDATION_ERROR}] Unknown rain_type '{rain_type}'. Valid: {valid}."
             )
         rain_type_code = _GAGE_RAIN_TYPES[key]
 
@@ -1016,9 +1007,7 @@ async def set_gage_scale_factor(
     except RuntimeError as exc:
         raise ToolError(f"[{ErrorCode.ENGINE_ERROR}] {exc}")
 
-    logger.info(
-        "Session '%s': gage '%s' scale_factor set to %s.", session_id, gage_id, sf
-    )
+    logger.info("Session '%s': gage '%s' scale_factor set to %s.", session_id, gage_id, sf)
     return {
         "status": "updated",
         "session_id": session_id,
@@ -1104,14 +1093,178 @@ async def set_gage_snow_factor(
     except (RuntimeError, ValueError) as exc:
         raise ToolError(f"[{ErrorCode.ENGINE_ERROR}] {exc}")
 
-    logger.info(
-        "Session '%s': gage '%s' snow_factor set to %s.", session_id, gage_id, sf
-    )
+    logger.info("Session '%s': gage '%s' snow_factor set to %s.", session_id, gage_id, sf)
     return {
         "status": "updated",
         "session_id": session_id,
         "gage_id": gage_id,
         "snow_factor": sf,
+    }
+
+
+@editing_mcp.tool()
+async def get_gage_metadata(
+    ctx: Context,
+    session_id: str = "default",
+    gage_id: str = "",
+) -> dict:
+    """Read back the data-source metadata :func:`configure_gage` writes.
+
+    ``configure_gage`` is write-only for these fields and
+    ``query_get_gage_info`` does not return them, so this is the only way to
+    verify what a gage was configured with:
+
+    * ``rain_interval`` — recording interval in seconds.
+    * ``rain_units`` — ``in`` / ``mm``, the depth unit declared for a *file*
+      source. Distinct from ``rain_type`` (intensity / volume / cumulative),
+      which ``query_get_gage_info`` already reports.
+    * ``timeseries_id`` — assigned series id (empty for a file source).
+    * ``station_id`` — station id within an external file (empty otherwise).
+
+    Valid in ``building``, ``opened``, or ``initialized`` state.
+
+    Parameters
+    ----------
+    gage_id:
+        Gage identifier.
+    """
+    # wraps: swmm_gage_get_rain_interval swmm_gage_get_rain_units swmm_gage_get_timeseries swmm_gage_get_station_id  # noqa: E501
+    if not gage_id:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] gage_id must not be empty.")
+
+    session = await _require_editable(ctx, session_id)
+    gages = session.gages
+
+    g_idx = await resolve_index(gages, gage_id, "Gage")
+    if g_idx < 0:
+        raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Gage '{gage_id}' not found.")
+
+    def _read() -> tuple[float, int, str, str]:
+        gage = gages[g_idx]
+        return (
+            float(gage.rain_interval),
+            int(gage.rain_units),
+            gage.timeseries,
+            gage.station_id,
+        )
+
+    interval, units, timeseries, station = await asyncio.to_thread(_read)
+    return {
+        "session_id": session_id,
+        "gage_id": gage_id,
+        "rain_interval": interval,
+        "rain_units_code": units,
+        "rain_units": _GAGE_RAIN_UNIT_NAMES.get(units, "unknown"),
+        "timeseries_id": timeseries,
+        "station_id": station,
+    }
+
+
+@editing_mcp.tool()
+async def set_gage_rain_units(
+    ctx: Context,
+    session_id: str = "default",
+    gage_id: str = "",
+    rain_units: str = "in",
+) -> dict:
+    """Set the rain-depth units declared for a file-based gage.
+
+    ``rain_units`` is ``in`` (inches) or ``mm`` (millimetres). This is the
+    depth unit of the values in the external file — *not* the rain type
+    (intensity / volume / cumulative), which :func:`configure_gage` sets.
+    :func:`configure_gage` does not touch it. Valid in ``building``,
+    ``opened``, or ``initialized`` state.
+
+    Parameters
+    ----------
+    gage_id:
+        Gage identifier.
+    rain_units:
+        ``in`` or ``mm``.
+    """
+    # wraps: swmm_gage_set_rain_units
+    if not gage_id:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] gage_id must not be empty.")
+
+    key = rain_units.strip().lower()
+    if key not in _GAGE_RAIN_UNITS:
+        valid = ", ".join(sorted(_GAGE_RAIN_UNITS))
+        raise ToolError(
+            f"[{ErrorCode.VALIDATION_ERROR}] Unknown rain_units '{rain_units}'. Valid: {valid}."
+        )
+    code = _GAGE_RAIN_UNITS[key]
+
+    session = await _require_editable(ctx, session_id)
+    gages = session.gages
+
+    g_idx = await resolve_index(gages, gage_id, "Gage")
+    if g_idx < 0:
+        raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Gage '{gage_id}' not found.")
+
+    def _apply() -> None:
+        gages[g_idx].rain_units = code
+
+    try:
+        await asyncio.to_thread(_apply)
+    except (RuntimeError, ValueError) as exc:
+        raise ToolError(f"[{ErrorCode.ENGINE_ERROR}] {exc}")
+
+    logger.info("Session '%s': gage '%s' rain_units set to %s.", session_id, gage_id, key)
+    return {
+        "status": "updated",
+        "session_id": session_id,
+        "gage_id": gage_id,
+        "rain_units": key,
+        "rain_units_code": code,
+    }
+
+
+@editing_mcp.tool()
+async def set_gage_station_id(
+    ctx: Context,
+    session_id: str = "default",
+    gage_id: str = "",
+    station_id: str = "",
+) -> dict:
+    """Set the station id a file-based gage reads from.
+
+    :func:`configure_gage` only applies ``station_id`` alongside a
+    ``filename``; this sets it on its own, e.g. to point an already-configured
+    file source at a different station. Valid in ``building``, ``opened``, or
+    ``initialized`` state.
+
+    Parameters
+    ----------
+    gage_id:
+        Gage identifier.
+    station_id:
+        Station identifier within the external rainfall file.
+    """
+    # wraps: swmm_gage_set_station_id
+    if not gage_id:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] gage_id must not be empty.")
+
+    session = await _require_editable(ctx, session_id)
+    gages = session.gages
+
+    g_idx = await resolve_index(gages, gage_id, "Gage")
+    if g_idx < 0:
+        raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Gage '{gage_id}' not found.")
+
+    def _apply() -> None:
+        gages[g_idx].station_id = station_id
+
+    try:
+        await asyncio.to_thread(_apply)
+    except (RuntimeError, ValueError) as exc:
+        raise ToolError(f"[{ErrorCode.ENGINE_ERROR}] {exc}")
+
+    logger.info("Session '%s': gage '%s' station_id set to %r.", session_id, gage_id, station_id)
+    return {
+        "status": "updated",
+        "session_id": session_id,
+        "gage_id": gage_id,
+        "station_id": station_id,
     }
 
 
@@ -1127,16 +1280,12 @@ async def set_gage_snow_factor(
 async def _resolve_subcatch(ctx: Context, session_id: str, subcatch_id: str):
     """Resolve (session, subcatchments accessor, index) or raise ToolError."""
     if not subcatch_id:
-        raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] subcatch_id must not be empty."
-        )
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] subcatch_id must not be empty.")
     session = await _require_editable(ctx, session_id)
     subcatchments = session.subcatchments
     sc_idx = await resolve_index(subcatchments, subcatch_id, "Subcatchment")
     if sc_idx < 0:
-        raise ToolError(
-            f"[{ErrorCode.ELEMENT_NOT_FOUND}] Subcatchment '{subcatch_id}' not found."
-        )
+        raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Subcatchment '{subcatch_id}' not found.")
     return subcatchments, sc_idx
 
 
@@ -1198,7 +1347,9 @@ async def set_subcatch_rain_scale_factor(
 
     logger.info(
         "Session '%s': subcatch '%s' rain_scale_factor set to %s.",
-        session_id, subcatch_id, sf,
+        session_id,
+        subcatch_id,
+        sf,
     )
     return {
         "status": "updated",
@@ -1267,7 +1418,9 @@ async def set_subcatch_snow_scale_factor(
 
     logger.info(
         "Session '%s': subcatch '%s' snow_scale_factor set to %s.",
-        session_id, subcatch_id, sf,
+        session_id,
+        subcatch_id,
+        sf,
     )
     return {
         "status": "updated",
@@ -1404,4 +1557,119 @@ async def rename_gage(
         "old_id": gage_id,
         "new_id": new_id,
         "index": idx,
+    }
+
+
+@editing_mcp.tool()
+async def rename_pollutant(
+    ctx: Context,
+    session_id: str = "default",
+    pollutant_id: str = "",
+    new_id: str = "",
+) -> dict:
+    """Rename a pollutant.
+
+    Name-stored references (``[INFLOWS]`` / ``[DWF]`` constituent rows) follow
+    the new name; index-stored ones (co-pollutant, buildup / washoff columns)
+    are positional and unaffected.
+    """
+    # wraps: swmm_pollutant_rename
+    if not new_id:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] new_id must not be empty.")
+    sm = get_session_manager(ctx)
+    session = await sm.get_session(session_id)
+    require_new_engine(session, "Pollutant rename")
+    accessor, idx = await _resolve_for_rename(session, "pollutants", pollutant_id)
+    await asyncio.to_thread(accessor.rename, idx, new_id)
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "element_type": "pollutant",
+        "old_id": pollutant_id,
+        "new_id": new_id,
+        "index": idx,
+    }
+
+
+@editing_mcp.tool()
+async def rename_pattern(
+    ctx: Context,
+    session_id: str = "default",
+    pattern_id: str = "",
+    new_id: str = "",
+) -> dict:
+    """Rename a time pattern, updating every stored reference to it."""
+    # wraps: swmm_pattern_rename
+    if not new_id:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] new_id must not be empty.")
+    sm = get_session_manager(ctx)
+    session = await sm.get_session(session_id)
+    require_new_engine(session, "Pattern rename")
+    accessor, idx = await _resolve_for_rename(session, "patterns", pattern_id)
+    await asyncio.to_thread(accessor.rename, idx, new_id)
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "element_type": "pattern",
+        "old_id": pattern_id,
+        "new_id": new_id,
+        "index": idx,
+    }
+
+
+@editing_mcp.tool()
+async def rename_landuse(
+    ctx: Context,
+    session_id: str = "default",
+    landuse_id: str = "",
+    new_id: str = "",
+) -> dict:
+    """Rename a land use.
+
+    Land uses are referenced positionally, so buildup / washoff rows and
+    subcatchment coverages follow automatically.
+    """
+    # wraps: swmm_landuse_rename
+    if not new_id:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] new_id must not be empty.")
+    sm = get_session_manager(ctx)
+    session = await sm.get_session(session_id)
+    require_new_engine(session, "Landuse rename")
+    landuses = session.quality.landuses
+    idx = await resolve_index(landuses, landuse_id, "Landuse")
+    if idx < 0:
+        raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Landuse '{landuse_id}' not found.")
+    await asyncio.to_thread(lambda: landuses[idx].rename(new_id))
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "element_type": "landuse",
+        "old_id": landuse_id,
+        "new_id": new_id,
+        "index": idx,
+    }
+
+
+@editing_mcp.tool()
+async def rename_transect(
+    ctx: Context,
+    session_id: str = "default",
+    transect_id: str | int = "",
+    new_id: str = "",
+) -> dict:
+    """Rename a transect (by id or zero-based index), updating stored references."""
+    # wraps: swmm_transect_rename
+    if not new_id:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] new_id must not be empty.")
+    sm = get_session_manager(ctx)
+    session = await sm.get_session(session_id)
+    require_new_engine(session, "Transect rename")
+    transects = session.infrastructure.transects
+    await asyncio.to_thread(transects.rename, transect_id, new_id)
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "element_type": "transect",
+        "old_id": transect_id,
+        "new_id": new_id,
     }
