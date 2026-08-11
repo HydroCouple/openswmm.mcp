@@ -905,15 +905,25 @@ async def get_infil_curve_number(
     session_id: str = "default",
     subcatch_id: str | int = "",
 ) -> dict:
-    """Return the SCS Curve Number for a subcatchment."""
+    """Return the SCS Curve Number and drying time for a subcatchment.
+
+    ``drying_time`` is the third ``[INFILTRATION]`` column -- days for a fully
+    saturated soil to dry -- and is what ``set_infil_curve_number`` preserves
+    when it is not given one.
+    """
+    # wraps: swmm_subcatch_get_infil_curve_number
     session = await _get_session(ctx, session_id)
     idx = await _resolve_subcatch(session, subcatch_id)
-    cn = await asyncio.to_thread(lambda: session.subcatchments[idx].infiltration.curve_number)
+    infil = session.subcatchments[idx].infiltration
+    cn, drying_time = await asyncio.to_thread(
+        lambda: (infil.curve_number, infil.curve_number_drying_time)
+    )
     return {
         "session_id": session_id,
         "subcatch_id": subcatch_id,
         "subcatch_index": idx,
         "curve_number": float(cn),
+        "drying_time": float(drying_time),
     }
 
 
@@ -923,18 +933,34 @@ async def set_infil_curve_number(
     session_id: str = "default",
     subcatch_id: str | int = "",
     curve_number: float = 0.0,
+    drying_time: float | None = None,
 ) -> dict:
-    """Set the SCS Curve Number for a subcatchment."""
+    """Set the SCS Curve Number for a subcatchment.
+
+    The engine writes both ``[INFILTRATION]`` columns in one call. Leave
+    ``drying_time`` unset to keep the subcatchment's current value and change
+    only the curve number.
+    """
+    # wraps: swmm_subcatch_set_infil_curve_number
     session = await _get_session(ctx, session_id)
     idx = await _resolve_subcatch(session, subcatch_id)
+    infil = session.subcatchments[idx].infiltration
     cn = float(curve_number)
-    await asyncio.to_thread(lambda: session.subcatchments[idx].infiltration.set_curve_number(cn))
+    dry = None if drying_time is None else float(drying_time)
+
+    def _apply() -> float:
+        applied_dry = infil.curve_number_drying_time if dry is None else dry
+        infil.set_curve_number(cn, applied_dry)
+        return applied_dry
+
+    applied_dry = await asyncio.to_thread(_apply)
     return {
         "status": "ok",
         "session_id": session_id,
         "subcatch_id": subcatch_id,
         "subcatch_index": idx,
         "curve_number": curve_number,
+        "drying_time": float(applied_dry),
     }
 
 

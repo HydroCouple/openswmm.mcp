@@ -31,6 +31,20 @@ async def _opened(session_manager, inp_path, session_id="sc_op"):
     return ctx
 
 
+async def _editable(session_manager, inp_path, session_id="sc_ed"):
+    """Land in the engine's editable ``opened`` state.
+
+    ``_opened`` above is a misnomer -- a strict open initialises, and geometry
+    setters (``CHECK_GEOMETRY``) reject the ``initialized`` state. Only a
+    lenient open leaves the session where they are accepted.
+    """
+    from openswmm_mcp.tools.lifecycle import open_model
+
+    ctx = MockContext(session_manager)
+    await open_model(ctx, inp_path=inp_path, session_id=session_id, lenient_open=True)
+    return ctx
+
+
 async def _ended(session_manager, inp_path, session_id="sc_end"):
     from openswmm_mcp.tools.lifecycle import open_model, run_simulation
 
@@ -205,7 +219,8 @@ class TestInfilModel:
             set_infil_curve_number,
         )
 
-        ctx = await _opened(session_manager, inp_path, "sc_cn")
+        ctx = await _editable(session_manager, inp_path, "sc_cn")
+        before = await get_infil_curve_number(ctx, session_id="sc_cn", subcatch_id="S1")
         try:
             await set_infil_curve_number(
                 ctx,
@@ -217,6 +232,30 @@ class TestInfilModel:
             pytest.skip(f"set_infil_curve_number rejected: {e}")
         r = await get_infil_curve_number(ctx, session_id="sc_cn", subcatch_id="S1")
         assert r["curve_number"] == pytest.approx(85.0)
+        # Omitting drying_time must not disturb the second [INFILTRATION] column.
+        assert r["drying_time"] == pytest.approx(before["drying_time"])
+
+    async def test_curve_number_sets_drying_time_when_given(self, session_manager, inp_path):
+        from openswmm_mcp.tools.subcatchments import (
+            get_infil_curve_number,
+            set_infil_curve_number,
+        )
+
+        ctx = await _editable(session_manager, inp_path, "sc_cn_dt")
+        try:
+            res = await set_infil_curve_number(
+                ctx,
+                session_id="sc_cn_dt",
+                subcatch_id="S1",
+                curve_number=70.0,
+                drying_time=5.5,
+            )
+        except (ToolError, RuntimeError) as e:
+            pytest.skip(f"set_infil_curve_number rejected: {e}")
+        assert res["drying_time"] == pytest.approx(5.5)
+        r = await get_infil_curve_number(ctx, session_id="sc_cn_dt", subcatch_id="S1")
+        assert r["curve_number"] == pytest.approx(70.0)
+        assert r["drying_time"] == pytest.approx(5.5)
 
 
 # ===========================================================================
@@ -443,9 +482,7 @@ class TestSnowpackDefinitions:
 
         ctx = await _opened(session_manager, inp_path, "sp_surf_code")
         with pytest.raises(ToolError, match="surface code must be"):
-            await snowpack_get_surface(
-                ctx, session_id="sp_surf_code", snowpack_id="SP1", surface=7
-            )
+            await snowpack_get_surface(ctx, session_id="sp_surf_code", snowpack_id="SP1", surface=7)
 
     @pytest.mark.parametrize("surface", ["plowable", "impervious", "pervious"])
     async def test_surface_round_trip(self, session_manager, inp_path, surface):
@@ -521,9 +558,7 @@ class TestSnowpackDefinitions:
         )
 
         ctx = await _with_snowpack(session_manager, inp_path, "sp_rms", "SP_RMS")
-        before = await snowpack_get_removal_subcatch(
-            ctx, session_id="sp_rms", snowpack_id="SP_RMS"
-        )
+        before = await snowpack_get_removal_subcatch(ctx, session_id="sp_rms", snowpack_id="SP_RMS")
         assert before["subcatch_id"] == ""
         await snowpack_set_removal_subcatch(
             ctx, session_id="sp_rms", snowpack_id="SP_RMS", subcatch_id="S2"
@@ -564,9 +599,7 @@ class TestCoveragesBulk:
         bulk = await get_coverages(ctx, session_id="sc_cvb2", subcatch_id="S1")
         if bulk["count"] == 0:
             pytest.skip("Reference model has no land uses defined.")
-        single = await get_coverage(
-            ctx, session_id="sc_cvb2", subcatch_id="S1", landuse_index=0
-        )
+        single = await get_coverage(ctx, session_id="sc_cvb2", subcatch_id="S1", landuse_index=0)
         assert bulk["coverages"][0] == pytest.approx(single["coverage"])
 
 
@@ -588,9 +621,7 @@ class TestInitialLoading:
             )
         except (ToolError, RuntimeError, Exception) as e:
             pytest.skip(f"Reference model has no pollutants: {e}")
-        r = await get_initial_loading(
-            ctx, session_id="sc_load", subcatch_id="S1", pollutant_id=0
-        )
+        r = await get_initial_loading(ctx, session_id="sc_load", subcatch_id="S1", pollutant_id=0)
         assert r["initial_loading"] == pytest.approx(2.5)
 
     async def test_unknown_subcatch_raises(self, session_manager, inp_path):
@@ -609,9 +640,7 @@ class TestZeroImpervPct:
 
         ctx = await _opened(session_manager, inp_path, "sc_zi_bad")
         with pytest.raises(ToolError, match=r"pct must be in \[0, 100\]"):
-            await set_zero_imperv_pct(
-                ctx, session_id="sc_zi_bad", subcatch_id="S1", pct=150.0
-            )
+            await set_zero_imperv_pct(ctx, session_id="sc_zi_bad", subcatch_id="S1", pct=150.0)
 
     async def test_round_trip(self, session_manager, inp_path):
         from openswmm_mcp.tools.subcatchments import (
