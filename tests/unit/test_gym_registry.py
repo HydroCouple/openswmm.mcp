@@ -186,7 +186,12 @@ def test_storage_volume_params_validation():
     registry.validate_params(
         "design_factory",
         "storage_volume",
-        {"node_ids": ["T1"], "low": [100.0, 0.0, 0.0], "high": [9000.0, 2.0, 500.0], "mode": "coeffs"},
+        {
+            "node_ids": ["T1"],
+            "low": [100.0, 0.0, 0.0],
+            "high": [9000.0, 2.0, 500.0],
+            "mode": "coeffs",
+        },
     )
     for bad in (
         {"node_ids": ["T1"], "low": 1.0, "high": 1.0},  # high <= low
@@ -202,7 +207,12 @@ def test_lid_placement_params_validation():
     ok = registry.validate_params(
         "design_factory",
         "lid_placement",
-        {"subcatch_ids": ["S1"], "lid_controls": ["BIO", "PAVE"], "area_low": 100.0, "area_high": 2000.0},
+        {
+            "subcatch_ids": ["S1"],
+            "lid_controls": ["BIO", "PAVE"],
+            "area_low": 100.0,
+            "area_high": 2000.0,
+        },
     )
     assert ok.model_dump()["number"] == 1
     for bad in (

@@ -7,10 +7,7 @@ so the tests are pure-Python (no ``openswmm.engine`` import needed).
 
 from __future__ import annotations
 
-import pytest
-
 from openswmm_mcp._util.formatting import paginate_list, truncate_list
-
 
 # ---------------------------------------------------------------------------
 # truncate_list (unchanged primitive — sanity-only)

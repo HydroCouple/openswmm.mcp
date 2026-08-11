@@ -140,6 +140,7 @@ async def get_id(ctx: Context, session_id: str = "default", rule_index: int = 0)
     display label like ``Rule N [unnamed]`` without catching exceptions.
     """
     _, controls, _ = await _get_controls_accessor(ctx, session_id)
+
     def _read_id():
         try:
             return controls[rule_index].id or None
@@ -272,9 +273,7 @@ async def remove_rule(ctx: Context, session_id: str = "default", rule_index: int
     try:
         remaining = await asyncio.to_thread(_remove)
     except IndexError:
-        raise ToolError(
-            f"[{ErrorCode.ELEMENT_NOT_FOUND}] rule_index {rule_index} is out of range."
-        )
+        raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] rule_index {rule_index} is out of range.")
     return {
         "status": "ok",
         "session_id": session_id,
@@ -284,9 +283,7 @@ async def remove_rule(ctx: Context, session_id: str = "default", rule_index: int
 
 
 @controls_mcp.tool()
-async def find_references(
-    ctx: Context, session_id: str = "default", object_name: str = ""
-) -> dict:
+async def find_references(ctx: Context, session_id: str = "default", object_name: str = "") -> dict:
     """Return the indices of control rules that reference an object by name.
 
     Wraps ``Controls.find_references``. Scans each rule's clauses for an

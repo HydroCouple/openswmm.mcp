@@ -120,9 +120,7 @@ class TestOpenDiagnostics:
         """
         from openswmm_mcp.tools.lifecycle import get_open_diagnostics, open_model
 
-        await open_model(
-            fake_ctx, inp_path=inp_path, session_id="diag", lenient_open=True
-        )
+        await open_model(fake_ctx, inp_path=inp_path, session_id="diag", lenient_open=True)
         out = await get_open_diagnostics(fake_ctx, session_id="diag")
         assert out["session_id"] == "diag"
         assert isinstance(out["errors"], list)
@@ -198,23 +196,24 @@ class TestRunSimulation:
         assert session.state == "ended"
 
     async def test_run_simulation_carries_engine_kind(
-        self, fake_ctx, inp_path, engine,
+        self,
+        fake_ctx,
+        inp_path,
+        engine,
     ):
         """Phase 4d: SimulationResult must carry the backend
         discriminator so consumers can distinguish "feature missing
         on this backend" from "no value to report"."""
         from openswmm_mcp.tools.lifecycle import open_model, run_simulation
 
-        await open_model(fake_ctx, inp_path=inp_path,
-                         session_id="run_ek", engine=engine)
+        await open_model(fake_ctx, inp_path=inp_path, session_id="run_ek", engine=engine)
         result = await run_simulation(fake_ctx, session_id="run_ek")
         assert result.engine_kind == engine
         # The single-pollutant site_drainage fixture cannot trigger the
         # "legacy + multi-pollutant" branch, so unsupported_fields is None
         # for both backends here. We assert the field is at least defined
         # (Pydantic default-ok contract).
-        assert result.unsupported_fields is None or isinstance(
-            result.unsupported_fields, list)
+        assert result.unsupported_fields is None or isinstance(result.unsupported_fields, list)
 
 
 # ---------------------------------------------------------------------------
@@ -343,42 +342,49 @@ class TestRunoffInterfaceTools:
     """
 
     async def test_save_runoff_interface_rejects_empty_path(
-        self, fake_ctx, inp_path,
+        self,
+        fake_ctx,
+        inp_path,
     ):
         from openswmm_mcp.tools.lifecycle import open_model, save_runoff_interface
 
         await open_model(fake_ctx, inp_path=inp_path, session_id="rfi_empty")
         with pytest.raises(ToolError, match="VALIDATION_ERROR"):
-            await save_runoff_interface(
-                fake_ctx, session_id="rfi_empty", path="")
+            await save_runoff_interface(fake_ctx, session_id="rfi_empty", path="")
 
     async def test_save_runoff_interface_rejects_legacy_backend(
-        self, fake_ctx, inp_path, tmp_path,
+        self,
+        fake_ctx,
+        inp_path,
+        tmp_path,
     ):
         """Runoff iface is a new-engine feature; legacy must be rejected
         with a clear ToolError rather than silently failing."""
         from openswmm_mcp.tools.lifecycle import open_model, save_runoff_interface
 
-        await open_model(
-            fake_ctx, inp_path=inp_path, session_id="rfi_leg", engine="legacy")
+        await open_model(fake_ctx, inp_path=inp_path, session_id="rfi_leg", engine="legacy")
         with pytest.raises(ToolError):
             await save_runoff_interface(
-                fake_ctx, session_id="rfi_leg",
-                path=str(tmp_path / "leg.rfi"))
+                fake_ctx, session_id="rfi_leg", path=str(tmp_path / "leg.rfi")
+            )
 
     async def test_save_runoff_interface_writes_file_after_run(
-        self, fake_ctx, inp_path, tmp_path,
+        self,
+        fake_ctx,
+        inp_path,
+        tmp_path,
     ):
         """Headline path: open in SAVE mode, run the simulation, the
         engine auto-emits records into the file."""
         from openswmm_mcp.tools.lifecycle import (
-            open_model, run_simulation, save_runoff_interface,
+            open_model,
+            run_simulation,
+            save_runoff_interface,
         )
 
         path = str(tmp_path / "phase1b.rfi")
         await open_model(fake_ctx, inp_path=inp_path, session_id="rfi_save")
-        result = await save_runoff_interface(
-            fake_ctx, session_id="rfi_save", path=path)
+        result = await save_runoff_interface(fake_ctx, session_id="rfi_save", path=path)
         assert result["status"] == "ok"
         assert result["mode"] == "save"
         assert result["path"] == path
@@ -386,18 +392,25 @@ class TestRunoffInterfaceTools:
         await run_simulation(fake_ctx, session_id="rfi_save")
 
         import os
+
         # File header is 28 bytes; a successful run should produce many
         # additional substep records.
         assert os.path.exists(path)
         assert os.path.getsize(path) > 28
 
     async def test_load_runoff_interface_after_save_round_trip(
-        self, fake_ctx, inp_path, tmp_path,
+        self,
+        fake_ctx,
+        inp_path,
+        tmp_path,
     ):
         """Round trip: produce a file via SAVE mode then open it via
         ``load_runoff_interface`` in a fresh session."""
         from openswmm_mcp.tools.lifecycle import (
-            close_model, load_runoff_interface, open_model, run_simulation,
+            close_model,
+            load_runoff_interface,
+            open_model,
+            run_simulation,
             save_runoff_interface,
         )
 
@@ -405,15 +418,13 @@ class TestRunoffInterfaceTools:
 
         # SAVE pass.
         await open_model(fake_ctx, inp_path=inp_path, session_id="rfi_rt_save")
-        await save_runoff_interface(
-            fake_ctx, session_id="rfi_rt_save", path=path)
+        await save_runoff_interface(fake_ctx, session_id="rfi_rt_save", path=path)
         await run_simulation(fake_ctx, session_id="rfi_rt_save")
         await close_model(fake_ctx, session_id="rfi_rt_save")
 
         # USE pass — reopen the file on a fresh session.
         await open_model(fake_ctx, inp_path=inp_path, session_id="rfi_rt_use")
-        result = await load_runoff_interface(
-            fake_ctx, session_id="rfi_rt_use", path=path)
+        result = await load_runoff_interface(fake_ctx, session_id="rfi_rt_use", path=path)
         assert result["status"] == "ok"
         assert result["mode"] == "use"
         # Audit the documented caveat is surfaced to the caller.
@@ -421,14 +432,17 @@ class TestRunoffInterfaceTools:
         assert "USE mode" in result["warning"]
 
     async def test_load_runoff_interface_rejects_missing_file(
-        self, fake_ctx, inp_path,
+        self,
+        fake_ctx,
+        inp_path,
     ):
         from openswmm_mcp.tools.lifecycle import (
-            load_runoff_interface, open_model,
+            load_runoff_interface,
+            open_model,
         )
 
         await open_model(fake_ctx, inp_path=inp_path, session_id="rfi_miss")
         with pytest.raises(ToolError):
             await load_runoff_interface(
-                fake_ctx, session_id="rfi_miss",
-                path="/nonexistent/path/to/file.rfi")
+                fake_ctx, session_id="rfi_miss", path="/nonexistent/path/to/file.rfi"
+            )

@@ -282,7 +282,9 @@ class TestSetLinkQuality:
         assert result["value"] == 12.5
         assert result["persist"] is True
 
-    async def test_set_link_quality_requires_running(self, session_manager, tmp_inp, reference_model):
+    async def test_set_link_quality_requires_running(
+        self, session_manager, tmp_inp, reference_model
+    ):
         from openswmm_mcp.tools.forcing import set_link_quality
         from openswmm_mcp.tools.lifecycle import open_model
 
@@ -310,7 +312,9 @@ class TestSetLinkQuality:
                 value=1.0,
             )
 
-    async def test_set_link_quality_unknown_pollutant(self, session_manager, tmp_inp, reference_model):
+    async def test_set_link_quality_unknown_pollutant(
+        self, session_manager, tmp_inp, reference_model
+    ):
         from openswmm_mcp.tools.forcing import set_link_quality
 
         ctx = await _open_and_run(session_manager, tmp_inp, "f_lqual_badp")

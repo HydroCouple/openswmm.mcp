@@ -360,28 +360,31 @@ class TestOutputNodeStats:
         from openswmm_mcp.tools.analysis import output_node_stats
 
         ctx = await _run_to_ended(session_manager, inp_path, "ons_fields")
-        result = await output_node_stats(
-            ctx, session_id="ons_fields", node_id="J1")
+        result = await output_node_stats(ctx, session_id="ons_fields", node_id="J1")
 
         for key in (
-            "max_depth", "max_overflow",
+            "max_depth",
+            "max_overflow",
             "total_flood_volume",
-            "time_flooded_seconds", "time_flooded_hours",
+            "time_flooded_seconds",
+            "time_flooded_hours",
         ):
             assert key in result, f"missing field: {key}"
             assert isinstance(result[key], float)
             assert result[key] >= 0.0
 
     async def test_seconds_and_hours_are_consistent(
-        self, session_manager, inp_path,
+        self,
+        session_manager,
+        inp_path,
     ):
         from openswmm_mcp.tools.analysis import output_node_stats
 
         ctx = await _run_to_ended(session_manager, inp_path, "ons_units")
-        result = await output_node_stats(
-            ctx, session_id="ons_units", node_id="J1")
+        result = await output_node_stats(ctx, session_id="ons_units", node_id="J1")
         assert result["time_flooded_hours"] == pytest.approx(
-            result["time_flooded_seconds"] / 3600.0)
+            result["time_flooded_seconds"] / 3600.0
+        )
 
     async def test_empty_node_id_rejected(self, session_manager, inp_path):
         from openswmm_mcp.tools.analysis import output_node_stats
@@ -395,8 +398,7 @@ class TestOutputNodeStats:
 
         ctx = await _run_to_ended(session_manager, inp_path, "ons_bad")
         with pytest.raises(ToolError, match="ELEMENT_NOT_FOUND"):
-            await output_node_stats(
-                ctx, session_id="ons_bad", node_id="DOES_NOT_EXIST")
+            await output_node_stats(ctx, session_id="ons_bad", node_id="DOES_NOT_EXIST")
 
     async def test_includes_node_index(self, session_manager, inp_path):
         """Response carries both the string id and the resolved index
@@ -404,8 +406,7 @@ class TestOutputNodeStats:
         from openswmm_mcp.tools.analysis import output_node_stats
 
         ctx = await _run_to_ended(session_manager, inp_path, "ons_idx")
-        result = await output_node_stats(
-            ctx, session_id="ons_idx", node_id="J1")
+        result = await output_node_stats(ctx, session_id="ons_idx", node_id="J1")
         assert result["node_id"] == "J1"
         assert isinstance(result["node_index"], int)
         assert result["node_index"] >= 0

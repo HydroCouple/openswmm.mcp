@@ -38,7 +38,11 @@ climate_mcp = FastMCP("climate")
 
 _TEMP_SOURCES: dict[str, int] = {"none": 0, "timeseries": 1, "file": 2}
 _EVAP_METHODS: dict[str, int] = {
-    "constant": 0, "monthly": 1, "timeseries": 2, "temperature": 3, "file": 4,
+    "constant": 0,
+    "monthly": 1,
+    "timeseries": 2,
+    "temperature": 3,
+    "file": 4,
 }
 _WIND_SOURCES: dict[str, int] = {"monthly": 0, "file": 1}
 # Climate-file temperature units (legacy [TEMPERATURE] FILE keyword). -1 = auto.
@@ -100,8 +104,7 @@ def _check_len(values, n: int, label: str) -> list[float]:
     seq = list(values)
     if len(seq) != n:
         raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] {label} must have exactly {n} values, "
-            f"got {len(seq)}."
+            f"[{ErrorCode.VALIDATION_ERROR}] {label} must have exactly {n} values, got {len(seq)}."
         )
     return [float(v) for v in seq]
 
@@ -214,14 +217,17 @@ async def set_temperature_config(
             c.temp_units = _coerce_enum(file_units, _TEMP_UNITS, "temperature file units")
             changed.append("file_units")
         if elevation is not None:
-            c.elevation = float(elevation); changed.append("elevation")
+            c.elevation = float(elevation)
+            changed.append("elevation")
         if latitude is not None:
-            c.latitude = float(latitude); changed.append("latitude")
+            c.latitude = float(latitude)
+            changed.append("latitude")
         if longitude_correction_min is not None:
             c.longitude_correction = float(longitude_correction_min)
             changed.append("longitude_correction_min")
         if file_start is not None:
-            c.temp_file_start = float(file_start); changed.append("file_start")
+            c.temp_file_start = float(file_start)
+            changed.append("file_start")
 
     await asyncio.to_thread(lambda: _apply(_do))
     return {"status": "applied", "session_id": session_id, "changed": changed}
@@ -250,13 +256,17 @@ async def set_evaporation_config(
             c.evap_type = _coerce_enum(method, _EVAP_METHODS, "evaporation method")
             changed.append("method")
         if monthly is not None:
-            c.evap_monthly = _check_len(monthly, _MONTHS, "monthly"); changed.append("monthly")
+            c.evap_monthly = _check_len(monthly, _MONTHS, "monthly")
+            changed.append("monthly")
         if timeseries is not None:
-            c.evap_timeseries = timeseries; changed.append("timeseries")
+            c.evap_timeseries = timeseries
+            changed.append("timeseries")
         if pan_coeff is not None:
-            c.pan_coeff = _check_len(pan_coeff, _MONTHS, "pan_coeff"); changed.append("pan_coeff")
+            c.pan_coeff = _check_len(pan_coeff, _MONTHS, "pan_coeff")
+            changed.append("pan_coeff")
         if recovery_pattern is not None:
-            c.evap_recovery = recovery_pattern; changed.append("recovery_pattern")
+            c.evap_recovery = recovery_pattern
+            changed.append("recovery_pattern")
 
     await asyncio.to_thread(lambda: _apply(_do))
     if dry_only is not None:
@@ -283,7 +293,8 @@ async def set_windspeed_config(
             c.wind_type = _coerce_enum(source, _WIND_SOURCES, "wind source")
             changed.append("source")
         if monthly is not None:
-            c.wind_monthly = _check_len(monthly, _MONTHS, "monthly"); changed.append("monthly")
+            c.wind_monthly = _check_len(monthly, _MONTHS, "monthly")
+            changed.append("monthly")
 
     await asyncio.to_thread(lambda: _apply(_do))
     return {"status": "applied", "session_id": session_id, "changed": changed}
@@ -305,11 +316,14 @@ async def set_snowmelt_config(
 
     def _do():
         if divide_temp is not None:
-            c.snow_temp = float(divide_temp); changed.append("divide_temp")
+            c.snow_temp = float(divide_temp)
+            changed.append("divide_temp")
         if ati_weight is not None:
-            c.ati_weight = float(ati_weight); changed.append("ati_weight")
+            c.ati_weight = float(ati_weight)
+            changed.append("ati_weight")
         if neg_melt_ratio is not None:
-            c.neg_melt_ratio = float(neg_melt_ratio); changed.append("neg_melt_ratio")
+            c.neg_melt_ratio = float(neg_melt_ratio)
+            changed.append("neg_melt_ratio")
 
     await asyncio.to_thread(lambda: _apply(_do))
     return {"status": "applied", "session_id": session_id, "changed": changed}

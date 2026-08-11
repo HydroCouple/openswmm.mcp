@@ -80,14 +80,30 @@ def _market_config(output_dir: Path) -> dict:
             "seller": {"type": "piecewise_linear", "onset": 0.3, "full": 1.0},
         },
         "agents": [
-            {"id": "T1", "element_type": "node", "commodity": "conveyance",
-             "stress_metric": "storage_fill", "curve": "buyer", "role": "buyer"},
-            {"id": "T2", "element_type": "node", "commodity": "storage",
-             "stress_metric": "storage_fill", "curve": "seller", "role": "seller"},
+            {
+                "id": "T1",
+                "element_type": "node",
+                "commodity": "conveyance",
+                "stress_metric": "storage_fill",
+                "curve": "buyer",
+                "role": "buyer",
+            },
+            {
+                "id": "T2",
+                "element_type": "node",
+                "commodity": "storage",
+                "stress_metric": "storage_fill",
+                "curve": "seller",
+                "role": "seller",
+            },
         ],
         "trade_routes": [
-            {"structure_link_id": "ORIF", "buyer_agents": ["T1"],
-             "seller_agents": ["T2"], "pid": {"kp": 2.0, "ki": 0.1}},
+            {
+                "structure_link_id": "ORIF",
+                "buyer_agents": ["T1"],
+                "seller_agents": ["T2"],
+                "pid": {"kp": 2.0, "ki": 0.1},
+            },
         ],
     }
     return {
@@ -123,9 +139,14 @@ async def test_market_random_search_then_apply(ctx, output_dir, job_manager):
     assert results["objective_names"] == ["uncontrolled_discharge", "storage_underutilization"]
     # 8 tuned policy params: buyer onset/ceiling/steepness, seller onset/ceiling, ORIF kp/ki/kd.
     assert set(results["best"]["decisions"]) == {
-        "curve:buyer.onset", "curve:buyer.ceiling", "curve:buyer.steepness",
-        "curve:seller.onset", "curve:seller.ceiling",
-        "pid:ORIF.kp", "pid:ORIF.ki", "pid:ORIF.kd",
+        "curve:buyer.onset",
+        "curve:buyer.ceiling",
+        "curve:buyer.steepness",
+        "curve:seller.onset",
+        "curve:seller.ceiling",
+        "pid:ORIF.kp",
+        "pid:ORIF.ki",
+        "pid:ORIF.kd",
     }
 
     # Apply writes the tuned controller config (no model session for market).

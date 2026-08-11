@@ -46,9 +46,7 @@ class TestReportStart:
 
     async def test_set_then_get_roundtrip(self, fake_ctx, inp_path):
         await _open(fake_ctx, inp_path)
-        await set_report_start(
-            fake_ctx, session_id="default", report_start="1998-01-01T03:00:00"
-        )
+        await set_report_start(fake_ctx, session_id="default", report_start="1998-01-01T03:00:00")
         result = await get_report_start(fake_ctx, session_id="default")
         assert result["report_start"] == "1998-01-01T03:00:00"
 
@@ -60,6 +58,4 @@ class TestReportStart:
     async def test_bad_format_rejected(self, fake_ctx, inp_path):
         await _open(fake_ctx, inp_path)
         with pytest.raises(ToolError):
-            await set_report_start(
-                fake_ctx, session_id="default", report_start="not-a-date"
-            )
+            await set_report_start(fake_ctx, session_id="default", report_start="not-a-date")

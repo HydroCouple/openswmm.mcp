@@ -436,9 +436,7 @@ class TestTriangleInitialConditions:
         # The fixture is a CMS project with ";; UNITS: SI (m)", so INIT_DEPTH
         # is metres here; on a US-FLOW_UNITS project it would be feet.
         ctx = await _open(session_manager, twod_inp_path)
-        out = await set_triangle_initial_conditions(
-            ctx, session_id="twod", triangle=0, depth=0.25
-        )
+        out = await set_triangle_initial_conditions(ctx, session_id="twod", triangle=0, depth=0.25)
         assert out["status"] == "ok"
         got = await get_triangle_initial_conditions(ctx, session_id="twod", triangle=0)
         assert got["init_depth"] == pytest.approx(0.25)

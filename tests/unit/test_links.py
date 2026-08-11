@@ -274,9 +274,7 @@ class TestOutletAccessors:
 
         ctx = await _opened(session_manager, inp_path, "l_ort_s")
         try:
-            await set_outlet_rating_type(
-                ctx, session_id="l_ort_s", link_id="OL1", rating_type=2
-            )
+            await set_outlet_rating_type(ctx, session_id="l_ort_s", link_id="OL1", rating_type=2)
         except (ToolError, RuntimeError) as e:
             pytest.skip(f"set_outlet_rating_type not allowed/applicable: {e}")
         r = await get_outlet_rating_type(ctx, session_id="l_ort_s", link_id="OL1")
@@ -293,9 +291,7 @@ class TestPumpDepthAccessors:
 
         ctx = await _opened(session_manager, inp_path, "l_psu")
         try:
-            await set_pump_startup_depth(
-                ctx, session_id="l_psu", link_id="P1", startup_depth=3.0
-            )
+            await set_pump_startup_depth(ctx, session_id="l_psu", link_id="P1", startup_depth=3.0)
         except (ToolError, RuntimeError) as e:
             pytest.skip(f"set_pump_startup_depth not allowed/applicable: {e}")
         r = await get_pump_startup_depth(ctx, session_id="l_psu", link_id="P1")
@@ -309,9 +305,7 @@ class TestPumpDepthAccessors:
 
         ctx = await _opened(session_manager, inp_path, "l_pso")
         try:
-            await set_pump_shutoff_depth(
-                ctx, session_id="l_pso", link_id="P1", shutoff_depth=1.0
-            )
+            await set_pump_shutoff_depth(ctx, session_id="l_pso", link_id="P1", shutoff_depth=1.0)
         except (ToolError, RuntimeError) as e:
             pytest.skip(f"set_pump_shutoff_depth not allowed/applicable: {e}")
         r = await get_pump_shutoff_depth(ctx, session_id="l_pso", link_id="P1")

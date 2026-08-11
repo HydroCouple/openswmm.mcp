@@ -170,7 +170,7 @@ def paginate_list(
         sl = []
         eff_limit = int(limit)
     else:
-        sl = items[start:start + int(limit)]
+        sl = items[start : start + int(limit)]
         eff_limit = int(limit)
     meta = {
         "total": total,

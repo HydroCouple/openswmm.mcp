@@ -269,12 +269,7 @@ def design_dimensions(env_config: EnvConfig) -> list[DesignDimension]:
         hi = np.asarray(space.high, dtype=float).ravel()
         size = int(lo.shape[0])
         params = spec.params
-        ids = (
-            params.get("link_ids")
-            or params.get("node_ids")
-            or params.get("subcatch_ids")
-            or []
-        )
+        ids = params.get("link_ids") or params.get("node_ids") or params.get("subcatch_ids") or []
         if len(ids) == size:
             labels = tuple(f"{spec.kind}:{eid}" for eid in ids)
         else:
@@ -501,9 +496,7 @@ def _flat_bounds(dims: list[DesignDimension]) -> tuple[np.ndarray, np.ndarray]:
 
     @rtype: tuple of two L{numpy.ndarray}
     """
-    low = np.concatenate(
-        [np.broadcast_to(np.asarray(d.low, dtype=float), (d.size,)) for d in dims]
-    )
+    low = np.concatenate([np.broadcast_to(np.asarray(d.low, dtype=float), (d.size,)) for d in dims])
     high = np.concatenate(
         [np.broadcast_to(np.asarray(d.high, dtype=float), (d.size,)) for d in dims]
     )

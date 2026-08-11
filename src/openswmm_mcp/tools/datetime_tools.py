@@ -25,9 +25,7 @@ datetime_mcp = FastMCP("datetime")
 
 
 @datetime_mcp.tool()
-async def encode_date(
-    ctx: Context, year: int = 2000, month: int = 1, day: int = 1
-) -> dict:
+async def encode_date(ctx: Context, year: int = 2000, month: int = 1, day: int = 1) -> dict:
     """Encode a calendar date as a SWMM DateTime (days since 1899-12-30).
 
     The returned ``value`` has a zero time-of-day fraction; add a time
@@ -43,9 +41,7 @@ async def encode_date(
 
 
 @datetime_mcp.tool()
-async def encode_time(
-    ctx: Context, hour: int = 0, minute: int = 0, second: int = 0
-) -> dict:
+async def encode_time(ctx: Context, hour: int = 0, minute: int = 0, second: int = 0) -> dict:
     """Encode a time-of-day as the fractional part of a SWMM DateTime."""
     if not (0 <= hour <= 23):
         raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] hour must be 0..23; got {hour}.")

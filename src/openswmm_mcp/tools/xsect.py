@@ -214,8 +214,7 @@ async def list_shapes(ctx: Context, session_id: str = "default") -> dict:
     # wraps: swmm_xsect_shape_name
     shapes = await asyncio.to_thread(
         lambda: [
-            {"name": shape_name(c).lower(), "code": c}
-            for c in sorted(set(shape_codes().values()))
+            {"name": shape_name(c).lower(), "code": c} for c in sorted(set(shape_codes().values()))
         ]
     )
     return {"session_id": session_id, "count": len(shapes), "shapes": shapes}

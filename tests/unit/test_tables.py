@@ -11,9 +11,7 @@ from __future__ import annotations
 import unittest
 
 from openswmm_mcp.errors import ToolError
-
 from tests.unit._base import EngineToolTestCase, MockContext
-
 
 # ---------------------------------------------------------------------------
 # Base with building-session helper
@@ -348,9 +346,7 @@ class TestPatterns(_TableToolTestCase):
             factors=[1.0] * 12,
         )
         self.assertEqual((await pattern_count(ctx, session_id="tbl_prm"))["count"], 1)
-        result = await pattern_remove(
-            ctx, session_id="tbl_prm", pattern_id="ToRemove"
-        )
+        result = await pattern_remove(ctx, session_id="tbl_prm", pattern_id="ToRemove")
         self.assertEqual(result["status"], "ok")
         self.assertEqual((await pattern_count(ctx, session_id="tbl_prm"))["count"], 0)
 

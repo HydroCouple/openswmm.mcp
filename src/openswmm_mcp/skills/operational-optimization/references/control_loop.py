@@ -18,7 +18,6 @@ import math
 from dataclasses import dataclass, field
 from typing import Protocol
 
-
 # ---------------------------------------------------------------------------
 # Cost curves -- map a stress metric in [0, 1] to a price in [0, 1]
 # ---------------------------------------------------------------------------
@@ -92,8 +91,10 @@ class PID:
         output = _clamp(raw, self.out_min, self.out_max)
 
         # Anti-windup: only accumulate when not pushing further into saturation.
-        if self.out_min < raw < self.out_max or (raw <= self.out_min and error < 0) or (
-            raw >= self.out_max and error > 0
+        if (
+            self.out_min < raw < self.out_max
+            or (raw <= self.out_min and error < 0)
+            or (raw >= self.out_max and error > 0)
         ):
             self._integral = candidate_i
 

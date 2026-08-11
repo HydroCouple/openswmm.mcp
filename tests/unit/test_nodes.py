@@ -10,9 +10,7 @@ from __future__ import annotations
 import unittest
 
 from openswmm_mcp.errors import ToolError
-
 from tests.unit._base import EngineToolTestCase, MockContext
-
 
 # ---------------------------------------------------------------------------
 # Base with lifecycle helpers
@@ -314,9 +312,7 @@ class TestOutfallReadBacks(_NodeToolTestCase):
 
         ctx = await self._opened("n_oft")
         try:
-            await set_outfall_tidal(
-                ctx, session_id="n_oft", node_id="O1", curve_index=1
-            )
+            await set_outfall_tidal(ctx, session_id="n_oft", node_id="O1", curve_index=1)
         except (ToolError, RuntimeError) as e:
             self.skipTest(f"set_outfall_tidal rejected in this state: {e}")
         r = await get_outfall_tidal(ctx, session_id="n_oft", node_id="O1")
@@ -330,9 +326,7 @@ class TestOutfallReadBacks(_NodeToolTestCase):
 
         ctx = await self._opened("n_ofts")
         try:
-            await set_outfall_timeseries(
-                ctx, session_id="n_ofts", node_id="O1", timeseries_index=2
-            )
+            await set_outfall_timeseries(ctx, session_id="n_ofts", node_id="O1", timeseries_index=2)
         except (ToolError, RuntimeError) as e:
             self.skipTest(f"set_outfall_timeseries rejected in this state: {e}")
         r = await get_outfall_timeseries(ctx, session_id="n_ofts", node_id="O1")
@@ -350,9 +344,7 @@ class TestHeadBoundary(_NodeToolTestCase):
 
         ctx = await self._opened("n_hb_gate")
         with self.assertRaisesRegex(ToolError, "running"):
-            await set_head_boundary(
-                ctx, session_id="n_hb_gate", node_id="J1", head=1.0
-            )
+            await set_head_boundary(ctx, session_id="n_hb_gate", node_id="J1", head=1.0)
 
     async def test_set_head_boundary_running_ok(self):
         from openswmm_mcp.tools.nodes import set_head_boundary
@@ -360,9 +352,7 @@ class TestHeadBoundary(_NodeToolTestCase):
         ctx = await self._running("n_hb")
         # A head boundary is an outfall-only concept; the engine rejects it
         # (BADPARAM) for junctions. O1 is the reference model's outfall.
-        r = await set_head_boundary(
-            ctx, session_id="n_hb", node_id="O1", head=1.0
-        )
+        r = await set_head_boundary(ctx, session_id="n_hb", node_id="O1", head=1.0)
         self.assertEqual(r["status"], "ok")
         self.assertEqual(r["head"], 1.0)
 

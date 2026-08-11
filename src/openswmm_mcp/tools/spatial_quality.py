@@ -953,7 +953,7 @@ async def get_model_geometry(
     crs = await asyncio.to_thread(lambda: spatial.crs)
 
     # ---- Nodes (bulk coord memcpy + batched property reads) -----------------
-    def _fetch_nodes() -> tuple[int, list[dict], "np.ndarray"]:
+    def _fetch_nodes() -> tuple[int, list[dict], np.ndarray]:
         count = len(nodes_acc)
         if count == 0:
             return 0, [], np.zeros((0, 2))
@@ -986,9 +986,7 @@ async def get_model_geometry(
             tn_wrap = link.to_node
             verts_arr = spatial.link_vertices(i)
             verts = (
-                [[float(row[0]), float(row[1])] for row in verts_arr]
-                if len(verts_arr) > 0
-                else []
+                [[float(row[0]), float(row[1])] for row in verts_arr] if len(verts_arr) > 0 else []
             )
             result.append(
                 {
@@ -1014,11 +1012,7 @@ async def get_model_geometry(
             sub = subcatch_acc[i]
             cx, cy = spatial.subcatchment_coord(i)
             poly_arr = spatial.subcatchment_polygon(i)
-            poly = (
-                [[float(row[0]), float(row[1])] for row in poly_arr]
-                if len(poly_arr) > 0
-                else []
-            )
+            poly = [[float(row[0]), float(row[1])] for row in poly_arr] if len(poly_arr) > 0 else []
             # v1: subcatchment.outlet returns Union[Node, Subcatchment, None]
             outlet = sub.outlet
             outlet_idx = -1

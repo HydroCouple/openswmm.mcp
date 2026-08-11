@@ -246,9 +246,7 @@ async def test_interactive_loop_matches_direct_env(ctx, output_dir):
 
         for expected_step in range(1, 4):
             stepped = await env_step(ctx, env_id="loop")
-            d_obs, d_reward, d_term, d_trunc, _ = direct.step(
-                {"design": {}, "runtime": {}}
-            )
+            d_obs, d_reward, d_term, d_trunc, _ = direct.step({"design": {}, "runtime": {}})
             assert stepped["step"] == expected_step
             assert stepped["observation"] == pytest.approx(d_obs.tolist())
             assert stepped["reward"] == pytest.approx(float(d_reward))

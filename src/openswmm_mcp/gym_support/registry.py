@@ -337,12 +337,9 @@ class RDIIUnitHydrographParams(_Params):
     def _check_bounds(self) -> RDIIUnitHydrographParams:
         if self.r_high <= self.r_low:
             raise ValueError("r_high must be strictly greater than r_low")
-        if self.include_ia and not any(
-            hi > lo for lo, hi in zip(self.ia_low, self.ia_high)
-        ):
+        if self.include_ia and not any(hi > lo for lo, hi in zip(self.ia_low, self.ia_high)):
             raise ValueError(
-                "include_ia requires at least one of (dmax, drecov, dinit) to "
-                "have ia_high > ia_low"
+                "include_ia requires at least one of (dmax, drecov, dinit) to have ia_high > ia_low"
             )
         return self
 

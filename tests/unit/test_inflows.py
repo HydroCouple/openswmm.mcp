@@ -464,8 +464,14 @@ class TestExternalAccessors:
 
         ctx = await _opened_session(session_manager, inp_path, "inf_ext_acc")
         await add_external(
-            ctx, session_id="inf_ext_acc", node_id="J1", constituent="FLOW",
-            ts_name="", inflow_type="FLOW", m_factor=2.0, baseline=0.3,
+            ctx,
+            session_id="inf_ext_acc",
+            node_id="J1",
+            constituent="FLOW",
+            ts_name="",
+            inflow_type="FLOW",
+            m_factor=2.0,
+            baseline=0.3,
         )
         got = await get_external(ctx, session_id="inf_ext_acc", entry_index=0)
         assert got["node_index"] >= 0
@@ -498,7 +504,9 @@ class TestDWFAccessors:
         )
 
         ctx = await _opened_session(session_manager, inp_path, "inf_dwf_acc")
-        await add_dwf(ctx, session_id="inf_dwf_acc", node_id="J1", constituent="FLOW", avg_value=0.4)
+        await add_dwf(
+            ctx, session_id="inf_dwf_acc", node_id="J1", constituent="FLOW", avg_value=0.4
+        )
         got = await get_dwf(ctx, session_id="inf_dwf_acc", entry_index=0)
         assert got["node_index"] >= 0
         assert got["avg_value"] == pytest.approx(0.4)
@@ -523,8 +531,14 @@ class TestHydrographEdits:
         from openswmm_mcp.tools.inflows import add_hydrograph
 
         await add_hydrograph(
-            ctx, session_id=sid, uh_name="UHE", month="all", response="short",
-            r=0.1, t=2.0, k=2.0,
+            ctx,
+            session_id=sid,
+            uh_name="UHE",
+            month="all",
+            response="short",
+            r=0.1,
+            t=2.0,
+            k=2.0,
         )
 
     async def test_set_rtk_and_ia_in_place(self, session_manager, inp_path):
@@ -538,12 +552,24 @@ class TestHydrographEdits:
         ctx = await _opened_session(session_manager, inp_path, "inf_he_set")
         await self._seed(ctx, "inf_he_set")
         await set_hydrograph_rtk(
-            ctx, session_id="inf_he_set", uh_name="UHE", month="all", response="short",
-            r=0.25, t=3.0, k=2.5,
+            ctx,
+            session_id="inf_he_set",
+            uh_name="UHE",
+            month="all",
+            response="short",
+            r=0.25,
+            t=3.0,
+            k=2.5,
         )
         await set_hydrograph_ia(
-            ctx, session_id="inf_he_set", uh_name="UHE", month="all", response="short",
-            dmax=0.5, drecov=0.1, dinit=0.0,
+            ctx,
+            session_id="inf_he_set",
+            uh_name="UHE",
+            month="all",
+            response="short",
+            dmax=0.5,
+            drecov=0.1,
+            dinit=0.0,
         )
         # Edits should not create new rows.
         assert (await hydrograph_count(ctx, session_id="inf_he_set"))["count"] == 1
@@ -554,18 +580,24 @@ class TestHydrographEdits:
 
     async def test_remove_entry_and_group(self, session_manager, inp_path):
         from openswmm_mcp.tools.inflows import (
+            add_hydrograph,
             hydrograph_count,
             hydrograph_group_count,
             remove_hydrograph_entry,
             remove_hydrograph_group,
         )
-        from openswmm_mcp.tools.inflows import add_hydrograph
 
         ctx = await _opened_session(session_manager, inp_path, "inf_he_rm")
         for m in ("jan", "feb"):
             await add_hydrograph(
-                ctx, session_id="inf_he_rm", uh_name="UHR", month=m, response="short",
-                r=0.1, t=2.0, k=2.0,
+                ctx,
+                session_id="inf_he_rm",
+                uh_name="UHR",
+                month=m,
+                response="short",
+                r=0.1,
+                t=2.0,
+                k=2.0,
             )
         await remove_hydrograph_entry(
             ctx, session_id="inf_he_rm", uh_name="UHR", month="jan", response="short"
@@ -583,7 +615,10 @@ class TestHydrographEdits:
         ctx = await _opened_session(session_manager, inp_path, "inf_he_ren")
         await self._seed(ctx, "inf_he_ren")
         await rename_hydrograph_group(ctx, session_id="inf_he_ren", group_index=0, new_id="UHE2")
-        names = [g["name"] for g in (await list_hydrograph_groups(ctx, session_id="inf_he_ren"))["groups"]]
+        names = [
+            g["name"]
+            for g in (await list_hydrograph_groups(ctx, session_id="inf_he_ren"))["groups"]
+        ]
         assert names == ["UHE2"]
 
     async def test_set_gage_replaces(self, session_manager, inp_path):
@@ -614,12 +649,24 @@ class TestHydrographEdits:
 
         ctx = await _opened_session(session_manager, inp_path, "inf_he_clr")
         await add_hydrograph(
-            ctx, session_id="inf_he_clr", uh_name="UHC", month="all", response="short",
-            r=0.1, t=2.0, k=2.0,
+            ctx,
+            session_id="inf_he_clr",
+            uh_name="UHC",
+            month="all",
+            response="short",
+            r=0.1,
+            t=2.0,
+            k=2.0,
         )
         await add_hydrograph(
-            ctx, session_id="inf_he_clr", uh_name="UHC", month="jan", response="short",
-            r=0.1, t=2.0, k=2.0,
+            ctx,
+            session_id="inf_he_clr",
+            uh_name="UHC",
+            month="jan",
+            response="short",
+            r=0.1,
+            t=2.0,
+            k=2.0,
         )
         await clear_hydrograph_group_months(ctx, session_id="inf_he_clr", uh_name="UHC")
         # The ALL-months row survives; the month-specific row is cleared.
@@ -649,16 +696,38 @@ class TestRDIIDecayEdits:
 
         ctx = await _opened_session(session_manager, inp_path, "inf_decay_edit")
         await add_hydrograph(
-            ctx, session_id="inf_decay_edit", uh_name="UHD", month="all", response="short",
-            r=0.1, t=2.0, k=2.0,
+            ctx,
+            session_id="inf_decay_edit",
+            uh_name="UHD",
+            month="all",
+            response="short",
+            r=0.1,
+            t=2.0,
+            k=2.0,
         )
         await add_rdii_decay(
-            ctx, session_id="inf_decay_edit", uh_name="UHD", response="short",
-            k_dep=0.05, k_0=0.02, k_T=0.01, T_ref=10.0, theta_rec=0.07, T_freeze=0.0,
+            ctx,
+            session_id="inf_decay_edit",
+            uh_name="UHD",
+            response="short",
+            k_dep=0.05,
+            k_0=0.02,
+            k_T=0.01,
+            T_ref=10.0,
+            theta_rec=0.07,
+            T_freeze=0.0,
         )
         await set_rdii_decay(
-            ctx, session_id="inf_decay_edit", uh_name="UHD", response="short",
-            k_dep=0.09, k_0=0.02, k_T=0.01, T_ref=10.0, theta_rec=0.07, T_freeze=0.0,
+            ctx,
+            session_id="inf_decay_edit",
+            uh_name="UHD",
+            response="short",
+            k_dep=0.09,
+            k_0=0.02,
+            k_T=0.01,
+            T_ref=10.0,
+            theta_rec=0.07,
+            T_freeze=0.0,
         )
         got = await get_rdii_decay(ctx, session_id="inf_decay_edit", entry_index=0)
         assert got["entry"]["k_dep"] == pytest.approx(0.09)

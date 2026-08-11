@@ -74,9 +74,13 @@ async def resolve_index(accessor: Any, element_id: Any, kind: str = "Element") -
     if isinstance(element_id, int):
         return element_id
     if not element_id:
-        _token = {"Node": "node_id", "Link": "link_id",
-                  "Subcatchment": "subcatch_id", "Gage": "gage_id",
-                  "Pollutant": "pollutant_id"}.get(kind, "element_id")
+        _token = {
+            "Node": "node_id",
+            "Link": "link_id",
+            "Subcatchment": "subcatch_id",
+            "Gage": "gage_id",
+            "Pollutant": "pollutant_id",
+        }.get(kind, "element_id")
         raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] {_token} must not be empty.")
     try:
         return await asyncio.to_thread(accessor.get_index, element_id)

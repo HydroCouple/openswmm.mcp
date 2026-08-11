@@ -244,9 +244,8 @@ async def get_statistics(
                     float(stats.node_vol_flooded[idx]),
                     float(stats.node_time_flooded[idx]),
                 )
-            max_depth, max_overflow, vol_flooded, time_flooded = await asyncio.to_thread(
-                _read_node
-            )
+
+            max_depth, max_overflow, vol_flooded, time_flooded = await asyncio.to_thread(_read_node)
             return {
                 "element_type": "node",
                 "element_id": element_id,
@@ -267,6 +266,7 @@ async def get_statistics(
         if idx < 0:
             raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Link '{element_id}' not found.")
         try:
+
             def _read_link() -> tuple[int, float, float, float, float, float]:
                 return (
                     int(links[idx].type),
@@ -276,6 +276,7 @@ async def get_statistics(
                     float(stats.link_surcharge_time[idx]),
                     float(stats.link_vol_flow[idx]),
                 )
+
             ltype, max_flow, max_vel, max_fill, surcharge, vol_flow = await asyncio.to_thread(
                 _read_link
             )
@@ -290,9 +291,11 @@ async def get_statistics(
             }
             # Pump-specific stats (type code 1 = PUMP)
             if ltype == 1:
+
                 def _pump_stats() -> tuple[int, float, float]:
                     s = links[idx].stats
                     return int(s.pump_cycles), float(s.pump_on_time), float(s.pump_volume)
+
                 pump_cycles, pump_on_time, pump_volume = await asyncio.to_thread(_pump_stats)
                 result["pump_cycles"] = pump_cycles
                 result["pump_on_time"] = pump_on_time
@@ -321,6 +324,7 @@ async def get_statistics(
                     float(stats.subcatchment_runoff_vol[idx]),
                     float(stats.subcatchment_max_runoff[idx]),
                 )
+
             precip, runoff_vol, max_runoff = await asyncio.to_thread(_read_sub)
             return {
                 "element_type": "subcatchment",
@@ -429,6 +433,7 @@ async def get_mass_balance(
     routing_stats_supported = hasattr(mb, "routing_diagnostics")
     if routing_stats_supported:
         try:
+
             def _read_diag() -> tuple[dict[str, float], float | None]:
                 diag = mb.routing_diagnostics
                 # RoutingDiagnostics is a NamedTuple / dataclass-like; expose
@@ -436,8 +441,7 @@ async def get_mass_balance(
                 if hasattr(diag, "_asdict"):
                     stats_dict = dict(diag._asdict())
                 elif hasattr(diag, "__dict__"):
-                    stats_dict = {k: v for k, v in vars(diag).items()
-                                  if not k.startswith("_")}
+                    stats_dict = {k: v for k, v in vars(diag).items() if not k.startswith("_")}
                 else:
                     stats_dict = {}
                 # max_courant is also a top-level MassBalance property.
@@ -642,7 +646,9 @@ async def get_time_series(
         )
     else:  # system
         var_enum = _resolve_system_var(variable)
-        raw = await asyncio.to_thread(reader.system_series, var_enum, start=start_period, end=end_period)
+        raw = await asyncio.to_thread(
+            reader.system_series, var_enum, start=start_period, end=end_period
+        )
 
     values = ndarray_to_list(raw)
 
@@ -971,7 +977,9 @@ async def compare_scenarios(
 
         async def _get_series(reader, idx):
             n = await asyncio.to_thread(lambda: reader.period_count)
-            return await asyncio.to_thread(reader.subcatchment_series, idx, var_enum, start=0, end=n - 1)
+            return await asyncio.to_thread(
+                reader.subcatchment_series, idx, var_enum, start=0, end=n - 1
+            )
 
     else:
         raise ToolError(
@@ -1427,7 +1435,9 @@ async def output_period_time(ctx: Context, session_id: str = "default", period: 
         raise ToolError(
             f"[{ErrorCode.VALIDATION_ERROR}] period must be in [0, {n_periods}); got {period}."
         )
-    elapsed = await asyncio.to_thread(lambda: float(reader.period_times[period].astype("float64") / 1e9))
+    elapsed = await asyncio.to_thread(
+        lambda: float(reader.period_times[period].astype("float64") / 1e9)
+    )
     return {
         "session_id": session_id,
         "period": period,
@@ -1529,8 +1539,7 @@ async def output_node_stats(
         or the node does not exist.
     """
     if not node_id:
-        raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] node_id must not be empty.")
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] node_id must not be empty.")
     sm = get_session_manager(ctx)
     session = await sm.get_session(session_id)
     require_state(session, "ended")
@@ -1538,8 +1547,7 @@ async def output_node_stats(
 
     node_idx = await resolve_index(session.nodes, node_id, "Node")
     if node_idx < 0:
-        raise ToolError(
-            f"[{ErrorCode.ELEMENT_NOT_FOUND}] Node '{node_id}' not found.")
+        raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Node '{node_id}' not found.")
 
     reader = await _ensure_output_reader(session)
 
@@ -1555,6 +1563,7 @@ async def output_node_stats(
             "total_flood_volume": float(reader.node_stats(node_idx).vol_flooded),
             "time_flooded_seconds": float(reader.node_stats(node_idx).time_flooded),
         }
+
     stats = await asyncio.to_thread(_fetch)
     return {
         "session_id": session_id,

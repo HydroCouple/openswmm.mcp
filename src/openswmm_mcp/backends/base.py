@@ -31,6 +31,12 @@ from typing import Any, Protocol, runtime_checkable
 class Backend(Protocol):
     """Engine-agnostic surface that tools call against.
 
+    New-engine-only attributes (``editor``, ``statistics``, ``spatial``,
+    ``tables``, ``patterns``, ``controls``, ``inflows``,
+    ``infrastructure``, ``quality``, ``save_schedule``) raise
+    :class:`AttributeError` on the legacy backend; tools that need them
+    must guard with :func:`openswmm_mcp.dependencies.require_new_engine`.
+
     Attributes
     ----------
     engine_kind:
@@ -57,12 +63,6 @@ class Backend(Protocol):
         ``save(solver, path)`` and ``open(path)`` returning an object with
         ``apply(solver)``.  Legacy backend wraps ``solver.save_hotstart`` /
         ``solver.use_hotstart`` to match this shape.
-
-    New-engine-only attributes (``editor``, ``statistics``, ``spatial``,
-    ``tables``, ``patterns``, ``controls``, ``inflows``,
-    ``infrastructure``, ``quality``, ``save_schedule``) raise
-    :class:`AttributeError` on the legacy backend; tools that need them
-    must guard with :func:`openswmm_mcp.dependencies.require_new_engine`.
     """
 
     engine_kind: str

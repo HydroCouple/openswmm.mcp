@@ -142,12 +142,19 @@ class _LegacySolverAdapter:
         self._last_current_dt = self._epoch
 
     def step(self) -> bool:
-        elapsed_days, current_dt = self._solver.step()
-        self._last_elapsed_days = elapsed_days
+        # Legacy ``step()`` returns an int error code; per-step data is read
+        # from the solver's properties afterwards (the old tuple-returning
+        # signature is gone).
+        from openswmm.legacy.engine import SolverState
+
+        self._solver.step()
+        current_dt = self._solver.current_datetime
         self._last_current_dt = current_dt
-        # Legacy convention: step returns elapsed=0 when the simulation has
-        # finished.  Mirror the new-engine "continue?" boolean.
-        return elapsed_days > 0.0
+        if self._epoch is not None:
+            self._last_elapsed_days = (current_dt - self._epoch).total_seconds() / 86400.0
+        # Mirror the new-engine "continue?" boolean: the legacy solver flips to
+        # FINISHED once the simulation completes.
+        return self._solver.solver_state == SolverState.STARTED
 
     def end(self) -> None:
         self._solver.end()
@@ -171,9 +178,23 @@ class _LegacySolverAdapter:
 
     @property
     def state(self) -> int:
-        """Mirror the legacy SolverState integer code."""
+        """Report state using the v6 EngineState codes the shared lifecycle
+        tools assume (CREATED=1, OPENED=2, INITIALIZED=3, RUNNING=5, ENDED=6,
+        CLOSED=7), so completion checks (``state != RUNNING``) work uniformly
+        across backends."""
+        from openswmm.legacy.engine import SolverState
+
+        _MAP = {
+            SolverState.CREATED: 1,
+            SolverState.OPEN: 3,
+            SolverState.STARTED: 5,
+            SolverState.FINISHED: 6,
+            SolverState.ENDED: 6,
+            SolverState.REPORTED: 6,
+            SolverState.CLOSED: 7,
+        }
         try:
-            return int(self._solver.solver_state.value)
+            return _MAP.get(self._solver.solver_state, -1)
         except Exception:
             return -1
 
@@ -256,7 +277,7 @@ class _LegacySolverAdapter:
         return timedelta(seconds=float(self._solver.routing_step))
 
     @property
-    def options(self) -> "_LegacyOptionsView":
+    def options(self) -> _LegacyOptionsView:
         view = getattr(self, "_options_view", None)
         if view is None:
             view = _LegacyOptionsView(self)
@@ -275,7 +296,7 @@ class _LegacyOptionsView:
 
     _SUPPORTED_KEYS: tuple[str, ...] = ("FLOW_UNITS",)
 
-    def __init__(self, adapter: "_LegacySolverAdapter") -> None:
+    def __init__(self, adapter: _LegacySolverAdapter) -> None:
         self._adapter = adapter
 
     def __getitem__(self, key: str) -> str:
@@ -321,7 +342,7 @@ class _LegacyNode:
 
     __slots__ = ("_collection", "_index")
 
-    def __init__(self, collection: "_LegacyNodes", index: int) -> None:
+    def __init__(self, collection: _LegacyNodes, index: int) -> None:
         self._collection = collection
         self._index = index
 
@@ -392,7 +413,7 @@ class _LegacyNodes:
     ``in``) returning :class:`_LegacyNode` wrappers.
     """
 
-    def __init__(self, solver: LegacySolver, backend: "LegacyBackend" | None = None) -> None:
+    def __init__(self, solver: LegacySolver, backend: LegacyBackend | None = None) -> None:
         self._solver = solver
         self._backend = backend
 
@@ -478,7 +499,7 @@ class _LegacyLink:
 
     __slots__ = ("_collection", "_index")
 
-    def __init__(self, collection: "_LegacyLinks", index: int) -> None:
+    def __init__(self, collection: _LegacyLinks, index: int) -> None:
         self._collection = collection
         self._index = index
 
@@ -495,7 +516,7 @@ class _LegacyLink:
         return self._collection.get_type(self._index)
 
     @property
-    def from_node(self) -> "_LegacyNode":
+    def from_node(self) -> _LegacyNode:
         # v1 returns a Node wrapper, not an int index.  Mirror that shape
         # by resolving through the backend's nodes collection.
         backend = self._collection._backend
@@ -504,7 +525,7 @@ class _LegacyLink:
         return backend.nodes[self._collection.get_from_node(self._index)]
 
     @property
-    def to_node(self) -> "_LegacyNode":
+    def to_node(self) -> _LegacyNode:
         backend = self._collection._backend
         if backend is None:
             raise AttributeError("Link.to_node requires a backend-bound Links collection.")
@@ -556,7 +577,7 @@ class _LegacyLinks:
     :class:`_LegacyLink` wrappers.
     """
 
-    def __init__(self, solver: LegacySolver, backend: "LegacyBackend" | None = None) -> None:
+    def __init__(self, solver: LegacySolver, backend: LegacyBackend | None = None) -> None:
         self._solver = solver
         self._backend = backend
 
@@ -648,7 +669,7 @@ class _LegacySubcatchment:
 
     __slots__ = ("_collection", "_index")
 
-    def __init__(self, collection: "_LegacySubcatchments", index: int) -> None:
+    def __init__(self, collection: _LegacySubcatchments, index: int) -> None:
         self._collection = collection
         self._index = index
 
@@ -706,7 +727,7 @@ class _LegacySubcatchments:
     :class:`_LegacySubcatchment` wrappers.
     """
 
-    def __init__(self, solver: LegacySolver, backend: "LegacyBackend" | None = None) -> None:
+    def __init__(self, solver: LegacySolver, backend: LegacyBackend | None = None) -> None:
         self._solver = solver
         self._backend = backend
 
@@ -729,9 +750,7 @@ class _LegacySubcatchments:
             if idx < 0:
                 raise KeyError(f"Subcatchment id {key!r} not found.")
             return _LegacySubcatchment(self, idx)
-        raise TypeError(
-            f"Subcatchment lookup expects int or str, got {type(key).__name__}."
-        )
+        raise TypeError(f"Subcatchment lookup expects int or str, got {type(key).__name__}.")
 
     def __contains__(self, key: object) -> bool:
         if isinstance(key, int):
@@ -796,6 +815,14 @@ class _LegacySubcatchments:
             value,
         )
 
+    def set_snowfall_override(self, index: int, value: float) -> None:
+        self._solver.set_value(
+            SWMMObjects.SUBCATCHMENT,
+            SWMMSubcatchmentProperties.API_SNOWFALL,
+            index,
+            value,
+        )
+
 
 _GAGE_DATA_SOURCE = {0: 0, 1: 1}  # legacy doesn't surface this distinctly
 _GAGE_RAIN_TYPE = {0: 0, 1: 1, 2: 2}
@@ -806,7 +833,7 @@ class _LegacyGage:
 
     __slots__ = ("_collection", "_index")
 
-    def __init__(self, collection: "_LegacyGages", index: int) -> None:
+    def __init__(self, collection: _LegacyGages, index: int) -> None:
         self._collection = collection
         self._index = index
 
@@ -847,7 +874,7 @@ class _LegacyGages:
     Exposes both v0 and v1 surfaces.
     """
 
-    def __init__(self, solver: LegacySolver, backend: "LegacyBackend" | None = None) -> None:
+    def __init__(self, solver: LegacySolver, backend: LegacyBackend | None = None) -> None:
         self._solver = solver
         self._backend = backend
 
@@ -919,7 +946,7 @@ class _LegacyPollutant:
 
     __slots__ = ("_collection", "_index")
 
-    def __init__(self, collection: "_LegacyPollutants", index: int) -> None:
+    def __init__(self, collection: _LegacyPollutants, index: int) -> None:
         self._collection = collection
         self._index = index
 
@@ -952,7 +979,7 @@ class _LegacyPollutants:
     Exposes both v0 and v1 surfaces.
     """
 
-    def __init__(self, solver: LegacySolver, backend: "LegacyBackend" | None = None) -> None:
+    def __init__(self, solver: LegacySolver, backend: LegacyBackend | None = None) -> None:
         self._solver = solver
         self._backend = backend
 
@@ -975,9 +1002,7 @@ class _LegacyPollutants:
             if idx < 0:
                 raise KeyError(f"Pollutant id {key!r} not found.")
             return _LegacyPollutant(self, idx)
-        raise TypeError(
-            f"Pollutant lookup expects int or str, got {type(key).__name__}."
-        )
+        raise TypeError(f"Pollutant lookup expects int or str, got {type(key).__name__}.")
 
     def __contains__(self, key: object) -> bool:
         if isinstance(key, int):
@@ -1088,6 +1113,12 @@ class _LegacyForcing:
     ) -> None:
         idx = self._resolve_index(self._subcatchments, target)
         self._subcatchments.set_rainfall_override(idx, value)
+
+    def subcatchment_snowfall(
+        self, target: Any, value: float, mode: int = 0, persist: int = 0
+    ) -> None:
+        idx = self._resolve_index(self._subcatchments, target)
+        self._subcatchments.set_snowfall_override(idx, value)
 
     def gage_rainfall(self, target: Any, value: float, mode: int = 0, persist: int = 0) -> None:
         idx = self._resolve_index(self._gages, target)

@@ -136,13 +136,10 @@ def _check_indicator_args(indicator: str, provided: dict[str, Any]) -> None:
             f"[{ErrorCode.VALIDATION_ERROR}] Unknown indicator '{indicator}'. "
             f"Valid indicators: {', '.join(sorted(_INDICATOR_REQUIREMENTS))}."
         )
-    missing = [
-        arg for arg in _INDICATOR_REQUIREMENTS[indicator] if provided.get(arg) is None
-    ]
+    missing = [arg for arg in _INDICATOR_REQUIREMENTS[indicator] if provided.get(arg) is None]
     if missing:
         raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] Indicator '{indicator}' requires "
-            f"{', '.join(missing)}."
+            f"[{ErrorCode.VALIDATION_ERROR}] Indicator '{indicator}' requires {', '.join(missing)}."
         )
 
 
@@ -182,9 +179,7 @@ def _compute_indicator(
         return float(scoring.spread(matrix))
     # r2_indicator
     return float(
-        scoring.r2_indicator(
-            matrix, _as_matrix("weights", weights), np.asarray(reference_point)
-        )
+        scoring.r2_indicator(matrix, _as_matrix("weights", weights), np.asarray(reference_point))
     )
 
 
@@ -213,9 +208,7 @@ async def pareto_filter(
     from openswmm_gymnasium.scoring import pareto_front
 
     filtered = await asyncio.to_thread(pareto_front, matrix)
-    indices = [
-        i for i, row in enumerate(matrix) if any(np.allclose(row, f) for f in filtered)
-    ]
+    indices = [i for i, row in enumerate(matrix) if any(np.allclose(row, f) for f in filtered)]
     result = {
         "input_count": int(matrix.shape[0]),
         "front": json_safe(filtered),
@@ -362,9 +355,7 @@ def _pick_evaluation(results: dict[str, Any], output_dir: str, evaluation: int |
     if evaluation == "best":
         record = results.get("best")
         if record is None:
-            raise ToolError(
-                f"[{ErrorCode.ELEMENT_NOT_FOUND}] Job has no evaluations."
-            )
+            raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Job has no evaluations.")
         return record
     if not isinstance(evaluation, int):
         raise ToolError(
@@ -377,10 +368,7 @@ def _pick_evaluation(results: dict[str, Any], output_dir: str, evaluation: int |
             record = json.loads(line)
             if record.get("evaluation") == evaluation:
                 return record
-    raise ToolError(
-        f"[{ErrorCode.ELEMENT_NOT_FOUND}] No evaluation #{evaluation} in "
-        f"{log_path}."
-    )
+    raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] No evaluation #{evaluation} in {log_path}.")
 
 
 def _apply_market_policy(
@@ -552,9 +540,7 @@ async def apply_design(
         links = session.links
         nodes = session.nodes
         for spec, dim in zip(env_config.design_factories, dims):
-            values = np.clip(
-                np.asarray(decisions[dim.key], dtype=np.float64), dim.low, dim.high
-            )
+            values = np.clip(np.asarray(decisions[dim.key], dtype=np.float64), dim.low, dim.high)
             ids = spec.params.get("link_ids") or spec.params.get("node_ids") or []
             for element_id, value in zip(ids, values):
                 value = float(value)
@@ -581,9 +567,7 @@ async def apply_design(
                             f"'{element_id}' not found in session '{session_id}'."
                         )
                     nodes[idx].max_depth = value
-                applied.append(
-                    {"kind": spec.kind, "element_id": element_id, "value": value}
-                )
+                applied.append({"kind": spec.kind, "element_id": element_id, "value": value})
 
     await asyncio.to_thread(_apply_all)
     return {

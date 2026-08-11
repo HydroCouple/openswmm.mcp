@@ -146,7 +146,6 @@ async def _get_inflows_accessor(ctx: Context, session_id: str) -> tuple[SimSessi
 async def _resolve_node_idx(nodes: Any, node_id: str | int) -> int:
     """Translate a string node ID to integer index; pass through ints."""
     return await resolve_index(nodes, node_id, "Node")
-    return idx
 
 
 # ===========================================================================
@@ -214,8 +213,16 @@ async def get_external(ctx: Context, session_id: str = "default", entry_index: i
     baseline, and baseline pattern.
     """
     _, inflows, _ = await _get_inflows_accessor(ctx, session_id)
-    (node_idx, constituent, ts_name, inflow_type, m_factor, s_factor,
-     baseline, pattern) = await asyncio.to_thread(inflows.get_external, entry_index)
+    (
+        node_idx,
+        constituent,
+        ts_name,
+        inflow_type,
+        m_factor,
+        s_factor,
+        baseline,
+        pattern,
+    ) = await asyncio.to_thread(inflows.get_external, entry_index)
     return {
         "session_id": session_id,
         "entry_index": entry_index,
@@ -339,8 +346,15 @@ async def get_dwf(ctx: Context, session_id: str = "default", entry_index: int = 
     and the four pattern IDs (monthly / daily / hourly / weekend).
     """
     _, inflows, _ = await _get_inflows_accessor(ctx, session_id)
-    (node_idx, constituent, avg_value, monthly_pattern, daily_pattern,
-     hourly_pattern, weekend_pattern) = await asyncio.to_thread(inflows.get_dwf, entry_index)
+    (
+        node_idx,
+        constituent,
+        avg_value,
+        monthly_pattern,
+        daily_pattern,
+        hourly_pattern,
+        weekend_pattern,
+    ) = await asyncio.to_thread(inflows.get_dwf, entry_index)
     return {
         "session_id": session_id,
         "entry_index": entry_index,

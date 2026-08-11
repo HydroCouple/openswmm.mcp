@@ -63,9 +63,7 @@ _ENV_EXAMPLES: dict[str, dict[str, Any]] = {
     "rtc": {
         "env_type": "rtc",
         "inp_path": "model.inp",
-        "runtime_factories": [
-            {"kind": "orifice_setting", "params": {"link_ids": ["Or1"]}}
-        ],
+        "runtime_factories": [{"kind": "orifice_setting", "params": {"link_ids": ["Or1"]}}],
         "observations": {"node_depths": ["J1"], "link_flows": ["Or1"]},
         "reward_terms": [{"kind": "flooding_volume", "params": {}}],
     },
@@ -152,7 +150,7 @@ def _parse_config(config: dict[str, Any]) -> EnvConfig:
             hint = (
                 "'observations' is a typed object: each key must be one of "
                 f"{list(OBSERVATION_FEATURES)} mapping to a list of element IDs "
-                "(e.g. {\"node_depths\": [\"J1\"]}), not the IDs directly. " + hint
+                '(e.g. {"node_depths": ["J1"]}), not the IDs directly. ' + hint
             )
         raise ToolError(
             f"[{ErrorCode.VALIDATION_ERROR}] Invalid environment config: {exc}. {hint}"

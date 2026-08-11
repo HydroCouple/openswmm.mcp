@@ -41,31 +41,35 @@ logger = logging.getLogger(__name__)
 
 _HAS_AUTH_EXTRAS = False
 
+# The functional providers below are what ``create_auth`` actually builds, so
+# their presence -- not the legacy ``BearerAuthProvider`` symbol, which fastmcp
+# 3.x removed -- determines whether the auth extras are installed.
 try:
-    from fastmcp.server.auth import (
-        BearerAuthProvider as _BearerAuthProvider,  # type: ignore[import-untyped]
-    )
+    from fastmcp.server.auth import JWTVerifier as _JWTVerifier  # type: ignore[import-untyped]
 
     _HAS_AUTH_EXTRAS = True
 except ImportError:
-    _BearerAuthProvider = None  # type: ignore[assignment,misc]
-
-try:
-    from fastmcp.server.auth import OAuthProvider as _OAuthProvider  # type: ignore[import-untyped]
-except ImportError:
-    _OAuthProvider = None  # type: ignore[assignment,misc]
-
-try:
-    from fastmcp.server.auth import JWTVerifier as _JWTVerifier  # type: ignore[import-untyped]
-except ImportError:
-    # Fall back to BearerAuthProvider with JWKS config if JWTVerifier is not
-    # exposed as a standalone class (varies across fastmcp versions).
-    _JWTVerifier = _BearerAuthProvider  # type: ignore[assignment,misc]
+    _JWTVerifier = None  # type: ignore[assignment,misc]
 
 try:
     from fastmcp.server.auth import MultiAuth as _MultiAuth  # type: ignore[import-untyped]
 except ImportError:
     _MultiAuth = None  # type: ignore[assignment,misc]
+
+# Legacy alias: pre-3.x fastmcp exposed JWT bearer verification as
+# ``BearerAuthProvider``; newer versions renamed it to ``JWTVerifier``.  Keep
+# the name importable and, on old fastmcp lacking ``JWTVerifier``, fall back to
+# it -- without gating the extras flag on a symbol that may not exist.
+try:
+    from fastmcp.server.auth import (
+        BearerAuthProvider as _BearerAuthProvider,  # type: ignore[import-untyped]
+    )
+
+    if _JWTVerifier is None:
+        _JWTVerifier = _BearerAuthProvider  # type: ignore[assignment,misc]
+    _HAS_AUTH_EXTRAS = True
+except ImportError:
+    _BearerAuthProvider = _JWTVerifier  # type: ignore[assignment,misc]
 
 
 # ---------------------------------------------------------------------------
@@ -109,37 +113,44 @@ def create_auth(settings: ServerSettings) -> Any | None:
     jwt_provider: Any | None = None
     oauth_provider: Any | None = None
 
-    # --- JWT verification via JWKS endpoint ---
+    # --- JWT verification via an explicit JWKS endpoint ---
     if settings.jwt_jwks_url:
         _ensure_auth_extras("JWT")
-        logger.info("Configuring JWT verification (jwks_url=%s)", settings.jwt_jwks_url)
+        logger.info("Configuring JWT verification (jwks_uri=%s)", settings.jwt_jwks_url)
         jwt_provider = _JWTVerifier(  # type: ignore[misc]
-            jwks_url=settings.jwt_jwks_url,
+            jwks_uri=settings.jwt_jwks_url,
             audience=settings.oauth_audience,
         )
 
-    # --- OAuth 2.0 / OIDC provider ---
+    # --- OIDC issuer: validate JWTs against the issuer's JWKS ---
+    # fastmcp 3.x's OAuthProvider is a full OAuth *server* base; validating
+    # bearer tokens minted by an external issuer is a JWTVerifier keyed on that
+    # issuer's JWKS.  fastmcp does not perform OIDC discovery, so derive the
+    # conventional JWKS path (set OPENSWMM_MCP_JWT_JWKS_URL explicitly when the
+    # issuer publishes its keys elsewhere).
     if settings.oauth_issuer:
         _ensure_auth_extras("OAuth")
-        logger.info("Configuring OAuth provider (issuer=%s)", settings.oauth_issuer)
-        oauth_provider = _OAuthProvider(  # type: ignore[misc]
+        jwks_uri = f"{settings.oauth_issuer.rstrip('/')}/.well-known/jwks.json"
+        logger.info("Configuring OIDC verification (issuer=%s)", settings.oauth_issuer)
+        oauth_provider = _JWTVerifier(  # type: ignore[misc]
+            jwks_uri=jwks_uri,
             issuer=settings.oauth_issuer,
             audience=settings.oauth_audience,
         )
 
-    # --- Combine providers when both are configured ---
+    # --- Combine verifiers when both are configured ---
     if jwt_provider and oauth_provider:
         _ensure_auth_extras("MultiAuth")
         if _MultiAuth is None:
             # fastmcp version does not expose MultiAuth; fall back to the
-            # OAuth provider alone and log a warning.
+            # issuer verifier alone and log a warning.
             logger.warning(
-                "Both JWT and OAuth are configured, but fastmcp.server.auth.MultiAuth "
-                "is not available in this version.  Falling back to OAuth only."
+                "Both JWT and OIDC are configured, but fastmcp.server.auth.MultiAuth "
+                "is not available in this version.  Falling back to the issuer verifier."
             )
             return oauth_provider
-        logger.info("Combining JWT and OAuth into a MultiAuth provider.")
-        return _MultiAuth(providers=[jwt_provider, oauth_provider])
+        logger.info("Combining JWT and OIDC verifiers into a MultiAuth provider.")
+        return _MultiAuth(verifiers=[jwt_provider, oauth_provider])
 
     # Return whichever single provider is configured, or None.
     provider = jwt_provider or oauth_provider

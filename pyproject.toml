@@ -34,6 +34,9 @@ dependencies = [
 engine = [
     "openswmm",
 ]
+gym = [
+    "openswmm.gymnasium",
+]
 dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21",

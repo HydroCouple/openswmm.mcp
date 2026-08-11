@@ -34,8 +34,14 @@ class TestGetClimateConfig:
         await _opened_session(session_manager, inp_path, "g")
         cfg = await get_climate_config(MockContext(session_manager), session_id="g")
 
-        for key in ("temperature", "evaporation", "wind", "snowmelt",
-                    "areal_depletion", "adjustments"):
+        for key in (
+            "temperature",
+            "evaporation",
+            "wind",
+            "snowmelt",
+            "areal_depletion",
+            "adjustments",
+        ):
             assert key in cfg
         assert len(cfg["evaporation"]["monthly"]) == 12
         assert len(cfg["wind"]["monthly"]) == 12
@@ -59,24 +65,38 @@ class TestSetClimateConfig:
         await _opened_session(session_manager, inp_path, "s")
 
         await set_temperature_config(
-            ctx, session_id="s",
-            latitude=41.5, elevation=200.0, longitude_correction_min=120.0,
+            ctx,
+            session_id="s",
+            latitude=41.5,
+            elevation=200.0,
+            longitude_correction_min=120.0,
         )
         await set_evaporation_config(
-            ctx, session_id="s", method="monthly", monthly=[0.2] * 12, dry_only=True,
+            ctx,
+            session_id="s",
+            method="monthly",
+            monthly=[0.2] * 12,
+            dry_only=True,
         )
         await set_windspeed_config(ctx, session_id="s", source="monthly", monthly=[3.0] * 12)
         await set_snowmelt_config(
-            ctx, session_id="s", divide_temp=33.0, ati_weight=0.3, neg_melt_ratio=0.4,
+            ctx,
+            session_id="s",
+            divide_temp=33.0,
+            ati_weight=0.3,
+            neg_melt_ratio=0.4,
         )
         await set_areal_depletion(
-            ctx, session_id="s",
-            impervious=[1, .9, .8, .7, .6, .5, .4, .3, .2, .1],
+            ctx,
+            session_id="s",
+            impervious=[1, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1],
         )
         # conductivity 0.0 must clamp to 1.0 (legacy behaviour)
         await set_adjustments(
-            ctx, session_id="s",
-            temperature=[1.0] * 12, conductivity=[2.0, 0.0] + [1.0] * 10,
+            ctx,
+            session_id="s",
+            temperature=[1.0] * 12,
+            conductivity=[2.0, 0.0] + [1.0] * 10,
         )
 
         cfg = await get_climate_config(ctx, session_id="s")
@@ -139,5 +159,7 @@ class TestLifecycle:
 
         with pytest.raises(ToolError):
             await set_snowmelt_config(
-                MockContext(session_manager), session_id="li", divide_temp=30.0,
+                MockContext(session_manager),
+                session_id="li",
+                divide_temp=30.0,
             )

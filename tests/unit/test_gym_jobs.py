@@ -190,9 +190,7 @@ def test_job_manager_unknown_job_and_algorithm(job_manager):
     with pytest.raises(ToolError, match="ELEMENT_NOT_FOUND"):
         job_manager.cancel("nope")
     with pytest.raises(ToolError, match="Unknown algorithm"):
-        job_manager.start(
-            _cip_config("m.inp"), OptimizationConfig(algorithm="simulated_annealing")
-        )
+        job_manager.start(_cip_config("m.inp"), OptimizationConfig(algorithm="simulated_annealing"))
     assert job_manager.list() == []
 
 
@@ -394,12 +392,8 @@ async def test_decode_policy_rejects_non_control_curve(ctx, output_dir, job_mana
 def test_optimization_config_resolved_includes_only_relevant_fields():
     # Issue #9: resolved() echoes the applied settings; algorithm-specific
     # fields appear only when they actually apply.
-    nsga2 = OptimizationConfig(
-        algorithm="nsga2", budget=600, population_size=24, seed=7
-    ).resolved()
-    assert nsga2 == {
-        "algorithm": "nsga2", "budget": 600, "seed": 7, "population_size": 24
-    }
+    nsga2 = OptimizationConfig(algorithm="nsga2", budget=600, population_size=24, seed=7).resolved()
+    assert nsga2 == {"algorithm": "nsga2", "budget": 600, "seed": 7, "population_size": 24}
     rnd = OptimizationConfig().resolved()
     assert rnd == {"algorithm": "random_search", "budget": 50, "seed": None}
     assert "population_size" not in rnd
@@ -423,9 +417,7 @@ async def test_start_optimization_accepts_json_string_and_echoes_resolved(
         optimization='{"algorithm": "random_search", "budget": 4, "seed": 3}',
         output_dir=str(output_dir / "json_str_opt"),
     )
-    assert snap["optimization"] == {
-        "algorithm": "random_search", "budget": 4, "seed": 3
-    }
+    assert snap["optimization"] == {"algorithm": "random_search", "budget": 4, "seed": 3}
     final = await _wait_for(job_manager, snap["job_id"], "done", "failed")
     assert final["state"] == "done", final["error"]
     assert final["optimization"]["budget"] == 4

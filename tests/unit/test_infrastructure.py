@@ -584,9 +584,7 @@ class TestLidLayerRoundTrip:
         )
 
         ctx = await _create_building_session(session_manager, "infra_lid_rt_pv")
-        await add_lid(
-            ctx, session_id="infra_lid_rt_pv", lid_id="L_PV", lid_type="perm_pavement"
-        )
+        await add_lid(ctx, session_id="infra_lid_rt_pv", lid_id="L_PV", lid_type="perm_pavement")
         await set_lid_pavement(
             ctx,
             session_id="infra_lid_rt_pv",

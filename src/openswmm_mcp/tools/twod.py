@@ -282,18 +282,14 @@ async def set_triangle_initial_conditions(
     """
     # wraps: swmm_2d_set_triangle_init_depth swmm_2d_set_triangle_init_velocity
     if depth is None and u is None and v is None:
-        raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] Provide depth and/or both u and v."
-        )
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] Provide depth and/or both u and v.")
     if (u is None) != (v is None):
         raise ToolError(
             f"[{ErrorCode.VALIDATION_ERROR}] Initial velocity needs both u and v "
             f"(got u={u}, v={v})."
         )
     if depth is not None and depth < 0.0:
-        raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] depth must be >= 0 (got {depth})."
-        )
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] depth must be >= 0 (got {depth}).")
     _, surface = await _get_surface(ctx, session_id)
 
     def _apply() -> None:
@@ -983,9 +979,7 @@ async def set_solver_params(
     exist.
     """
     if dry_depth is None:
-        raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] Provide dry_depth."
-        )
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] Provide dry_depth.")
     _, surface = await _get_surface(ctx, session_id)
 
     def _apply() -> dict:

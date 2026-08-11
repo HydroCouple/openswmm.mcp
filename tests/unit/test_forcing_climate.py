@@ -12,13 +12,12 @@ import pytest
 eng = pytest.importorskip("openswmm.engine")
 if not hasattr(eng.Forcing, "climate_evap_rate"):
     pytest.skip(
-        "openswmm.engine build predates Forcing.climate_evap_rate "
-        "(rebuild the engine wheel)",
+        "openswmm.engine build predates Forcing.climate_evap_rate (rebuild the engine wheel)",
         allow_module_level=True,
     )
 
-from openswmm_mcp.errors import ToolError
-from openswmm_mcp.tools.forcing import (
+from openswmm_mcp.errors import ToolError  # noqa: E402
+from openswmm_mcp.tools.forcing import (  # noqa: E402
     get_climate_evap_rate,
     get_climate_state,
     set_climate_dry_only,
@@ -117,18 +116,14 @@ class TestSetClimateForcing:
 
     async def test_evap_applies(self, session_manager, tmp_inp):
         ctx = await _open_and_run(session_manager, tmp_inp)
-        out = await set_climate_forcing(
-            ctx, session_id="default", variable="evap", value=0.25
-        )
+        out = await set_climate_forcing(ctx, session_id="default", variable="evap", value=0.25)
         assert out["status"] == "applied"
         assert out["variable"] == "evap"
 
     async def test_invalid_variable_rejected(self, session_manager, tmp_inp):
         ctx = await _open_and_run(session_manager, tmp_inp)
         with pytest.raises(ToolError):
-            await set_climate_forcing(
-                ctx, session_id="default", variable="humidity", value=1.0
-            )
+            await set_climate_forcing(ctx, session_id="default", variable="humidity", value=1.0)
 
     async def test_requires_running_state(self, session_manager, tmp_inp):
         from openswmm_mcp.tools.lifecycle import open_model

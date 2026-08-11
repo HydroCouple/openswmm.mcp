@@ -232,9 +232,7 @@ class TestTreatmentValidation:
 
         await _initialized(fake_ctx, inp_path, "tv_ro")
         before = await treatment_get(fake_ctx, session_id="tv_ro", node_id="J2", pollutant_id="TSS")
-        await treatment_validate_expression(
-            fake_ctx, session_id="tv_ro", expression="C = 0.5 * C"
-        )
+        await treatment_validate_expression(fake_ctx, session_id="tv_ro", expression="C = 0.5 * C")
         after = await treatment_get(fake_ctx, session_id="tv_ro", node_id="J2", pollutant_id="TSS")
         assert after["expression"] == before["expression"]
 

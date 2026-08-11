@@ -153,9 +153,7 @@ async def test_score_front_matches_direct_calls(output_dir):
         "igd_plus": scoring.igd_plus(front, np.asarray(ref_front)),
         "epsilon_indicator": scoring.epsilon_indicator(front, np.asarray(ref_front)),
         "spread": scoring.spread(front),
-        "r2_indicator": scoring.r2_indicator(
-            front, np.asarray(weights), np.asarray(_REF_POINT)
-        ),
+        "r2_indicator": scoring.r2_indicator(front, np.asarray(weights), np.asarray(_REF_POINT)),
     }
     assert result["front_size"] == 3
     for name, value in expected.items():

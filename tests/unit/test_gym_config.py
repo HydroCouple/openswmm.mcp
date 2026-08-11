@@ -82,6 +82,8 @@ def test_observation_features_are_real_observation_spec_fields():
     # non-element-ID flags such as include_clock).
     assert set(OBSERVATION_FEATURES) <= set(ObservationSpec.model_fields)
     assert "node_depths" in OBSERVATION_FEATURES and "link_flows" in OBSERVATION_FEATURES
+
+
 _OUTPUT_ROOT = Path(__file__).parents[1] / "_output" / "gym_config"
 
 
@@ -187,9 +189,7 @@ def test_bad_kind_params_rejected():
                         "params": {"link_ids": ["C1"], "low": 0.5, "high": 2.0},
                     }
                 ],
-                "runtime_factories": [
-                    {"kind": "orifice_setting", "params": {"link_ids": ["C2"]}}
-                ],
+                "runtime_factories": [{"kind": "orifice_setting", "params": {"link_ids": ["C2"]}}],
             },
             "does not accept runtime_factories",
         ),
@@ -220,9 +220,7 @@ def test_bad_kind_params_rejected():
                 "policy_factory": {
                     "kind": "control_curve",
                     "params": {
-                        "assets": [
-                            {"link_id": "Or1", "obs_node": "J1", "x_knots": [0.0, 1.0]}
-                        ]
+                        "assets": [{"link_id": "Or1", "obs_node": "J1", "x_knots": [0.0, 1.0]}]
                     },
                 }
             },
@@ -235,9 +233,7 @@ def test_bad_kind_params_rejected():
                 "policy_factory": {
                     "kind": "control_curve",
                     "params": {
-                        "assets": [
-                            {"link_id": "Or1", "obs_node": "J1", "x_knots": [0.0, 1.0]}
-                        ]
+                        "assets": [{"link_id": "Or1", "obs_node": "J1", "x_knots": [0.0, 1.0]}]
                     },
                 },
                 "design_factories": [
@@ -255,9 +251,7 @@ def test_bad_kind_params_rejected():
                 "policy_factory": {
                     "kind": "control_curve",
                     "params": {
-                        "assets": [
-                            {"link_id": "Or1", "obs_node": "J1", "x_knots": [0.0, 1.0]}
-                        ]
+                        "assets": [{"link_id": "Or1", "obs_node": "J1", "x_knots": [0.0, 1.0]}]
                     },
                 }
             },
@@ -304,9 +298,7 @@ def test_control_curve_config_valid_and_round_trips():
 
 def test_control_interval_must_be_positive():
     with pytest.raises(ValidationError, match="control_interval_steps"):
-        EnvConfig(
-            env_type="rtc", inp_path="m.inp", observations=_obs(), control_interval_steps=0
-        )
+        EnvConfig(env_type="rtc", inp_path="m.inp", observations=_obs(), control_interval_steps=0)
 
 
 # ---------------------------------------------------------------------------
@@ -336,9 +328,7 @@ def test_build_env_rtc_reset_step_close(gym_inp_path):
         terminated = truncated = False
         steps = 0
         while not (terminated or truncated):
-            obs, reward, terminated, truncated, info = env.step(
-                {"design": {}, "runtime": {}}
-            )
+            obs, reward, terminated, truncated, info = env.step({"design": {}, "runtime": {}})
             steps += 1
             assert steps <= 5
         assert truncated  # max_episode_steps=5 << full 6 h simulation

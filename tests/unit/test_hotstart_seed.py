@@ -47,6 +47,4 @@ class TestSeedHotstartState:
     async def test_nonexistent_file_raises(self, fake_ctx, inp_path):
         await _open_and_run(fake_ctx, inp_path)
         with pytest.raises(ToolError):
-            await seed_hotstart_state(
-                fake_ctx, session_id="default", path="/no/such/file.hsf"
-            )
+            await seed_hotstart_state(fake_ctx, session_id="default", path="/no/such/file.hsf")

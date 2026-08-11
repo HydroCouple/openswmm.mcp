@@ -24,18 +24,29 @@
 
 ## Features
 
-The server exposes **45 tools** organized across 8 namespaced sub-servers, along with **9 URI-based resources**, **7 prompt templates**, and full authentication support.
+The server exposes **358 tools** organized across 20 namespaced sub-servers, along with **9 URI-based resources**, **7 prompt templates**, and full authentication support.
 
 ### Tool Namespaces
 
-- **lifecycle\_\***: Open models, run or step simulations, inspect session state, manage multiple concurrent sessions
+- **lifecycle\_\***: Open models, run or step simulations, inspect session state, manage event windows and runoff-interface files, manage multiple concurrent sessions
 - **query\_\***: Read properties and runtime state for nodes, links, subcatchments, and gages; search elements by regex pattern
-- **forcing\_\***: Apply runtime forcing overrides (rainfall, inflows, boundary conditions), set link controls, add control rules
-- **analysis\_\***: Retrieve post-simulation statistics, mass balance, time series, flooding summaries, capacity summaries, scenario comparison, and CSV/JSON export
+- **model\_\***: Project-level metadata — title, options, CRS, unit system, scalar user flags plus user-flag schema / per-object values, plugins, file-section paths and typed external-file path slots
 - **building\_\***: Construct models from scratch — add nodes, links, subcatchments, gages, time series, curves; pop (undo) the last added element; set options; validate and write `.inp` files
 - **editing\_\***: Delete model objects with cascade analysis, preview impacts non-destructively, and convert nodes or links to different types in place
-- **hotstart\_\***: Save and load simulation state checkpoints; clone sessions for scenario branching
+- **nodes\_\*** / **links\_\*** / **subcatchments\_\***: Fine-grained per-element accessors — bulk state arrays, configuration setters, per-element statistics
+- **inflows\_\***: External / dry-weather / RDII inflows, unit hydrographs, exponential IA decay
+- **controls\_\***: SWMM control rules — add, list, clear, set link setting / status
+- **forcing\_\***: Apply runtime forcing overrides (rainfall, inflows, PET, boundary conditions), read back the climate evaporation rate, set link controls, add control rules
+- **pollutants\_\*** / **quality\_\***: Pollutant properties, buildup / washoff / treatment kinetics, landuse and street sweeping
+- **tables\_\***: Time series, curves, and patterns with lookup helpers
+- **infrastructure\_\***: Transects, streets, inlets, LID controls and usage
+- **hotstart\_\***: Save and load simulation state checkpoints; seed state; clone sessions for scenario branching
+- **analysis\_\***: Retrieve post-simulation statistics, mass balance, time series, flooding summaries, capacity summaries, scenario comparison, and CSV/JSON export
 - **spatial\_\***: Query and set element coordinates, retrieve water-quality concentrations, assign treatment expressions, add LID controls
+- **geopackage\_\***: GeoPackage I/O — simulations, result series, observed-data comparison
+- **twod\_\***: 2D overland-flow surface — mesh queries, per-triangle state, statistics and mass balance, runtime forcing, solver parameters, edge boundary conditions, edge conveyance
+
+See the [tools guide](docs/user-guide/tools.md) for the per-namespace tool inventory.
 
 ### Additional Capabilities
 
@@ -150,7 +161,9 @@ Claude: [calls hotstart_clone_session] Cloned "default" to "whatif_upsize".
 | Tool | Description |
 |------|-------------|
 | `forcing_set_forcing` | Apply a runtime forcing override to any element variable |
+| `forcing_set_persistent_forcing` | Apply an override that persists across timesteps |
 | `forcing_clear_forcing` | Clear forcing overrides (single element or all) |
+| `forcing_get_climate_evap_rate` | Read back the climate-derived PET rate for caller-side composition |
 | `forcing_set_link_control` | Override a link's control setting (pump speed, orifice opening) |
 | `forcing_add_control_rule` | Add a new control rule in SWMM rule syntax |
 | `forcing_set_rainfall_override` | Convenience shortcut for persistent rainfall override on a gage |
@@ -210,6 +223,21 @@ Claude: [calls hotstart_clone_session] Cloned "default" to "whatif_upsize".
 | `spatial_get_quality` | Retrieve water-quality concentrations |
 | `spatial_set_treatment` | Assign a treatment expression to a node |
 | `spatial_add_lid` | Add a Low Impact Development control to a subcatchment |
+
+### twod (2D Overland-Flow Surface)
+
+| Tool | Description |
+|------|-------------|
+| `twod_get_mesh_summary` | Mesh activity flag, vertex/triangle counts, boundary edges, 1D couplings |
+| `twod_get_mesh_geometry` | Windowed triangle geometry: vertices, area, centroid, Manning's n, neighbours |
+| `twod_get_state` / `twod_get_state_bulk` | Per-triangle depth/head/rainfall/coupling state, single or summarised |
+| `twod_get_stats` | Per-triangle max depth/velocity/continuity-residual hot spots |
+| `twod_get_mass_balance` | Global 2D mass-balance terms and continuity error |
+| `twod_force_rainfall` / `twod_force_coupling_flux` / `twod_force_clear` | Runtime 2D forcing overrides |
+| `twod_get_edge_bc` / `twod_set_edge_bc` | Edge boundary conditions (wall, normal flow, stage, flow, rating curve) |
+| `twod_get_edge_conveyance` / `twod_set_edge_conveyance` / `twod_reset_edge_conveyance` | Per-edge conveyance factors (berms / barriers) |
+
+The full twod inventory (28 tools, including `twod_get_coupling_map`, `twod_get_totals`, `twod_set_vertex_z`, and `twod_get_solver_params` / `twod_set_solver_params`) is in the [tools guide](docs/user-guide/tools.md).
 
 ## Available Resources
 

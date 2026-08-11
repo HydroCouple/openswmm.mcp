@@ -200,9 +200,7 @@ class TestSetGageCoord:
         assert result["x"] == 123.0
         assert result["y"] == 456.0
 
-        allc = await get_all_coordinates(
-            fake_ctx, session_id="gage_coord", element_type="gage"
-        )
+        allc = await get_all_coordinates(fake_ctx, session_id="gage_coord", element_type="gage")
         rec = next(r for r in allc["coordinates"] if r["id"] == reference_model.GAGE_ID)
         assert rec["x"] == pytest.approx(123.0)
         assert rec["y"] == pytest.approx(456.0)
@@ -231,15 +229,11 @@ class TestSetNodeCoordsBulk:
         await _open(fake_ctx, inp_path, "bulk_coord")
         n = reference_model.NODE_COUNT
         coords = [[float(i), float(i) + 0.5] for i in range(n)]
-        result = await set_node_coords_bulk(
-            fake_ctx, session_id="bulk_coord", coordinates=coords
-        )
+        result = await set_node_coords_bulk(fake_ctx, session_id="bulk_coord", coordinates=coords)
         assert result["status"] == "updated"
         assert result["node_count"] == n
 
-        allc = await get_all_coordinates(
-            fake_ctx, session_id="bulk_coord", element_type="node"
-        )
+        allc = await get_all_coordinates(fake_ctx, session_id="bulk_coord", element_type="node")
         assert allc["count"] == n
         # get_all_coordinates returns records in node-index order.
         assert allc["coordinates"][0]["x"] == pytest.approx(0.0)

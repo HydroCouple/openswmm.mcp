@@ -51,12 +51,19 @@ class SessionMeta:
 
     __slots__ = (
         "_session",
-        "_n_nodes", "_n_links", "_n_subcatchments", "_n_pollutants", "_n_gages",
-        "_node_ids", "_link_ids", "_subcatch_ids",
-        "_pollutant_ids", "_gage_ids",
+        "_n_nodes",
+        "_n_links",
+        "_n_subcatchments",
+        "_n_pollutants",
+        "_n_gages",
+        "_node_ids",
+        "_link_ids",
+        "_subcatch_ids",
+        "_pollutant_ids",
+        "_gage_ids",
     )
 
-    def __init__(self, session: "SimSession") -> None:
+    def __init__(self, session: SimSession) -> None:
         # Keep a back-reference for lazy fetch; do NOT materialise anything
         # here so that an inexpensive ``session.meta`` access in a tool
         # that never reads from it costs ~zero.
@@ -109,7 +116,10 @@ class SessionMeta:
     # -- id arrays -----------------------------------------------------------
 
     def _fetch_ids(
-        self, proxy: Any, count: int, bulk_attr: str = "get_ids_bulk",
+        self,
+        proxy: Any,
+        count: int,
+        bulk_attr: str = "get_ids_bulk",
     ) -> list[str]:
         """Single-pass id fetch.
 
@@ -145,8 +155,7 @@ class SessionMeta:
     @property
     def subcatch_ids(self) -> list[str]:
         if self._subcatch_ids is None:
-            self._subcatch_ids = self._fetch_ids(
-                self._session.subcatchments, self.n_subcatchments)
+            self._subcatch_ids = self._fetch_ids(self._session.subcatchments, self.n_subcatchments)
         return self._subcatch_ids
 
     @property
@@ -157,8 +166,7 @@ class SessionMeta:
                 self._pollutant_ids = []
             else:
                 # pollutants binding may not have get_ids_bulk yet — fall back.
-                self._pollutant_ids = self._fetch_ids(
-                    pollutants, self.n_pollutants)
+                self._pollutant_ids = self._fetch_ids(pollutants, self.n_pollutants)
         return self._pollutant_ids
 
     @property
@@ -276,7 +284,7 @@ class SimSession:
     # Phase 3 bulk getters.
 
     @property
-    def meta(self) -> "SessionMeta":
+    def meta(self) -> SessionMeta:
         """Lazy cache of static (topology + pollutant) metadata.
 
         Computed on first access from the backend's bulk getters.  Safe to

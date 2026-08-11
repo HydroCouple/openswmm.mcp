@@ -69,10 +69,10 @@ def _resolve_forcing_mode(mode: str) -> int:
 
 # v1 ForcingTarget enum codes — used by ``Forcing.clear(target, key)``.
 _FORCING_TARGET_CODES: dict[str, int] = {
-    "node": 0,        # ForcingTarget.NODE
-    "link": 1,        # ForcingTarget.LINK
+    "node": 0,  # ForcingTarget.NODE
+    "link": 1,  # ForcingTarget.LINK
     "subcatchment": 2,  # ForcingTarget.SUBCATCH
-    "gage": 3,        # ForcingTarget.GAGE
+    "gage": 3,  # ForcingTarget.GAGE
 }
 
 
@@ -126,7 +126,7 @@ async def set_forcing(
 
     # Provenance for the C↔Python↔MCP parity matrix (build_matrix_provenance.py):
     # this dispatcher aggregates the per-element forcing C entry points.
-    # wraps: swmm_forcing_node_lat_inflow swmm_forcing_node_head_boundary swmm_forcing_node_quality swmm_forcing_link_flow swmm_forcing_link_setting swmm_forcing_subcatch_rainfall swmm_forcing_subcatch_evap swmm_forcing_subcatch_snowfall swmm_forcing_gage_rainfall
+    # wraps: swmm_forcing_node_lat_inflow swmm_forcing_node_head_boundary swmm_forcing_node_quality swmm_forcing_link_flow swmm_forcing_link_setting swmm_forcing_subcatch_rainfall swmm_forcing_subcatch_evap swmm_forcing_subcatch_snowfall swmm_forcing_gage_rainfall  # noqa: E501
 
     # Validate target_type
     target_lower = target_type.strip().lower()
@@ -174,15 +174,11 @@ async def set_forcing(
             # node_quality(node, pollutant, mass_rate, *, mode=..., persist=...)
             # — defaults pollutant index to 0.
             await asyncio.to_thread(
-                lambda: method(
-                    element_idx, 0, value_f, mode=forcing_mode, persist=persist_flag
-                )
+                lambda: method(element_idx, 0, value_f, mode=forcing_mode, persist=persist_flag)
             )
         else:
             await asyncio.to_thread(
-                lambda: method(
-                    element_idx, value_f, mode=forcing_mode, persist=persist_flag
-                )
+                lambda: method(element_idx, value_f, mode=forcing_mode, persist=persist_flag)
             )
     except NotImplementedError as exc:
         raise ToolError(
@@ -373,14 +369,10 @@ async def set_climate_forcing(
     value_f = float(value)
 
     try:
-        method = getattr(forcing := session.forcing, method_name)
-        await asyncio.to_thread(
-            lambda: method(value_f, mode=forcing_mode, persist=persist_flag)
-        )
+        method = getattr(session.forcing, method_name)
+        await asyncio.to_thread(lambda: method(value_f, mode=forcing_mode, persist=persist_flag))
     except Exception as exc:
-        raise ToolError(
-            f"[{ErrorCode.ENGINE_ERROR}] Failed to set climate forcing: {exc}"
-        ) from exc
+        raise ToolError(f"[{ErrorCode.ENGINE_ERROR}] Failed to set climate forcing: {exc}") from exc
 
     return {
         "status": "applied",
@@ -420,9 +412,7 @@ async def set_climate_dry_only(
         forcing = session.forcing
         await asyncio.to_thread(lambda: forcing.climate_dry_only(flag_b))
     except Exception as exc:
-        raise ToolError(
-            f"[{ErrorCode.ENGINE_ERROR}] Failed to set dry-only flag: {exc}"
-        ) from exc
+        raise ToolError(f"[{ErrorCode.ENGINE_ERROR}] Failed to set dry-only flag: {exc}") from exc
 
     return {"status": "applied", "session_id": session_id, "dry_only": flag_b}
 

@@ -272,9 +272,7 @@ def run_episode(
                             "env_step": steps,
                             "action": json_safe(action),
                             "reward": reward_j,
-                            "reward_components": json_safe(
-                                info.get("reward_components", {})
-                            ),
+                            "reward_components": json_safe(info.get("reward_components", {})),
                             "elapsed_days": json_safe(info.get("elapsed_days")),
                             "observation": json_safe(obs),
                         }
@@ -357,9 +355,7 @@ class EnvManager:
         """Close envs idle longer than the timeout (internal)."""
         now = time.monotonic()
         for env_id in [
-            eid
-            for eid, h in self._envs.items()
-            if now - h.last_used > self.idle_timeout_s
+            eid for eid, h in self._envs.items() if now - h.last_used > self.idle_timeout_s
         ]:
             handle = self._envs.pop(env_id)
             try:
@@ -427,9 +423,7 @@ class EnvManager:
         with self._registry_lock:
             handle = self._envs.pop(env_id, None)
         if handle is None:
-            raise ToolError(
-                f"[{ErrorCode.SESSION_NOT_FOUND}] No open env '{env_id}'."
-            )
+            raise ToolError(f"[{ErrorCode.SESSION_NOT_FOUND}] No open env '{env_id}'.")
         with handle.lock:
             handle.env.close()
 

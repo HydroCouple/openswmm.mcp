@@ -10,7 +10,6 @@ from __future__ import annotations
 import unittest
 
 from openswmm_mcp.errors import ToolError
-
 from tests.unit._base import EngineToolTestCase, MockContext
 
 

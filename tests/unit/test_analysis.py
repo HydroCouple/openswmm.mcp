@@ -215,7 +215,9 @@ class TestGetMassBalance:
         assert result.engine_kind in ("openswmm", "legacy")
 
     async def test_mass_balance_routing_stats_state_is_explicit(
-        self, session_manager, tmp_inp,
+        self,
+        session_manager,
+        tmp_inp,
     ):
         """``routing_stats`` is either populated (with the field absent
         from ``unsupported_fields``) or it is None (and the field is
@@ -309,7 +311,9 @@ class TestGetFloodingSummary:
         assert result == []
 
     async def test_flooding_summary_matches_scalar_per_node_path(
-        self, session_manager, tmp_inp,
+        self,
+        session_manager,
+        tmp_inp,
     ):
         """Phase 4c regression: the bulk-pulled flooding summary must match
         the scalar per-node path bit-for-bit. We rebuild the expected
@@ -327,13 +331,15 @@ class TestGetFloodingSummary:
             vol = stats.node_vol_flooded_at(i)
             if vol <= 0.0:
                 continue
-            expected.append((
-                nodes.get_id(i),
-                stats.node_max_overflow_at(i),
-                vol,
-                stats.node_time_flooded_at(i),
-                stats.node_max_depth_at(i),
-            ))
+            expected.append(
+                (
+                    nodes.get_id(i),
+                    stats.node_max_overflow_at(i),
+                    vol,
+                    stats.node_time_flooded_at(i),
+                    stats.node_max_depth_at(i),
+                )
+            )
         expected.sort(key=lambda t: t[2], reverse=True)
 
         result = await get_flooding_summary(ctx, session_id="flood_eq")
@@ -396,7 +402,9 @@ class TestGetCapacitySummary:
         assert len(high) <= len(low)
 
     async def test_capacity_summary_matches_scalar_per_link_path(
-        self, session_manager, tmp_inp,
+        self,
+        session_manager,
+        tmp_inp,
     ):
         """Phase 4c regression: bulk path output must equal the scalar
         path output. Only ``max_flow`` currently has a bulk variant; the
@@ -414,18 +422,19 @@ class TestGetCapacitySummary:
             filling = stats.link_max_filling_at(i)
             if filling <= 0.0:
                 continue
-            expected.append((
-                links.get_id(i),
-                filling,
-                stats.link_max_flow_at(i),
-                stats.link_max_velocity_at(i),
-                stats.link_surcharge_time_at(i),
-                stats.link_vol_flow_at(i),
-            ))
+            expected.append(
+                (
+                    links.get_id(i),
+                    filling,
+                    stats.link_max_flow_at(i),
+                    stats.link_max_velocity_at(i),
+                    stats.link_surcharge_time_at(i),
+                    stats.link_vol_flow_at(i),
+                )
+            )
         expected.sort(key=lambda t: t[1], reverse=True)
 
-        result = await get_capacity_summary(ctx, session_id="cap_eq",
-                                              max_filling_threshold=0.0)
+        result = await get_capacity_summary(ctx, session_id="cap_eq", max_filling_threshold=0.0)
         assert len(result) == len(expected)
         for item, exp in zip(result, expected):
             assert item.link_id == exp[0]

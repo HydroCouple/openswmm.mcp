@@ -213,9 +213,7 @@ class TestFindReferences:
 
         ctx = await _opened_session(session_manager, inp_path, "ctl_fr_none")
         await add_rule(ctx, session_id="ctl_fr_none", rule_text=SAMPLE_RULE)
-        result = await find_references(
-            ctx, session_id="ctl_fr_none", object_name="NO_SUCH_OBJECT"
-        )
+        result = await find_references(ctx, session_id="ctl_fr_none", object_name="NO_SUCH_OBJECT")
         assert result["rule_indices"] == []
         assert result["count"] == 0
 

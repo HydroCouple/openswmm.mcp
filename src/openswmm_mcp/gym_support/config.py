@@ -67,9 +67,7 @@ def decode_json_if_str(value: Any) -> Any:
 JsonObject = Annotated[dict[str, Any] | None, BeforeValidator(decode_json_if_str)]
 JsonObjectRequired = Annotated[dict[str, Any], BeforeValidator(decode_json_if_str)]
 JsonArray = Annotated[list[Any] | None, BeforeValidator(decode_json_if_str)]
-JsonFloatMatrix = Annotated[
-    list[list[float]] | None, BeforeValidator(decode_json_if_str)
-]
+JsonFloatMatrix = Annotated[list[list[float]] | None, BeforeValidator(decode_json_if_str)]
 JsonFloatVector = Annotated[list[float] | None, BeforeValidator(decode_json_if_str)]
 JsonStrList = Annotated[list[str] | None, BeforeValidator(decode_json_if_str)]
 JsonStrListRequired = Annotated[list[str], BeforeValidator(decode_json_if_str)]
@@ -109,6 +107,7 @@ def coerce_json_param(value: Any, param: str) -> Any:
             f"that is not valid JSON: {exc}. Pass an object/array (or a JSON "
             "string that encodes one)."
         ) from exc
+
 
 # Observation feature name -> ObservationBuilder method name.
 _OBS_METHODS: dict[str, str] = {
@@ -187,9 +186,7 @@ class ObservationSpec(BaseModel):
         @return: C{True} when every list is empty and the clock is off.
         @rtype: bool
         """
-        return not self.include_clock and not any(
-            getattr(self, field) for field in _OBS_METHODS
-        )
+        return not self.include_clock and not any(getattr(self, field) for field in _OBS_METHODS)
 
     def build(self) -> Any:
         """Construct the C{ObservationBuilder} this spec describes.
@@ -346,9 +343,7 @@ class EnvConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    env_type: Literal[
-        "rtc", "cip", "joint", "mo_rtc", "market", "schedule", "control_curve"
-    ]
+    env_type: Literal["rtc", "cip", "joint", "mo_rtc", "market", "schedule", "control_curve"]
     inp_path: str
     runtime_factories: list[RuntimeFactorySpec] = []
     design_factories: list[DesignFactorySpec] = []
@@ -417,18 +412,14 @@ class EnvConfig(BaseModel):
             if self.policy_factory is None:
                 raise ValueError("env_type 'control_curve' requires a policy_factory")
             if self.control_interval_seconds is None:
-                raise ValueError(
-                    "env_type 'control_curve' requires control_interval_seconds"
-                )
+                raise ValueError("env_type 'control_curve' requires control_interval_seconds")
             if self.design_factories or self.runtime_factories:
                 raise ValueError(
                     "env_type 'control_curve' does not accept design_factories or "
                     "runtime_factories; the decision vector is the control policy"
                 )
         elif self.policy_factory is not None:
-            raise ValueError(
-                "policy_factory is only valid for env_type 'control_curve'"
-            )
+            raise ValueError("policy_factory is only valid for env_type 'control_curve'")
 
         if self.env_type in ("cip", "joint") and not self.design_factories:
             raise ValueError(f"env_type '{self.env_type}' requires design_factories")
@@ -439,17 +430,14 @@ class EnvConfig(BaseModel):
             )
         if self.env_type == "cip" and self.runtime_factories:
             raise ValueError(
-                "env_type 'cip' does not accept runtime_factories; "
-                "use 'joint' for combined CIP+RTC"
+                "env_type 'cip' does not accept runtime_factories; use 'joint' for combined CIP+RTC"
             )
 
         if self.env_type == "mo_rtc":
             if not self.reward_terms:
                 raise ValueError("env_type 'mo_rtc' requires at least one reward term")
             if self.ideal_point is None or self.reference_point is None:
-                raise ValueError(
-                    "env_type 'mo_rtc' requires both ideal_point and reference_point"
-                )
+                raise ValueError("env_type 'mo_rtc' requires both ideal_point and reference_point")
             n = len(self.reward_terms)
             if len(self.ideal_point) != n or len(self.reference_point) != n:
                 raise ValueError(
@@ -457,9 +445,7 @@ class EnvConfig(BaseModel):
                     f"per reward term ({n})"
                 )
         elif self.ideal_point is not None or self.reference_point is not None:
-            raise ValueError(
-                "ideal_point/reference_point are only valid for env_type 'mo_rtc'"
-            )
+            raise ValueError("ideal_point/reference_point are only valid for env_type 'mo_rtc'")
         return self
 
 
@@ -558,7 +544,7 @@ def build_env(config: EnvConfig) -> Any:
             from openswmm_gymnasium.spaces import SchedulePolicySpace
 
             structures = list(config.structure_ids)
-            lo, hi = (config.schedule_bounds or [0.0, 1.0])
+            lo, hi = config.schedule_bounds or [0.0, 1.0]
             policy_space = SchedulePolicySpace(
                 structures, config.n_points, low=float(lo), high=float(hi)
             )
@@ -577,9 +563,7 @@ def build_env(config: EnvConfig) -> Any:
             )
             from openswmm_gymnasium.spaces import ControlCurvePolicySpace
 
-            policy_space = ControlCurvePolicySpace.from_params(
-                config.policy_factory.params
-            )
+            policy_space = ControlCurvePolicySpace.from_params(config.policy_factory.params)
             env = SwmmControlEnv(
                 config.inp_path,
                 policy_space=policy_space,

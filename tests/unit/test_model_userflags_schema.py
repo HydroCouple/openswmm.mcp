@@ -13,13 +13,12 @@ import pytest
 eng = pytest.importorskip("openswmm.engine")
 if not hasattr(eng.ModelBuilder, "define_userflag"):
     pytest.skip(
-        "openswmm.engine build predates the user-flag schema bindings "
-        "(rebuild the engine wheel)",
+        "openswmm.engine build predates the user-flag schema bindings (rebuild the engine wheel)",
         allow_module_level=True,
     )
 
-from openswmm_mcp.errors import ToolError
-from openswmm_mcp.tools.model import (
+from openswmm_mcp.errors import ToolError  # noqa: E402
+from openswmm_mcp.tools.model import (  # noqa: E402
     file_path_get,
     file_path_set,
     userflag_clear_value,
@@ -91,9 +90,7 @@ class TestUserflagSchema:
 
     async def test_define_on_opened_solver(self, session_manager, inp_path):
         ctx = await _opened_session(session_manager, inp_path)
-        await userflag_define(
-            ctx, session_id="opened_flags", name="reviewed", flag_type="BOOLEAN"
-        )
+        await userflag_define(ctx, session_id="opened_flags", name="reviewed", flag_type="BOOLEAN")
         listed = await userflag_list_defs(ctx, session_id="opened_flags")
         names = [d["name"] for d in listed["definitions"]]
         assert "REVIEWED" in names
@@ -101,16 +98,12 @@ class TestUserflagSchema:
     async def test_invalid_type_raises(self, session_manager):
         ctx = await _building_session(session_manager, session_id="bld_badtype")
         with pytest.raises(ToolError):
-            await userflag_define(
-                ctx, session_id="bld_badtype", name="x", flag_type="COMPLEX"
-            )
+            await userflag_define(ctx, session_id="bld_badtype", name="x", flag_type="COMPLEX")
 
     async def test_empty_name_raises(self, session_manager):
         ctx = await _building_session(session_manager, session_id="bld_noname")
         with pytest.raises(ToolError):
-            await userflag_define(
-                ctx, session_id="bld_noname", name="", flag_type="REAL"
-            )
+            await userflag_define(ctx, session_id="bld_noname", name="", flag_type="REAL")
 
 
 # ---------------------------------------------------------------------------
@@ -121,9 +114,7 @@ class TestUserflagSchema:
 class TestUserflagValues:
     async def test_value_roundtrip(self, session_manager):
         ctx = await _building_session(session_manager, session_id="bld_vals")
-        await userflag_define(
-            ctx, session_id="bld_vals", name="rank", flag_type="INTEGER"
-        )
+        await userflag_define(ctx, session_id="bld_vals", name="rank", flag_type="INTEGER")
         await userflag_set_value(
             ctx,
             session_id="bld_vals",
@@ -187,9 +178,7 @@ class TestUserflagValues:
 class TestFilePathSlots:
     async def test_scalar_roundtrip(self, session_manager):
         ctx = await _building_session(session_manager, session_id="bld_paths")
-        out = await file_path_set(
-            ctx, session_id="bld_paths", role="rainfall", new_path="rain.dat"
-        )
+        out = await file_path_set(ctx, session_id="bld_paths", role="rainfall", new_path="rain.dat")
         assert out["status"] == "ok"
         got = await file_path_get(ctx, session_id="bld_paths", role="RAINFALL")
         assert got["original"] == "rain.dat"

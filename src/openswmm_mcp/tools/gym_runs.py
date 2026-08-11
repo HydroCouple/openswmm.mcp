@@ -116,8 +116,8 @@ async def run_episode(
     policy = coerce_json_param(policy, "policy")
     env_config = await _resolve_config(ctx, name, config, config_dir)
     run_id = time.strftime("%Y%m%d-%H%M%S") + f"-{seed if seed is not None else 'x'}"
-    resolved_run_dir = Path(run_dir) if run_dir is not None else _default_run_dir(
-        env_config, run_id
+    resolved_run_dir = (
+        Path(run_dir) if run_dir is not None else _default_run_dir(env_config, run_id)
     )
     summary = await asyncio.to_thread(
         _run_episode_sync,
@@ -391,8 +391,7 @@ async def decode_policy(ctx: Context, job_id: str, index: str = "best") -> dict:
         evaluation = front[i]
     if not evaluation:
         raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] No evaluation to decode for job "
-            f"'{job_id}'."
+            f"[{ErrorCode.VALIDATION_ERROR}] No evaluation to decode for job '{job_id}'."
         )
 
     space = ControlCurvePolicySpace.from_params(env_config.policy_factory.params)
