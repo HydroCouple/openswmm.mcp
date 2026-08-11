@@ -34,6 +34,9 @@ tests/
     test_hotstart.py                # save/load hotstart, clone, saves_*
     test_spatial_quality.py         # coordinates, quality, treatment, geometry
     test_geopackage_tools.py        # geopackage_* tools
+    test_twod.py                    # twod_* 2D-surface tools (twod_parking_lot.inp fixture)
+    test_model_userflags_schema.py  # model_userflag_* schema/value + model_file_path_* tools
+    test_forcing_climate.py         # forcing_get_climate_evap_rate
     test_backend_dispatch.py        # openswmm vs legacy backend selection
     test_phase2_wave2.py            # Phase-2 wave-2 regression set
     test_resources.py               # All 9 swmm:// resources

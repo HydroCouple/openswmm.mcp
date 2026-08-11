@@ -290,6 +290,14 @@ openswmm_mcp.tools.geopackage
    :undoc-members:
    :show-inheritance:
 
+openswmm_mcp.tools.twod
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. automodule:: openswmm_mcp.tools.twod
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Resource Modules
 ----------------
 

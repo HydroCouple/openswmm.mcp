@@ -7,9 +7,10 @@ allowing large-language models and AI assistants to open, run, query, and
 modify EPA-SWMM hydraulic and hydrologic models.
 
 Built on `FastMCP 3.x <https://github.com/jlowin/fastmcp>`_, the server
-provides roughly 317 tools organised into 19 domain namespaces, nine
-``swmm://`` resources for structured data access, and seven
-guided-workflow prompts for common stormwater modelling tasks.
+provides 358 tools organised into 20 domain namespaces — including a
+2D overland-flow surface namespace (``twod_*``) — nine ``swmm://``
+resources for structured data access, and seven guided-workflow
+prompts for common stormwater modelling tasks.
 
 .. toctree::
    :maxdepth: 2
@@ -24,6 +25,7 @@ guided-workflow prompts for common stormwater modelling tasks.
    :caption: User Guide
 
    user-guide/tools
+   user-guide/optimization
    user-guide/resources
    user-guide/prompts
    user-guide/examples
@@ -35,6 +37,8 @@ guided-workflow prompts for common stormwater modelling tasks.
    developer/architecture
    developer/contributing
    developer/testing
+   developer/SKILLS
+   developer/RTC_AGENT_FEEDBACK_DISPOSITION
 
 .. toctree::
    :maxdepth: 2

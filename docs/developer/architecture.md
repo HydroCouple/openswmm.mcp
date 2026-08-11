@@ -47,11 +47,14 @@ Root FastMCP ("OpenSWMM MCP Server")
   |-- mount(spatial_quality_mcp, namespace="spatial")
   |-- mount(geopackage_mcp,      namespace="geopackage")
   |
+  |   # 2D overland-flow surface
+  |-- mount(twod_mcp,            namespace="twod")
+  |
   |-- mount(resources_mcp)       # no namespace
   |-- mount(prompts_mcp)         # no namespace
 ```
 
-Nineteen tool sub-servers are mounted in total — each declared in its
+Twenty tool sub-servers are mounted in total — each declared in its
 own `openswmm_mcp/tools/<name>.py` module as a `FastMCP("<name>")`
 instance.  The full list (and mount order) is in
 `openswmm_mcp/server.py`.

@@ -217,21 +217,20 @@ def require_new_engine(session, feature: str) -> None:
 
 
 def require_gymnasium(feature: str = "This tool") -> None:
-    """Assert that the optional C{openswmm.gymnasium} package is importable.
+    """Assert that the optional ``openswmm.gymnasium`` package is importable.
 
-    Gym tool modules import C{openswmm_gymnasium} lazily so the server
-    starts cleanly without the C{gym} extra; this guard converts the
-    eventual C{ImportError} into an actionable C{ToolError} instead.
+    Gym tool modules import ``openswmm_gymnasium`` lazily so the server
+    starts cleanly without the ``gym`` extra; this guard converts the
+    eventual ``ImportError`` into an actionable ``ToolError`` instead.
 
-    @param feature: Human-readable name of the feature being requested,
-        used in the error message (e.g. C{"gym_run_episode"}).
-    @type feature: str
-    @raise ToolError: With code
-        L{ErrorCode.DEPENDENCY_MISSING<openswmm_mcp.errors.ErrorCode>}
-        when C{openswmm_gymnasium} cannot be imported.
-    @return: C{None}
-    @rtype: C{None}
-    @author: Caleb Buahin
+    Args:
+        feature: Human-readable name of the feature being requested, used
+            in the error message (e.g. ``"gym_run_episode"``).
+
+    Raises:
+        ToolError: With code
+            :attr:`~openswmm_mcp.errors.ErrorCode.DEPENDENCY_MISSING`
+            when ``openswmm_gymnasium`` cannot be imported.
     """
     from openswmm_mcp.errors import ErrorCode
 

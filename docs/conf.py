@@ -16,7 +16,17 @@ extensions = [
 ]
 
 templates_path = ["_templates"]
-exclude_patterns = ["_build"]
+exclude_patterns = [
+    "_build",
+    # Internal work-plan / handoff docs kept in the repo but not published.
+    "CLOUD_OFFLOADING_PLAN.md",
+    "developer/CONTROL_CURVE_TEST_HANDOFF.md",
+    "developer/CONTROL_CURVE_VERIFICATION_RESULTS.md",
+    "developer/GYMNASIUM_INTEGRATION_PLAN.md",
+    "developer/GYM_TEST_RUN_INSTRUCTIONS.md",
+    "developer/MCP_GAP_CLOSURE_TEST_INSTRUCTIONS.md",
+    "developer/V1_MIGRATION_PLAN.md",
+]
 
 html_theme = "pydata_sphinx_theme"
 html_theme_options = {
@@ -34,6 +44,10 @@ html_favicon = "../images/hydrocouplecomposer.png"
 # Napoleon
 napoleon_google_docstring = True
 napoleon_numpy_docstring = True
+# Render docstring "Attributes:" sections as :ivar: fields rather than
+# standalone .. attribute:: directives, so they don't collide with the
+# same members documented by autodoc ``:members:`` (duplicate-object warnings).
+napoleon_use_ivar = True
 
 # Intersphinx
 intersphinx_mapping = {

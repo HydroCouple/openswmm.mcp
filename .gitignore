@@ -25,6 +25,7 @@ env/
 htmlcov/
 .coverage
 coverage.xml
+tests/_output/
 
 # Sphinx docs
 docs/_build/
