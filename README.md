@@ -387,7 +387,7 @@ See [AUTHORS.md](AUTHORS.md) for the full list of contributors to this project.
 
 ## License
 
-MIT License -- see [LICENSE](LICENSE) for the full text.
+Apache License, Version 2.0 -- see [LICENSE](LICENSE) for the full text and [NOTICE](NOTICE) for required attribution.
 
 ## Acknowledgements
 

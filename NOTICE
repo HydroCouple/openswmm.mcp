@@ -1,0 +1,30 @@
+OpenSWMM MCP Server
+Copyright 2026 Caleb Buahin
+
+This product includes software developed by the OpenSWMM authors
+(https://github.com/HydroCouple/openswmm.mcp).
+
+Licensed under the Apache License, Version 2.0. See the LICENSE file for the
+full license text.
+
+--------------------------------------------------------------------------------
+THIRD-PARTY COMPONENTS
+--------------------------------------------------------------------------------
+
+This product depends on, but does not bundle, the following separately
+licensed components. Each remains subject to its own license terms, which
+accompany the component in its own distribution:
+
+  - openswmm (OpenSWMM Engine Python bindings) — Apache License, Version 2.0.
+    Portions of the underlying engine are derived from USEPA SWMM and reside
+    in the public domain under 17 USC § 105. See the NOTICE file distributed
+    with the openswmm package.
+
+  - openswmm.gymnasium — Apache License, Version 2.0 (optional dependency).
+
+  - FastMCP, Pydantic, NumPy, and other runtime dependencies as declared in
+    pyproject.toml.
+
+The USEPA does not endorse this product, and the names "EPA", "USEPA", and
+"SWMM" are used solely to describe the origin of the public domain material
+referenced above.

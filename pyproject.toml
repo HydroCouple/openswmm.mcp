@@ -7,7 +7,8 @@ name = "openswmm.mcp"
 version = "0.1.0.dev0"
 description = "MCP server for the OpenSWMM stormwater engine"
 readme = "README.md"
-license = "MIT"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.10"
 authors = [
     { name = "Caleb Buahin", email = "caleb.buahin@gmail.com" },
@@ -15,7 +16,6 @@ authors = [
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
