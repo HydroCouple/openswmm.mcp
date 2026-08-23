@@ -51,7 +51,11 @@ jobs:
           pip install -e ".[docs]"
 
       - name: Build Sphinx HTML (strict, fail on warning)
-        run: sphinx-build -b html -W --keep-going docs docs/_build/html
+        # docs/CNAME pins the Pages custom domain and must ride along at the
+        # root of the published site.
+        run: |
+          sphinx-build -b html -W --keep-going docs docs/_build/html
+          cp docs/CNAME docs/_build/html/
 
       - name: Upload HTML artefact
         uses: actions/upload-artifact@v5
@@ -97,7 +101,11 @@ jobs:
       - name: Upload Pages artefact
         uses: actions/upload-pages-artifact@v4
         with:
-          path: site/openswmm.mcp/
+          # The artefact download lands the Sphinx site directly in site/ —
+          # there is no site/openswmm.mcp/ subdirectory. The project's path
+          # segment comes from the repository name under the org's custom
+          # domain, not from the uploaded tree.
+          path: site/
 
       - name: Deploy to GitHub Pages
         id: deployment
