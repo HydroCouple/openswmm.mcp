@@ -1,0 +1,87 @@
+{
+  "meta": {
+    "model_path": "/path/to/model.inp",
+    "output_dir": "/path/to/reviewable/output",
+    "treatment_tag": "TREATED",
+    "control_interval_seconds": 300,
+    "currency_note": "All prices are normalized to [0,1]; one unit of price is comparable across conveyance, storage, and treatment."
+  },
+  "objectives": {
+    "flooding": 1.0,
+    "uncontrolled_discharge": 1.0,
+    "storage_underutilization": 0.5,
+    "pumping_energy": 0.25
+  },
+  "cost_curves": {
+    "buyer_logistic": {
+      "type": "logistic",
+      "onset": 0.85,
+      "steepness": 20,
+      "floor": 0.0,
+      "ceiling": 1.0
+    },
+    "seller_linear": {
+      "type": "piecewise_linear",
+      "onset": 0.6,
+      "full": 1.0,
+      "floor": 0.0,
+      "ceiling": 1.0
+    }
+  },
+  "agents": [
+    {
+      "id": "J_outfall_approach",
+      "element_type": "node",
+      "role": "buyer",
+      "commodity": "conveyance",
+      "stress_metric": "freeboard_fraction",
+      "curve": "buyer_logistic"
+    },
+    {
+      "id": "OF_untreated_1",
+      "element_type": "node",
+      "role": "buyer",
+      "commodity": "treatment",
+      "stress_metric": "spill_imminence",
+      "curve": "buyer_logistic"
+    },
+    {
+      "id": "ST_basin_A",
+      "element_type": "node",
+      "role": "seller",
+      "commodity": "storage",
+      "stress_metric": "storage_fill",
+      "curve": "seller_linear"
+    },
+    {
+      "id": "C_trunk_main",
+      "element_type": "link",
+      "role": "seller",
+      "commodity": "conveyance",
+      "stress_metric": "filling_ratio",
+      "curve": "seller_linear"
+    }
+  ],
+  "trade_routes": [
+    {
+      "structure_link_id": "GATE_to_basin_A",
+      "buyer_agents": ["J_outfall_approach", "OF_untreated_1"],
+      "seller_agents": ["ST_basin_A"],
+      "aggregate": "max",
+      "pid": { "kp": 0.8, "ki": 0.05, "kd": 0.0, "setpoint": 0, "out_min": 0, "out_max": 1 },
+      "constraints": { "setting_min": 0.0, "setting_max": 1.0 }
+    },
+    {
+      "structure_link_id": "PUMP_lift_1",
+      "buyer_agents": ["J_outfall_approach"],
+      "seller_agents": ["C_trunk_main"],
+      "aggregate": "max",
+      "pid": { "kp": 0.6, "ki": 0.1, "kd": 0.02, "setpoint": 0, "out_min": 0, "out_max": 1 },
+      "constraints": { "setting_min": 0.0, "setting_max": 1.0, "min_cycle_seconds": 600, "max_starts_per_hour": 6 }
+    }
+  ],
+  "constraints": {
+    "min_velocity": 0.6,
+    "max_hgl_freeboard": 0.3
+  }
+}

@@ -1,0 +1,79 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "openswmm.mcp"
+version = "0.1.0.dev0"
+description = "MCP server for the OpenSWMM stormwater engine"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+requires-python = ">=3.10"
+authors = [
+    { name = "Caleb Buahin", email = "caleb.buahin@gmail.com" },
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Hydrology",
+]
+dependencies = [
+    "fastmcp[auth]>=3.0",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "numpy>=1.21",
+]
+
+[project.optional-dependencies]
+engine = [
+    "openswmm",
+]
+gym = [
+    "openswmm.gymnasium",
+]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+    "pytest-cov",
+    "ruff==0.15.14",
+]
+docs = [
+    "sphinx>=7.0",
+    "pydata-sphinx-theme>=0.15",
+    "myst-parser>=3.0",
+    "sphinx-autodoc-typehints",
+]
+
+[project.scripts]
+"openswmm.mcp" = "openswmm_mcp.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/HydroCouple/openswmm.mcp"
+Documentation = "https://hydrocouple.github.io/openswmm.mcp"
+Repository = "https://github.com/HydroCouple/openswmm.mcp"
+Issues = "https://github.com/HydroCouple/openswmm.mcp/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/openswmm_mcp"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --tb=short"
+asyncio_mode = "auto"
+markers = [
+    "integration: tests requiring compiled openswmm engine",
+]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP"]
