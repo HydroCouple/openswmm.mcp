@@ -34,7 +34,12 @@ mcp = FastMCP(
         "flooding-or-surcharge assessment and reporting, use `capacity-assessment` "
         "(it drives the standard assessment + plotting/dashboard workflow); for "
         "calibrating against observed data use `calibrate-model`; for real-time / "
-        "agent-based control tuning use `operational-optimization`."
+        "agent-based control tuning use `operational-optimization`; for a quick "
+        "pass/fail check against a specific design storm (return period, "
+        "development review) use `design-storm-check`; for overland/2D mesh flood "
+        "extent and depth-velocity hazard mapping use `overland-flood-mapping`; "
+        "and before trusting an unfamiliar model (or before running any of the "
+        "above on one), consider `model-qa-check` to catch authoring errors first."
     ),
     lifespan=server_lifespan,
 )
