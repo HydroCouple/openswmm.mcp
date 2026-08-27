@@ -6,26 +6,12 @@ import asyncio
 
 from fastmcp import Context, FastMCP
 
+from openswmm_mcp.dependencies import get_session_manager as _get_session_manager
 from openswmm_mcp.dependencies import require_new_engine
 from openswmm_mcp.errors import ToolError, resolve_index
 from openswmm_mcp.models import SpatialResult
 
 spatial_quality_mcp = FastMCP("spatial_quality")
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _get_session_manager(ctx: Context):
-    """Extract the :class:`SessionManager` from the lifespan context."""
-    try:
-        return ctx.lifespan_context["session_manager"]
-    except (KeyError, TypeError) as exc:
-        raise ToolError(
-            "Session manager is not available. The server may not have started correctly."
-        ) from exc
 
 
 _VALID_SPATIAL_TYPES = frozenset({"node", "link", "subcatchment"})
