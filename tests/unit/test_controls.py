@@ -47,10 +47,13 @@ async def _step_to_running(ctx, session_manager, session_id: str):
     await step_simulation(ctx, session_id=session_id, num_steps=1)
 
 
-# Sample rule used across several tests. Targets J1 and pumps don't exist
-# in site_drainage_example.inp, but the engine accepts the rule text as
-# long as it parses — the rule simply never fires.
-SAMPLE_RULE = "RULE TEST_R1\nIF NODE J1 DEPTH > 5.0\nTHEN PUMP P1 STATUS = ON"
+# Sample rule used across several tests. J1 and C1 both exist in
+# site_drainage_example.inp (site_drainage_example.inp has no pumps at
+# all — Controls.append validates THEN/ELSE action targets once the
+# session has been initialize()'d, which _opened_session always does via
+# the default strict open_model(), so a rule naming a nonexistent PUMP
+# raises BadParamError here even though it parses fine as text).
+SAMPLE_RULE = "RULE TEST_R1\nIF NODE J1 DEPTH > 5.0\nTHEN CONDUIT C1 STATUS = CLOSED"
 
 
 # ===========================================================================
@@ -118,7 +121,7 @@ class TestListRules:
         await add_rule(
             ctx,
             session_id="ctl_list",
-            rule_text=("RULE TEST_R2\nIF NODE J1 DEPTH < 1.0\nTHEN PUMP P1 STATUS = OFF"),
+            rule_text=("RULE TEST_R2\nIF NODE J1 DEPTH < 1.0\nTHEN CONDUIT C1 STATUS = OPEN"),
         )
         result = await list_rules(ctx, session_id="ctl_list")
         assert result["count"] == 2
@@ -331,7 +334,7 @@ class TestGetId:
         await add_rule(
             ctx,
             session_id="ctl_id_canonical",
-            rule_text=("RULE PumpOnHigh\nIF NODE J1 DEPTH > 5\nTHEN PUMP P1 STATUS = ON"),
+            rule_text=("RULE PumpOnHigh\nIF NODE J1 DEPTH > 5\nTHEN CONDUIT C1 STATUS = CLOSED"),
         )
         result = await get_id(ctx, session_id="ctl_id_canonical", rule_index=0)
         assert result["name"] == "PumpOnHigh"
@@ -344,12 +347,12 @@ class TestGetId:
         await add_rule(
             ctx,
             session_id="ctl_id_case",
-            rule_text="rule WeirBypass\nIF NODE J1 DEPTH < 1\nTHEN PUMP P1 STATUS = OFF",
+            rule_text="rule WeirBypass\nIF NODE J1 DEPTH < 1\nTHEN CONDUIT C1 STATUS = OPEN",
         )
         await add_rule(
             ctx,
             session_id="ctl_id_case",
-            rule_text="Rule TankFill\nIF NODE J1 DEPTH < 2\nTHEN PUMP P1 STATUS = ON",
+            rule_text="Rule TankFill\nIF NODE J1 DEPTH < 2\nTHEN CONDUIT C1 STATUS = CLOSED",
         )
         a = await get_id(ctx, session_id="ctl_id_case", rule_index=0)
         b = await get_id(ctx, session_id="ctl_id_case", rule_index=1)
@@ -361,12 +364,19 @@ class TestGetId:
         so callers can render a sentinel display label."""
         from openswmm_mcp.tools.controls import add_rule, get_id
 
-        ctx = await _opened_session(session_manager, inp_path, "ctl_id_bad")
-        # No RULE keyword at all — but engine still accepts the text.
+        # A leniently-opened ("opened", not "initialized") session is
+        # required here: Controls.append validates that rule text parses
+        # a RULE <name> header once the session is initialized, and
+        # rejects headerless text outright — only the pre-initialize
+        # "opened" state accepts it (see the RULE_HEADER investigation
+        # notes in this PR).
+        ctx = await _lenient_opened_session(session_manager, inp_path, "ctl_id_bad")
+        # No RULE keyword at all — the engine still accepts the text (it
+        # just can't parse out a name) in this pre-initialize state.
         await add_rule(
             ctx,
             session_id="ctl_id_bad",
-            rule_text="IF NODE J1 DEPTH > 5\nTHEN PUMP P1 STATUS = ON",
+            rule_text="IF NODE J1 DEPTH > 5\nTHEN CONDUIT C1 STATUS = CLOSED",
         )
         result = await get_id(ctx, session_id="ctl_id_bad", rule_index=0)
         assert result["name"] is None
@@ -378,22 +388,25 @@ class TestListRulesWithNames:
     async def test_list_includes_name_field(self, session_manager, inp_path):
         from openswmm_mcp.tools.controls import add_rule, list_rules
 
-        ctx = await _opened_session(session_manager, inp_path, "ctl_list_named")
+        # Leniently opened ("opened", not "initialized") — the third rule
+        # below has no RULE header, which Controls.append only accepts
+        # pre-initialize (see test_malformed_rule_returns_none).
+        ctx = await _lenient_opened_session(session_manager, inp_path, "ctl_list_named")
         await add_rule(
             ctx,
             session_id="ctl_list_named",
-            rule_text="RULE Pump_A\nIF NODE J1 DEPTH > 5\nTHEN PUMP P1 STATUS = ON",
+            rule_text="RULE Pump_A\nIF NODE J1 DEPTH > 5\nTHEN CONDUIT C1 STATUS = CLOSED",
         )
         await add_rule(
             ctx,
             session_id="ctl_list_named",
-            rule_text="rule Weir_B\nIF NODE J1 DEPTH < 1\nTHEN PUMP P1 STATUS = OFF",
+            rule_text="rule Weir_B\nIF NODE J1 DEPTH < 1\nTHEN CONDUIT C1 STATUS = OPEN",
         )
         # Malformed rule — name should come back as None.
         await add_rule(
             ctx,
             session_id="ctl_list_named",
-            rule_text="IF NODE J2 DEPTH > 5\nTHEN PUMP P2 STATUS = ON",
+            rule_text="IF NODE J2 DEPTH > 5\nTHEN CONDUIT C2 STATUS = CLOSED",
         )
 
         result = await list_rules(ctx, session_id="ctl_list_named")

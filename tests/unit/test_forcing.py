@@ -352,7 +352,7 @@ class TestAddControlRule:
         from openswmm_mcp.tools.forcing import add_control_rule
 
         ctx = await _open_and_run(session_manager, tmp_inp, "f_rule")
-        rule_text = "RULE R1\nIF NODE J1 DEPTH > 5\nTHEN PUMP P1 STATUS = ON"
+        rule_text = "RULE R1\nIF NODE J1 DEPTH > 5\nTHEN CONDUIT C1 STATUS = CLOSED"
 
         result = await add_control_rule(ctx, session_id="f_rule", rule_text=rule_text)
 

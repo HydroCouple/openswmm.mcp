@@ -52,26 +52,30 @@ See the [tools guide](docs/user-guide/tools.md) for the per-namespace tool inven
 
 - **9 URI-based resources** (`swmm://sessions`, `swmm://session/{id}/nodes`, etc.) for structured data access
 - **7 prompt templates** for guided workflows (model analysis, flooding diagnosis, scenario comparison, design review, what-if setup, model construction, result explanation)
-- **Full OAuth/JWT authentication** for HTTP transport via `fastmcp[auth]`
+- **Full OAuth/JWT authentication** for HTTP transport (built into `fastmcp` core, no extra install needed)
 - **Background task support** with progress reporting for long-running simulations
 - **Multi-session management** with configurable session limits
 
 ## Installation
 
 ```bash
-pip install openswmm-mcp
+pip install "openswmm-mcp[engine]"
 ```
 
-Authentication support is included by default through the `fastmcp[auth]` dependency. To install with development and documentation extras:
+`[engine]` pulls in the `openswmm` Python bindings needed to actually run a simulation
+— omit it only if you're integrating against a different backend. Authentication
+support (OAuth/JWT) and background-task support are both included by default via
+core `fastmcp` dependencies, no extra flags needed. To install with development and
+documentation extras:
 
 ```bash
-pip install "openswmm-mcp[dev,docs]"
+pip install "openswmm-mcp[engine,dev,docs]"
 ```
 
 ### Requirements
 
 - Python 3.10+
-- `openswmm >= 6.0.0a1` (the OpenSWMM engine Python bindings)
+- `openswmm >= 6.0.0a1` (the OpenSWMM engine Python bindings — via the `[engine]` extra)
 - `fastmcp >= 3.0`
 - `pydantic >= 2.0`
 - `numpy >= 1.21`
