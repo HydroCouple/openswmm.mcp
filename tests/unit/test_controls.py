@@ -48,7 +48,7 @@ async def _step_to_running(ctx, session_manager, session_id: str):
 
 
 # Sample rule used across several tests. J1 and C1 both exist in
-# site_drainage_example.inp (site_drainage_example.inp has no pumps at
+# site_drainage_model.inp (site_drainage_model.inp has no pumps at
 # all — Controls.append validates THEN/ELSE action targets once the
 # session has been initialize()'d, which _opened_session always does via
 # the default strict open_model(), so a rule naming a nonexistent PUMP
