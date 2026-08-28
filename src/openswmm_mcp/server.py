@@ -39,7 +39,11 @@ mcp = FastMCP(
         "development review) use `design-storm-check`; for overland/2D mesh flood "
         "extent and depth-velocity hazard mapping use `overland-flood-mapping`; "
         "and before trusting an unfamiliar model (or before running any of the "
-        "above on one), consider `model-qa-check` to catch authoring errors first."
+        "above on one), consider `model-qa-check` to catch authoring errors first. "
+        "For a broad start-to-finish tour of every tool namespace instead of one "
+        "of these specific workflows -- e.g. the user is new to this server, asks "
+        "what it can do, or wants a general walkthrough of an unfamiliar model -- "
+        "use `getting-started`."
     ),
     lifespan=server_lifespan,
 )
