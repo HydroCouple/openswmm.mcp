@@ -7,24 +7,10 @@ import json
 
 from fastmcp import Context, FastMCP
 
+from openswmm_mcp.dependencies import get_session_manager as _get_session_manager
 from openswmm_mcp.errors import ToolError, resolve_index
 
 resources_mcp = FastMCP("resources")
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _get_session_manager(ctx: Context):
-    """Extract the :class:`SessionManager` from the lifespan context."""
-    try:
-        return ctx.lifespan_context["session_manager"]
-    except (KeyError, TypeError) as exc:
-        raise ToolError(
-            "Session manager is not available. The server may not have started correctly."
-        ) from exc
 
 
 _NODE_TYPE_NAMES = {0: "JUNCTION", 1: "OUTFALL", 2: "STORAGE", 3: "DIVIDER"}

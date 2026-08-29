@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from fastmcp import Context
 from fastmcp.exceptions import ToolError
@@ -17,6 +17,36 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Module-level mirror of the lifespan context. Every tool in this codebase is
+# defined on a namespace-mounted sub-server (see server.py's mcp.mount calls),
+# and FastMCP's Context.lifespan_context returns *that sub-server's own*
+# lifespan result -- an empty dict, since only the root `mcp` has a lifespan
+# -- not the parent's, despite Context.lifespan_context's own docstring
+# describing a request-context fallback "preserved for parity with prior
+# behavior". Verified empirically against fastmcp 3.4.7: ctx.lifespan_context
+# is `{}` in every mounted tool call, over both stdio and in-process
+# transports (a minimal two-server mount/lifespan repro reproduces it outside
+# this codebase entirely, so it isn't specific to how these tools are
+# structured). server_lifespan mirrors its yielded dict here so the getters
+# below can reach shared state regardless of mount position; this is a
+# best-effort *server-process-local* singleton (not per-FastMCP-instance
+# scoped), which is fine for the single composed server this module runs as.
+_shared_context: dict[str, Any] | None = None
+
+
+def _context_value(ctx: Context, key: str) -> Any:
+    """Look up *key*, preferring ctx.lifespan_context but falling back to
+    the module-level mirror (see _shared_context) when that's empty --
+    which in practice is every call, since every tool lives in a mounted
+    sub-server. Checking ctx first costs nothing and stays correct if a
+    future fastmcp release fixes the underlying propagation."""
+    value = ctx.lifespan_context.get(key)
+    if value is not None:
+        return value
+    if _shared_context is not None:
+        return _shared_context.get(key)
+    return None
+
 
 @lifespan
 async def server_lifespan(server) -> AsyncIterator[dict]:
@@ -26,6 +56,8 @@ async def server_lifespan(server) -> AsyncIterator[dict]:
         session_manager: :class:`SessionManager` shared across all tool calls.
         settings: :class:`ServerSettings` loaded from the environment.
     """
+    global _shared_context
+
     # 1. Build configuration from environment variables / .env
     settings = ServerSettings()
 
@@ -52,17 +84,24 @@ async def server_lifespan(server) -> AsyncIterator[dict]:
     env_manager = EnvManager()
     job_manager = JobManager()
 
-    # 4. Yield the context dict so tools can access shared state
+    # 4. Yield the context dict so tools can access shared state. Also
+    #    mirrored at module level (see _shared_context) since mounted
+    #    sub-servers don't see the root's lifespan_context -- only the
+    #    yielded dict itself is real config; the module variable exists
+    #    purely so every tool can reach it regardless of mount position.
+    context = {
+        "session_manager": session_manager,
+        "settings": settings,
+        "env_manager": env_manager,
+        "job_manager": job_manager,
+    }
     try:
-        yield {
-            "session_manager": session_manager,
-            "settings": settings,
-            "env_manager": env_manager,
-            "job_manager": job_manager,
-        }
+        _shared_context = context
+        yield context
     finally:
         # 5. Cleanup on shutdown
         logger.info("OpenSWMM MCP server shutting down -- cleaning up sessions")
+        _shared_context = None
         job_manager.shutdown()
         env_manager.close_all()
         await session_manager.cleanup_all()
@@ -91,12 +130,12 @@ def get_session_manager(ctx: Context) -> SessionManager:
     ToolError
         If the session manager is not available in the context.
     """
-    try:
-        return ctx.lifespan_context["session_manager"]
-    except (KeyError, TypeError) as exc:
+    value = _context_value(ctx, "session_manager")
+    if value is None:
         raise ToolError(
             "Session manager is not available. The server may not have started correctly."
-        ) from exc
+        )
+    return value
 
 
 def get_settings(ctx: Context) -> ServerSettings:
@@ -117,12 +156,12 @@ def get_settings(ctx: Context) -> ServerSettings:
     ToolError
         If settings are not available in the context.
     """
-    try:
-        return ctx.lifespan_context["settings"]
-    except (KeyError, TypeError) as exc:
+    value = _context_value(ctx, "settings")
+    if value is None:
         raise ToolError(
             "Server settings are not available. The server may not have started correctly."
-        ) from exc
+        )
+    return value
 
 
 def get_env_manager(ctx: Context):
@@ -134,12 +173,12 @@ def get_env_manager(ctx: Context):
     @rtype: L{EnvManager<openswmm_mcp.gym_support.envs.EnvManager>}
     @raise ToolError: If the env manager is not available in the context.
     """
-    try:
-        return ctx.lifespan_context["env_manager"]
-    except (KeyError, TypeError) as exc:
+    value = _context_value(ctx, "env_manager")
+    if value is None:
         raise ToolError(
             "Gym env manager is not available. The server may not have started correctly."
-        ) from exc
+        )
+    return value
 
 
 def get_job_manager(ctx: Context):
@@ -151,12 +190,12 @@ def get_job_manager(ctx: Context):
     @rtype: L{JobManager<openswmm_mcp.gym_support.jobs.JobManager>}
     @raise ToolError: If the job manager is not available in the context.
     """
-    try:
-        return ctx.lifespan_context["job_manager"]
-    except (KeyError, TypeError) as exc:
+    value = _context_value(ctx, "job_manager")
+    if value is None:
         raise ToolError(
             "Gym job manager is not available. The server may not have started correctly."
-        ) from exc
+        )
+    return value
 
 
 def require_state(session, *valid_states: str) -> None:

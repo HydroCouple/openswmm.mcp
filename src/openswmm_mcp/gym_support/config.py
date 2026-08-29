@@ -465,6 +465,28 @@ class EnvConfig(BaseModel):
         return self
 
 
+def _require_control_env(env_type: str) -> Any:
+    """Import C{SwmmControlEnv} lazily, only for the three env types that use it.
+
+    C{SwmmControlEnv} (market/schedule/control_curve tuning) has landed in
+    C{openswmm.gymnasium} more recently than the other four env classes, so an
+    older or in-progress install may not have it yet. Importing it
+    unconditionally at the top of L{build_env} would break C{cip}/C{rtc}/
+    C{joint}/C{mo_rtc} too, even though they never touch it -- keep the failure
+    scoped to the env types that actually need it.
+    """
+    try:
+        from openswmm_gymnasium import SwmmControlEnv
+    except ImportError as exc:
+        raise ToolError(
+            f"[{ErrorCode.DEPENDENCY_MISSING}] env_type '{env_type}' requires "
+            "SwmmControlEnv, which isn't present in the installed "
+            "openswmm.gymnasium version. Update it: "
+            "pip install -U 'git+https://github.com/HydroCouple/openswmm.gymnasium.git'"
+        ) from exc
+    return SwmmControlEnv
+
+
 def build_env(config: EnvConfig) -> Any:
     """Construct a live, wrapped C{gymnasium.Env} from *config*.
 
@@ -484,7 +506,6 @@ def build_env(config: EnvConfig) -> Any:
     try:
         from openswmm_gymnasium import (
             SwmmCIPEnv,
-            SwmmControlEnv,
             SwmmJointCIPRTCEnv,
             SwmmMORTCEnv,
             SwmmRTCEnv,
@@ -535,6 +556,7 @@ def build_env(config: EnvConfig) -> Any:
                 **stepped,
             )
         elif config.env_type == "market":
+            SwmmControlEnv = _require_control_env(config.env_type)
             from openswmm_gymnasium.config import MarketConfig
             from openswmm_gymnasium.spaces import MarketPolicySpace
 
@@ -556,6 +578,7 @@ def build_env(config: EnvConfig) -> Any:
                 **common,
             )
         elif config.env_type == "schedule":
+            SwmmControlEnv = _require_control_env(config.env_type)
             from openswmm_gymnasium.control import ScheduleController
             from openswmm_gymnasium.spaces import SchedulePolicySpace
 
@@ -573,6 +596,7 @@ def build_env(config: EnvConfig) -> Any:
                 **common,
             )
         elif config.env_type == "control_curve":
+            SwmmControlEnv = _require_control_env(config.env_type)
             from openswmm_gymnasium.control import (
                 ControlCurveController,
                 ControlCurveMetricReader,

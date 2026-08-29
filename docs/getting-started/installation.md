@@ -5,11 +5,14 @@
 The simplest way to install the OpenSWMM MCP Server is via pip:
 
 ```bash
-pip install openswmm.mcp
+pip install "openswmm.mcp[engine]"
 ```
 
-This installs the server and all required runtime dependencies (`fastmcp`,
-`openswmm`, `pydantic`, `pydantic-settings`, `numpy`).
+This installs the server and its required runtime dependencies (`fastmcp`,
+`pydantic`, `pydantic-settings`, `numpy`), plus the `openswmm` engine Python
+bindings via the `[engine]` extra — `openswmm` is optional at the packaging
+level (not every consumer needs the bindings installed locally), but nearly
+every real deployment wants it, so it's the extra you almost always want.
 
 ## From Source
 

@@ -24,7 +24,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Hydrology",
 ]
 dependencies = [
-    "fastmcp[auth]>=3.0",
+    "fastmcp[tasks]>=3.0",
     "pydantic>=2.0",
     "pydantic-settings>=2.0",
     "numpy>=1.21",
