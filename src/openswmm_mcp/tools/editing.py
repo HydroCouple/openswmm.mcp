@@ -496,6 +496,17 @@ _GAGE_RAIN_UNITS: dict[str, int] = {
 
 _GAGE_RAIN_UNIT_NAMES: dict[int, str] = {v: k for k, v in _GAGE_RAIN_UNITS.items()}
 
+# Rain-file format codes (engine ``GageFileFormat``): 5 = standard SWMM rain
+# file, 6 = multi-column CSV/TSV/PCSWMM TSF. -1 means "not a file gage" and is
+# read-only -- it is a report of absence, not a format one can select.
+_GAGE_FILE_FORMATS: dict[str, int] = {
+    "stan_prcp": 5,
+    "user_csv": 6,
+}
+
+_GAGE_FILE_FORMAT_NAMES: dict[int, str] = {v: k for k, v in _GAGE_FILE_FORMATS.items()}
+_GAGE_FILE_FORMAT_NAMES[-1] = "unknown"
+
 
 async def _require_editable(ctx: Context, session_id: str) -> SimSession:
     """Return a session that allows property edits (building, opened, or initialized)."""
@@ -1120,6 +1131,16 @@ async def get_gage_metadata(
       which ``query_get_gage_info`` already reports.
     * ``timeseries_id`` — assigned series id (empty for a file source).
     * ``station_id`` — station id within an external file (empty otherwise).
+    * ``file_format`` / ``file_format_code`` — the rain-file format:
+      ``stan_prcp`` (5, a standard SWMM rain file), ``user_csv`` (6, a
+      multi-column CSV/TSV/PCSWMM TSF), or ``unknown`` (-1, not a file gage).
+    * ``file_column`` — the data column selected out of a multi-column file
+      (the ``COLUMN`` half of the ``FILE "path:COLUMN"`` form); empty when
+      unset, which on a ``user_csv`` gage means the file's first data column.
+
+    The two file fields are mutually exclusive in practice: a ``user_csv``
+    gage carries a ``file_column`` and no ``station_id``, a station-based
+    format the reverse. See ``editing_set_gage_file_format`` for the writes.
 
     Valid in ``building``, ``opened``, or ``initialized`` state.
 
@@ -1128,7 +1149,7 @@ async def get_gage_metadata(
     gage_id:
         Gage identifier.
     """
-    # wraps: swmm_gage_get_rain_interval swmm_gage_get_rain_units swmm_gage_get_timeseries swmm_gage_get_station_id  # noqa: E501
+    # wraps: swmm_gage_get_rain_interval swmm_gage_get_rain_units swmm_gage_get_timeseries swmm_gage_get_station_id swmm_gage_get_file_column swmm_gage_get_file_format  # noqa: E501
     if not gage_id:
         raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] gage_id must not be empty.")
 
@@ -1139,16 +1160,18 @@ async def get_gage_metadata(
     if g_idx < 0:
         raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Gage '{gage_id}' not found.")
 
-    def _read() -> tuple[float, int, str, str]:
+    def _read() -> tuple[float, int, str, str, str, int]:
         gage = gages[g_idx]
         return (
             float(gage.rain_interval),
             int(gage.rain_units),
             gage.timeseries,
             gage.station_id,
+            gage.file_column,
+            int(gage.file_format),
         )
 
-    interval, units, timeseries, station = await asyncio.to_thread(_read)
+    interval, units, timeseries, station, column, fmt = await asyncio.to_thread(_read)
     return {
         "session_id": session_id,
         "gage_id": gage_id,
@@ -1157,6 +1180,149 @@ async def get_gage_metadata(
         "rain_units": _GAGE_RAIN_UNIT_NAMES.get(units, "unknown"),
         "timeseries_id": timeseries,
         "station_id": station,
+        "file_column": column,
+        "file_format_code": fmt,
+        "file_format": _GAGE_FILE_FORMAT_NAMES.get(fmt, "unknown"),
+    }
+
+
+@editing_mcp.tool()
+async def set_gage_file_format(
+    ctx: Context,
+    session_id: str = "default",
+    gage_id: str = "",
+    file_format: str | int = "",
+) -> dict:
+    """Set the rain-file format of a file-based gage.
+
+    ``file_format`` is ``stan_prcp`` (5, a standard SWMM rain file) or
+    ``user_csv`` (6, a multi-column CSV/TSV/PCSWMM TSF), given as the name or
+    the int code.
+
+    This is the way BACK OUT of ``user_csv``: both ``editing_configure_gage``
+    and setting a file column preserve the USER_CSV format once it is set, so
+    only this tool can restore a station-based format.
+
+    The two formats carry mutually exclusive metadata and the engine enforces
+    that: selecting ``user_csv`` CLEARS ``station_id``, and selecting a
+    station-based format CLEARS ``file_column``. Read either back with
+    ``editing_get_gage_metadata``. Valid in ``building``, ``opened``, or
+    ``initialized`` state.
+
+    Parameters
+    ----------
+    gage_id:
+        Gage identifier.
+    file_format:
+        ``stan_prcp`` / ``user_csv``, or the int code.
+    """
+    # wraps: swmm_gage_set_file_format
+    if not gage_id:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] gage_id must not be empty.")
+    if file_format == "":
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] Provide a file_format.")
+
+    if isinstance(file_format, bool):
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] file_format must be a name or int code.")
+    if isinstance(file_format, int):
+        if file_format not in _GAGE_FILE_FORMATS.values():
+            raise ToolError(
+                f"[{ErrorCode.VALIDATION_ERROR}] file_format code {file_format} out of range. "
+                f"Valid: {sorted(_GAGE_FILE_FORMATS.values())}."
+            )
+        code = file_format
+    else:
+        key = str(file_format).strip().lower()
+        if key not in _GAGE_FILE_FORMATS:
+            valid = ", ".join(sorted(_GAGE_FILE_FORMATS))
+            raise ToolError(
+                f"[{ErrorCode.VALIDATION_ERROR}] Unknown file_format '{file_format}'. "
+                f"Valid: {valid}."
+            )
+        code = _GAGE_FILE_FORMATS[key]
+
+    session = await _require_editable(ctx, session_id)
+    gages = session.gages
+
+    g_idx = await resolve_index(gages, gage_id, "Gage")
+    if g_idx < 0:
+        raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Gage '{gage_id}' not found.")
+
+    def _set() -> None:
+        gages[g_idx].file_format = code
+
+    await asyncio.to_thread(_set)
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "gage_id": gage_id,
+        "file_format": _GAGE_FILE_FORMAT_NAMES.get(code, "unknown"),
+        "file_format_code": code,
+    }
+
+
+@editing_mcp.tool()
+async def get_gage_rainfall_series(
+    ctx: Context,
+    session_id: str = "default",
+    gage_id: str = "",
+    offset: int = 0,
+    limit: int = 500,
+) -> dict:
+    """Return the rainfall series a gage will actually apply.
+
+    This is the RESOLVED series, not the raw input: the rain-type transform,
+    the rain-file units factor and the gage scale factor are already applied,
+    and it works for both data sources — a timeseries gage reports its table,
+    a file gage the series loaded from disk. That makes it the way to confirm
+    what a gage really feeds the model, rather than inferring it from
+    ``editing_get_gage_metadata``.
+
+    Each point is ``{"time": ISO-8601, "value": float}`` where ``value`` is an
+    INTENSITY in rain units per hour, applying from its own stamp until the
+    recording interval elapses or the next point begins, whichever comes first
+    — rainfall is zero in between. Pair with ``rain_interval`` from
+    ``editing_get_gage_metadata`` to reconstruct the step function.
+
+    A file gage's series is windowed to the ``[OPTIONS]`` simulation dates
+    (± one day) and reflects the file AS READ AT OPEN, so re-read after
+    changing the path, column, station, units or dates. ``count`` is the full
+    series length; ``points`` is the ``offset`` / ``limit`` slice of it, so
+    large series stay manageable. An empty series means the gage contributes
+    no rainfall to the run.
+    """
+    # wraps: swmm_gage_get_rainfall_series swmm_gage_get_rainfall_series_count
+    if not gage_id:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] gage_id must not be empty.")
+    if offset < 0:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] offset must be non-negative.")
+    if limit <= 0:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] limit must be positive.")
+
+    session = await _require_editable(ctx, session_id)
+    gages = session.gages
+
+    g_idx = await resolve_index(gages, gage_id, "Gage")
+    if g_idx < 0:
+        raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Gage '{gage_id}' not found.")
+
+    def _read() -> tuple[int, list[dict]]:
+        series = gages[g_idx].rainfall_series
+        total = int(len(series))
+        window = series[offset : offset + limit]
+        points = [
+            {"time": str(row["time"]), "value": float(row["value"])} for row in window
+        ]
+        return total, points
+
+    count, points = await asyncio.to_thread(_read)
+    return {
+        "session_id": session_id,
+        "gage_id": gage_id,
+        "count": count,
+        "offset": offset,
+        "limit": limit,
+        "points": points,
     }
 
 
@@ -1647,6 +1813,65 @@ async def rename_landuse(
         "old_id": landuse_id,
         "new_id": new_id,
         "index": idx,
+    }
+
+
+@editing_mcp.tool()
+async def rename_aquifer(
+    ctx: Context,
+    session_id: str = "default",
+    aquifer_id: str | int = "",
+    new_id: str = "",
+) -> dict:
+    """Rename an aquifer, updating every stored reference to it.
+
+    Subcatchment groundwater assignments reference aquifers by name, so they
+    follow the rename automatically — there is no second edit to make. Read
+    the current names with ``model_list_aquifers``.
+    """
+    # wraps: swmm_aquifer_rename
+    if not new_id:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] new_id must not be empty.")
+    sm = get_session_manager(ctx)
+    session = await sm.get_session(session_id)
+    require_new_engine(session, "Aquifer rename")
+    aquifers = session.aquifers
+    await asyncio.to_thread(aquifers.rename, aquifer_id, new_id)
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "element_type": "aquifer",
+        "old_id": aquifer_id,
+        "new_id": new_id,
+    }
+
+
+@editing_mcp.tool()
+async def rename_snowpack(
+    ctx: Context,
+    session_id: str = "default",
+    snowpack_id: str | int = "",
+    new_id: str = "",
+) -> dict:
+    """Rename a snow pack, updating every stored reference to it.
+
+    Subcatchment snow-pack assignments reference packs by name and follow the
+    rename automatically. Read the current names with ``model_list_snowpacks``.
+    """
+    # wraps: swmm_snowpack_rename
+    if not new_id:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] new_id must not be empty.")
+    sm = get_session_manager(ctx)
+    session = await sm.get_session(session_id)
+    require_new_engine(session, "Snowpack rename")
+    snowpacks = session.snowpacks
+    await asyncio.to_thread(snowpacks.rename, snowpack_id, new_id)
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "element_type": "snowpack",
+        "old_id": snowpack_id,
+        "new_id": new_id,
     }
 
 

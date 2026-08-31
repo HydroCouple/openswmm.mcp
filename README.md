@@ -24,7 +24,7 @@
 
 ## Features
 
-The server exposes **358 tools** organized across 20 namespaced sub-servers, along with **9 URI-based resources**, **7 prompt templates**, and full authentication support.
+The server exposes **650 tools** organized across 30 namespaced sub-servers, along with **9 URI-based resources**, **7 prompt templates**, and full authentication support.
 
 ### Tool Namespaces
 
@@ -45,6 +45,14 @@ The server exposes **358 tools** organized across 20 namespaced sub-servers, alo
 - **spatial\_\***: Query and set element coordinates, retrieve water-quality concentrations, assign treatment expressions, add LID controls
 - **geopackage\_\***: GeoPackage I/O — simulations, result series, observed-data comparison
 - **twod\_\***: 2D overland-flow surface — mesh queries, per-triangle state, statistics and mass balance, runtime forcing, solver parameters, edge boundary conditions, edge conveyance
+- **infil2d\_\***: Per-cell infiltration on the 2D mesh — options, tag defaults, per-cell overrides, rate / cumulative / total-volume readback
+- **climate\_\***: Pre-run climate configuration — temperature, evaporation, wind, snowmelt globals, areal-depletion curves, monthly adjustments
+- **heat\_\***: Heat transport — flux-module toggles, radiative / solar / cloud parameters, shortwave mode, `[HEAT_SOURCES]` inlet temperatures (degC, refused not clamped outside `[-50, 100]`) and per-node overrides
+- **water\_age\_\***: `[WATER_AGE_SOURCES]` — per-pathway global ages in HOURS (negative values legal: age extraction) plus `dwf` / `external_inflow` node overrides
+- **reactions\_\***: Multi-species reactions — species, coefficients, terms, pipe / tank expressions, options, initial quality, whole-file `.rxn` text, expression pre-flight, and the session-less completer vocabulary
+- **initial\_quality\_\***: `[INITIAL_QUALITY]` per-element seeds, including the reserved `__WATER_AGE__` (hours) and `__TEMPERATURE__` (degC) constituents
+- **process\_components\_\***: `[PROCESS_COMPONENTS]` registrations — enumerate, find, register (the config path need not exist yet), remove
+- **xsect\_\***: Cross-section geometry maths — area, depth, hydraulic radius, section factor, critical depth; no open session required
 
 See the [tools guide](docs/user-guide/tools.md) for the per-namespace tool inventory.
 
@@ -237,7 +245,7 @@ Claude: [calls hotstart_clone_session] Cloned "default" to "whatif_upsize".
 | `twod_get_edge_bc` / `twod_set_edge_bc` | Edge boundary conditions (wall, normal flow, stage, flow, rating curve) |
 | `twod_get_edge_conveyance` / `twod_set_edge_conveyance` / `twod_reset_edge_conveyance` | Per-edge conveyance factors (berms / barriers) |
 
-The full twod inventory (28 tools, including `twod_get_coupling_map`, `twod_get_totals`, `twod_set_vertex_z`, and `twod_get_solver_params` / `twod_set_solver_params`) is in the [tools guide](docs/user-guide/tools.md).
+The full twod inventory (35 tools, including `twod_get_coupling_map`, `twod_get_totals`, `twod_set_vertex_z`, and `twod_get_solver_params` / `twod_set_solver_params`) is in the [tools guide](docs/user-guide/tools.md).
 
 ## Available Resources
 

@@ -104,6 +104,91 @@ class TestXsectShapeCodes:
             resolve_shape("not_a_shape")
 
 
+class TestTransportEnumCodes:
+    """Transport-configuration tokens must map onto the engine's own enums.
+
+    Mirrors :class:`TestXsectShapeCodes`. ``_util.transport_enums`` derives
+    every map from the engine ``IntEnum`` rather than transcribing it, for the
+    same reason: a hand-copied enum is a second source of truth, and its drift
+    shows up as a value silently written to the wrong parameter -- a wrong
+    latitude, a wrong emissivity -- rather than as an error.
+    """
+
+    def test_maps_are_derived_from_the_engine_enums(self):
+        eng = pytest.importorskip("openswmm.engine")
+        from openswmm_mcp._util import transport_enums as te
+
+        cases = [
+            (eng.HeatFluxModule, te.heat_flux_module_codes),
+            (eng.HeatShortwaveMode, te.heat_shortwave_mode_codes),
+            (eng.HeatRadiativeParam, te.heat_radiative_param_codes),
+            (eng.HeatSolarParam, te.heat_solar_param_codes),
+            (eng.HeatCloudParam, te.heat_cloud_param_codes),
+            (eng.HeatSourceKind, te.heat_source_kind_codes),
+            (eng.WaterAgeSource, te.water_age_source_codes),
+            (eng.ReactionScope, te.reaction_scope_codes),
+            (eng.ReactionExprForm, te.reaction_expr_form_codes),
+        ]
+        for enum, accessor in cases:
+            codes = accessor()
+            assert len(codes) == len(list(enum)), (
+                f"{enum.__name__}: map has {len(codes)} entries, enum has {len(list(enum))}"
+            )
+            for member in enum:
+                assert codes[member.name.lower()] == int(member), (
+                    f"{enum.__name__}.{member.name} maps to "
+                    f"{codes.get(member.name.lower())}, expected {int(member)}"
+                )
+
+    def test_resolvers_agree_with_the_enums(self):
+        eng = pytest.importorskip("openswmm.engine")
+        from openswmm_mcp._util import transport_enums as te
+
+        # The three an agent is most likely to pass by name.
+        assert te.resolve_heat_shortwave_mode("computed") == int(eng.HeatShortwaveMode.COMPUTED)
+        assert te.resolve_heat_source_kind("external_inflow") == int(
+            eng.HeatSourceKind.EXTERNAL_INFLOW
+        )
+        assert te.resolve_water_age_source("dwf") == int(eng.WaterAgeSource.DWF)
+        assert te.resolve_reaction_scope("tank") == int(eng.ReactionScope.TANK)
+
+    def test_coerce_accepts_names_and_codes(self):
+        pytest.importorskip("openswmm.engine")
+        from openswmm_mcp._util.transport_enums import coerce_enum, heat_cloud_param_codes
+
+        codes = heat_cloud_param_codes()
+        assert coerce_enum("FRACTION", codes, "cloud param") == codes["fraction"]
+        assert coerce_enum(codes["fraction"], codes, "cloud param") == codes["fraction"]
+
+    def test_unknown_token_raises(self):
+        pytest.importorskip("openswmm.engine")
+        from openswmm_mcp._util import transport_enums as te
+        from openswmm_mcp.errors import ToolError
+
+        resolvers = [
+            te.resolve_heat_flux_module,
+            te.resolve_heat_shortwave_mode,
+            te.resolve_heat_radiative_param,
+            te.resolve_heat_solar_param,
+            te.resolve_heat_cloud_param,
+            te.resolve_heat_source_kind,
+            te.resolve_water_age_source,
+            te.resolve_reaction_scope,
+            te.resolve_reaction_expr_form,
+        ]
+        for resolve in resolvers:
+            with pytest.raises(ToolError):
+                resolve("not_a_valid_token")
+
+    def test_out_of_range_code_raises(self):
+        pytest.importorskip("openswmm.engine")
+        from openswmm_mcp._util.transport_enums import coerce_enum, reaction_scope_codes
+        from openswmm_mcp.errors import ToolError
+
+        with pytest.raises(ToolError):
+            coerce_enum(999, reaction_scope_codes(), "reaction scope")
+
+
 class TestWrapsMarkers:
     """``# wraps:`` markers must stay machine-readable by the parity builder."""
 
@@ -164,6 +249,13 @@ class TestToolRegistration:
         "twod",
         "gym",
         "xsect",
+        # Transport-configuration surface (heat / reactions / water age /
+        # initial quality / process components).
+        "heat",
+        "reactions",
+        "water_age",
+        "initial_quality",
+        "process_components",
     }
 
     # Gym tool domain (GYMNASIUM_INTEGRATION_PLAN.md Phase 2).
@@ -233,6 +325,7 @@ class TestToolRegistration:
         "twod_get_mesh_summary",
         "twod_get_mesh_geometry",
         "twod_set_vertex_z",
+        "twod_set_vertex_z_bulk",
         "twod_get_coupling_map",
         "twod_get_state",
         "twod_get_state_bulk",
@@ -253,6 +346,84 @@ class TestToolRegistration:
         "lifecycle_get_open_diagnostics",
         "controls_remove_rule",
         "controls_find_references",
+        # ------------------------------------------------------------------
+        # Transport-configuration surface: the five namespaces added for the
+        # heat / reactions / water-age / initial-quality / process-component
+        # bindings, plus the residual gaps closed in existing namespaces.
+        # ------------------------------------------------------------------
+        "heat_clear_cloud",
+        "heat_clear_source_temp",
+        "heat_get_cloud",
+        "heat_get_config",
+        "heat_get_effective_source_temp",
+        "heat_get_radiative",
+        "heat_get_solar",
+        "heat_list_node_overrides",
+        "heat_list_sources",
+        "heat_remove_node_override",
+        "heat_set_cloud",
+        "heat_set_cloud_timeseries",
+        "heat_set_module",
+        "heat_set_node_override",
+        "heat_set_radiative",
+        "heat_set_shortwave_mode",
+        "heat_set_solar",
+        "heat_set_source_temp",
+        "initial_quality_list_entries",
+        "initial_quality_remove_entry",
+        "initial_quality_set_entry",
+        "process_components_find_component",
+        "process_components_list_components",
+        "process_components_register_component",
+        "process_components_remove_component",
+        "reactions_add_coefficient",
+        "reactions_add_species",
+        "reactions_add_term",
+        "reactions_apply_text",
+        "reactions_check_text",
+        "reactions_functions",
+        "reactions_get_option",
+        "reactions_get_species_expression",
+        "reactions_hydraulic_variables",
+        "reactions_list_coefficients",
+        "reactions_list_initial_quality",
+        "reactions_list_species",
+        "reactions_list_terms",
+        "reactions_remove_coefficient",
+        "reactions_remove_initial_element",
+        "reactions_remove_species",
+        "reactions_remove_term",
+        "reactions_save",
+        "reactions_serialize",
+        "reactions_set_coefficient_value",
+        "reactions_set_initial_element",
+        "reactions_set_initial_global",
+        "reactions_set_option",
+        "reactions_set_species_expression",
+        "reactions_set_term_expression",
+        "reactions_validate_expression",
+        "water_age_get_config",
+        "water_age_list_node_overrides",
+        "water_age_remove_node_override",
+        "water_age_save_sources",
+        "water_age_set_global_source",
+        "water_age_set_node_override",
+        # Residual gaps closed in pre-existing namespaces.
+        "editing_set_gage_file_format",
+        "editing_get_gage_rainfall_series",
+        "editing_rename_aquifer",
+        "editing_rename_snowpack",
+        "nodes_get_rim_depth",
+        "nodes_set_rim_depth",
+        "nodes_get_inflow",
+        "links_get_slot_volume",
+        "links_stat_slot_share",
+        "links_stat_peak_slot_share",
+        "lifecycle_save_runoff_step",
+        "lifecycle_read_runoff_step",
+        "lifecycle_close_runoff_interface",
+        "lifecycle_write_report",
+        "lifecycle_run_model_file",
     }
 
     async def test_namespaces_and_new_tools_registered(self):
@@ -262,8 +433,19 @@ class TestToolRegistration:
         tools = await mcp.list_tools()
         names = {t.name for t in tools}
 
-        namespaces = {n.split("_")[0] for n in names}
-        missing_ns = self._EXPECTED_NAMESPACES - namespaces
+        # Check each expected namespace by prefix rather than deriving the
+        # namespace set as ``{n.split("_")[0] for n in names}``. That heuristic
+        # assumed every namespace is a single underscore-free token, which
+        # stopped being true with ``water_age`` / ``initial_quality`` /
+        # ``process_components``: ``water_age_get_config`` split to ``water``,
+        # so a correctly mounted namespace read as missing. The namespaces are
+        # named by the ``mcp.mount(..., namespace=...)`` calls in server.py,
+        # and this set mirrors them, so prefix-matching tests the real thing.
+        missing_ns = {
+            ns
+            for ns in self._EXPECTED_NAMESPACES
+            if not any(n.startswith(f"{ns}_") for n in names)
+        }
         assert not missing_ns, f"unmounted tool namespaces: {sorted(missing_ns)}"
 
         missing = self._EXPECTED_NEW_TOOLS - names

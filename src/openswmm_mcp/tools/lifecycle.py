@@ -272,7 +272,12 @@ async def run_simulation(
 
     Starts the solver (if not already started), steps through every timestep,
     and reports progress as a percentage.  Returns continuity errors and timing.
+
+    Does NOT write the ``.rpt`` report file — call ``lifecycle_write_report``
+    afterwards if you want it, or use ``lifecycle_run_model_file`` for a
+    one-shot batch run that writes it as part of the run.
     """
+    # wraps: swmm_set_progress_callback
     sm = get_session_manager(ctx)
     session = await sm.get_session(session_id)
     require_state(session, "initialized", "running")
@@ -298,6 +303,29 @@ async def run_simulation(
     steps = 0
     wall_start = time.monotonic()
 
+    # The engine reports its own elapsed fraction from inside step(), which is
+    # both cheaper and more accurate than re-deriving it from
+    # current_datetime.  The callback fires on the worker thread running
+    # step(), so it only records the value; the async side below reads it.
+    # The datetime path stays as the fallback for backends that never invoke
+    # it (the legacy adapter has no such callback).
+    engine_progress: list[float] = []
+
+    def _on_progress(fraction: float) -> None:
+        engine_progress.append(float(fraction))
+        del engine_progress[:-1]
+
+    def _clear_progress_callback() -> None:
+        try:
+            solver.set_progress_callback(None)
+        except Exception:
+            pass
+
+    try:
+        await asyncio.to_thread(solver.set_progress_callback, _on_progress)
+    except Exception:  # legacy adapter, or a binding without the callback
+        pass
+
     # Detect completion by polling solver.state. v1's step() returns a
     # timedelta (elapsed since simulation start); the legacy adapter
     # returns a bool.  We ignore the return value and rely on .state.
@@ -311,9 +339,12 @@ async def run_simulation(
             # Report progress based on elapsed simulation time.
             if steps % 100 == 0:
                 try:
-                    cur_dt = await asyncio.to_thread(lambda: solver.current_datetime)
-                    elapsed_sim = (cur_dt - start_dt).total_seconds()
-                    pct = min(int((elapsed_sim / total_seconds) * 100), 99)
+                    if engine_progress:
+                        pct = min(int(engine_progress[-1] * 100), 99)
+                    else:
+                        cur_dt = await asyncio.to_thread(lambda: solver.current_datetime)
+                        elapsed_sim = (cur_dt - start_dt).total_seconds()
+                        pct = min(int((elapsed_sim / total_seconds) * 100), 99)
                     await ctx.report_progress(pct, 100)
                 except Exception:
                     pass
@@ -323,9 +354,11 @@ async def run_simulation(
         await asyncio.to_thread(solver.end)
         session.state = "ended"
     except Exception as exc:
+        await asyncio.to_thread(_clear_progress_callback)
         raise ToolError(
             f"[{ErrorCode.ENGINE_ERROR}] Simulation failed at step {steps}: {exc}"
         ) from exc
+    await asyncio.to_thread(_clear_progress_callback)
 
     wall_elapsed = time.monotonic() - wall_start
 
@@ -868,6 +901,205 @@ async def load_runoff_interface(
             "loaded state on every runoff substep. Full USE-mode "
             "auto-skip is a follow-up to Phase 1b."
         ),
+    }
+
+
+@lifecycle_mcp.tool()
+async def save_runoff_step(
+    ctx: Context,
+    session_id: str = "default",
+    seconds: float = 0.0,
+) -> dict:
+    """Write one runoff record to the interface file opened in SAVE mode.
+
+    The engine normally auto-emits a record per runoff substep, so this is the
+    MANUAL emit for callers driving the file themselves — useful when you are
+    stepping with ``lifecycle_step_simulation`` and want a record at a cadence
+    of your own rather than the engine's.
+
+    ``seconds`` is the timestep the record covers, in seconds. Requires
+    ``lifecycle_save_runoff_interface`` to have opened a file first; calling it
+    with no file open is refused. Close with
+    ``lifecycle_close_runoff_interface``.
+    """
+    # wraps: swmm_runoff_iface_save_step
+    sm = get_session_manager(ctx)
+    session = await sm.get_session(session_id)
+    require_new_engine(session, "Runoff interface file")
+    if seconds <= 0:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] seconds must be positive.")
+    try:
+        await asyncio.to_thread(session.solver.save_runoff_step, float(seconds))
+    except Exception as exc:
+        raise ToolError(
+            f"[{ErrorCode.ENGINE_ERROR}] Failed to save a runoff interface record: {exc}"
+        ) from exc
+    return {"status": "ok", "session_id": session_id, "seconds": float(seconds)}
+
+
+@lifecycle_mcp.tool()
+async def read_runoff_step(ctx: Context, session_id: str = "default") -> dict:
+    """Read the next runoff record from the interface file opened in USE mode.
+
+    Returns ``has_record``: true when a record was read and applied to the
+    subcatchments, false once the file is exhausted — use it as the
+    loop-termination condition.
+
+    This is the manual orchestration ``lifecycle_load_runoff_interface``
+    documents: USE mode does not yet skip the engine's own runoff computation,
+    so call this BETWEEN ``lifecycle_step_simulation`` calls, after each step,
+    to overwrite what the engine just computed with the recorded values.
+    Requires a file opened for reading.
+    """
+    # wraps: swmm_runoff_iface_read_step
+    sm = get_session_manager(ctx)
+    session = await sm.get_session(session_id)
+    require_new_engine(session, "Runoff interface file")
+    try:
+        has_record = await asyncio.to_thread(session.solver.read_runoff_step)
+    except Exception as exc:
+        raise ToolError(
+            f"[{ErrorCode.ENGINE_ERROR}] Failed to read a runoff interface record: {exc}"
+        ) from exc
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "has_record": bool(has_record),
+    }
+
+
+@lifecycle_mcp.tool()
+async def close_runoff_interface(ctx: Context, session_id: str = "default") -> dict:
+    """Close the runoff interface file, finalising it if it was open for writing.
+
+    Ordinary flows do not need this — closing the session finalises a SAVE-mode
+    file automatically. Call it explicitly when you want the file complete and
+    readable BEFORE the session ends, for instance to hand it to a second
+    routing-only session in the same conversation.
+
+    Closing a session with no interface file open is harmless.
+    """
+    # wraps: swmm_runoff_iface_close
+    sm = get_session_manager(ctx)
+    session = await sm.get_session(session_id)
+    require_new_engine(session, "Runoff interface file")
+    try:
+        await asyncio.to_thread(session.solver.close_runoff_interface)
+    except Exception as exc:
+        raise ToolError(
+            f"[{ErrorCode.ENGINE_ERROR}] Failed to close the runoff interface file: {exc}"
+        ) from exc
+    return {"status": "ok", "session_id": session_id}
+
+
+# ===========================================================================
+# Report file
+# ===========================================================================
+
+
+@lifecycle_mcp.tool()
+async def write_report(ctx: Context, session_id: str = "default") -> dict:
+    """Write the model's ``.rpt`` summary report file.
+
+    **Nothing else writes it.** ``lifecycle_run_simulation`` drives the step
+    loop and ends the run, but it does not produce the report — so a session
+    that ran to completion still has no ``.rpt`` on disk until this is called.
+    If you want the human-readable summary tables (continuity, node flooding,
+    link surcharge, outfall loading), call this after the run has ended.
+
+    Requires the ``ended`` state: the report is assembled from the completed
+    run's statistics. The destination is the ``.rpt`` path the session was
+    opened with — see ``model_files_get``. The structured equivalents are
+    available without a report file via ``analysis_get_mass_balance`` and the
+    ``nodes_stat_*`` / ``links_stat_*`` tools.
+    """
+    # wraps: swmm_engine_report
+    sm = get_session_manager(ctx)
+    session = await sm.get_session(session_id)
+    require_new_engine(session, "Report file writing")
+    require_state(session, "ended")
+    try:
+        await asyncio.to_thread(session.solver.report)
+    except Exception as exc:
+        raise ToolError(
+            f"[{ErrorCode.ENGINE_ERROR}] Failed to write the report file: {exc}"
+        ) from exc
+    return {"status": "ok", "session_id": session_id}
+
+
+@lifecycle_mcp.tool(task=True)
+async def run_model_file(
+    ctx: Context,
+    inp_path: str = "",
+    rpt_path: str = "",
+    out_path: str = "",
+    plugin_lib: str = "",
+) -> dict:
+    """Run a SWMM input file start-to-finish in one call, without a session.
+
+    The batch path: opens, initializes, steps to the end, ends, WRITES THE
+    REPORT and closes, all inside the engine. Use it when you only want the
+    ``.rpt`` and ``.out`` products and have nothing to do between steps —
+    it is markedly faster than driving ``lifecycle_step_simulation``, and
+    unlike ``lifecycle_run_simulation`` it produces the report file.
+
+    Because no session is involved, NOTHING IS INSPECTABLE afterwards through
+    the session tools: open the resulting ``.out`` with the ``analysis_output_*``
+    tools, or use ``lifecycle_open_model`` + ``lifecycle_run_simulation`` +
+    ``lifecycle_write_report`` when you need to interact with the model while
+    it runs.
+
+    ``rpt_path`` and ``out_path`` default to the engine's own naming next to
+    the input file when left empty. Progress is reported from the engine's own
+    progress callback, so it reflects simulated time rather than step count.
+    """
+    # wraps: swmm_engine_run swmm_engine_run_with_callback
+    if not inp_path:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] inp_path must be non-empty.")
+
+    try:
+        from openswmm.engine import run_with_callback
+    except ImportError as exc:
+        raise ToolError(
+            f"[{ErrorCode.NOT_SUPPORTED}] The openswmm engine is not available: {exc}"
+        ) from exc
+
+    # The engine invokes the progress callback from the worker thread running
+    # the blocking simulation, so it cannot await ctx.report_progress itself.
+    # It records the latest fraction instead and the async side polls it --
+    # the one shape in which an engine callback can cross the MCP boundary.
+    latest = [0.0]
+
+    def _progress(fraction: float) -> None:
+        latest[0] = float(fraction)
+
+    def _run() -> None:
+        run_with_callback(
+            inp_path,
+            rpt_path or None,
+            out_path or None,
+            _progress,
+            plugin_lib=plugin_lib or None,
+        )
+
+    wall_start = time.monotonic()
+    task = asyncio.create_task(asyncio.to_thread(_run))
+    try:
+        while not task.done():
+            done, _ = await asyncio.wait({task}, timeout=1.0)
+            if not done:
+                await ctx.report_progress(min(int(latest[0] * 100), 99), 100)
+        await task
+    except Exception as exc:
+        raise ToolError(f"[{ErrorCode.ENGINE_ERROR}] Simulation failed: {exc}") from exc
+    await ctx.report_progress(100, 100)
+
+    return {
+        "status": "ok",
+        "inp_path": inp_path,
+        "rpt_path": rpt_path,
+        "out_path": out_path,
+        "elapsed_seconds": time.monotonic() - wall_start,
     }
 
 

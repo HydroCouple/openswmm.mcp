@@ -126,6 +126,14 @@ def coerce_json_param(value: Any, param: str) -> Any:
 
 
 # Observation feature name -> ObservationBuilder method name.
+#
+# Every collector C{ObservationBuilder} implements must appear here, or it is
+# unreachable from a declarative env config however well it works in code.
+# Three entries below take an extra argument beyond the ID list and are
+# therefore driven from their own C{ObservationSpec} fields rather than from
+# this table's simple "field -> method(ids)" loop; they are listed anyway so
+# C{OBSERVATION_FEATURES} and C{is_empty} stay complete, and C{build} special-
+# cases them.
 _OBS_METHODS: dict[str, str] = {
     "node_depths": "add_node_depths",
     "node_heads": "add_node_heads",
@@ -142,7 +150,17 @@ _OBS_METHODS: dict[str, str] = {
     "subcatch_runoff": "add_subcatch_runoff",
     "subcatch_groundwater": "add_subcatch_groundwater",
     "rainfall_gages": "add_rainfall",
+    # -- extra-argument collectors; see the note above and ``build``. --
+    "node_pollutant_concentration": "add_pollutant_concentration",
+    "link_pollutant_concentration": "add_link_pollutant_concentration",
+    "vertex_depths_2d": "add_2d_vertex_depths",
 }
+
+#: Feature fields whose value is not a plain ID list, so C{build} drives them
+#: individually instead of through the C{method(ids)} loop.
+_OBS_SPECIAL: frozenset[str] = frozenset(
+    {"node_pollutant_concentration", "link_pollutant_concentration", "vertex_depths_2d"}
+)
 
 #: Valid C{observations} feature keys (each maps element IDs -> features), in
 #: builder/concatenation order. Surfaced by C{gym_list_capabilities} and in
@@ -174,6 +192,21 @@ class ObservationSpec(BaseModel):
     @ivar subcatch_groundwater: Subcatchment IDs contributing groundwater
         (baseflow) features.
     @ivar rainfall_gages: Rain gage IDs contributing rainfall features.
+    @ivar node_pollutant_concentration: Map of pollutant ID (as declared in
+        C{[POLLUTANTS]}) to the node IDs whose concentration of it to
+        observe. One feature per node per pollutant, in the pollutant's own
+        declared concentration units (C{mg/L}, C{ug/L}, C{#/L}); requires
+        the model to run water quality.
+    @ivar link_pollutant_concentration: Map of pollutant ID to the link IDs
+        whose concentration of it to observe — the link-side counterpart of
+        C{node_pollutant_concentration}, and the natural pairing for a
+        load-based objective such as the C{tss_load} reward term, which is
+        computed from link flow times link concentration.
+    @ivar vertex_depths_2d: 2D mesh vertex indices (0-based) whose signed
+        inundation depth (C{eta_v - z_v}; negative = dry freeboard) to
+        observe. Requires an engine built with the 2D module B{and} a model
+        with an active 2D surface; binding fails with a clear error
+        otherwise, including on episodes run with the C{IGNORE_2D} gate on.
     @ivar include_clock: Whether to append simulation-clock features.
     """
 
@@ -194,6 +227,9 @@ class ObservationSpec(BaseModel):
     subcatch_runoff: list[str] = []
     subcatch_groundwater: list[str] = []
     rainfall_gages: list[str] = []
+    node_pollutant_concentration: dict[str, list[str]] = {}
+    link_pollutant_concentration: dict[str, list[str]] = {}
+    vertex_depths_2d: list[int] = []
     include_clock: bool = False
 
     def is_empty(self) -> bool:
@@ -224,9 +260,22 @@ class ObservationSpec(BaseModel):
 
         builder = ObservationBuilder()
         for field, method in _OBS_METHODS.items():
+            if field in _OBS_SPECIAL:
+                continue
             ids = getattr(self, field)
             if ids:
                 getattr(builder, method)(ids)
+        # Extra-argument collectors. Pollutant maps are iterated in insertion
+        # order so the observation vector's layout is reproducible from the
+        # config JSON.
+        for pollutant, node_ids in self.node_pollutant_concentration.items():
+            if node_ids:
+                builder.add_pollutant_concentration(node_ids, pollutant)
+        for pollutant, link_ids in self.link_pollutant_concentration.items():
+            if link_ids:
+                builder.add_link_pollutant_concentration(link_ids, pollutant)
+        if self.vertex_depths_2d:
+            builder.add_2d_vertex_depths(self.vertex_depths_2d)
         if self.include_clock:
             builder.add_clock()
         return builder

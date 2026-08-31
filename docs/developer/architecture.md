@@ -41,6 +41,15 @@ Root FastMCP ("OpenSWMM MCP Server")
   |-- mount(quality_mcp,         namespace="quality")
   |-- mount(tables_mcp,          namespace="tables")
   |-- mount(infrastructure_mcp,  namespace="infrastructure")
+  |-- mount(climate_mcp,         namespace="climate")
+  |
+  |   # Transport configuration (heat / age / reactions)
+  |-- mount(heat_mcp,            namespace="heat")
+  |-- mount(water_age_mcp,       namespace="water_age")
+  |-- mount(reactions_mcp,       namespace="reactions")
+  |-- mount(initial_quality_mcp, namespace="initial_quality")
+  |-- mount(process_components_mcp,
+  |         namespace="process_components")
   |
   |   # State / IO
   |-- mount(hotstart_mcp,        namespace="hotstart")
@@ -49,15 +58,25 @@ Root FastMCP ("OpenSWMM MCP Server")
   |
   |   # 2D overland-flow surface
   |-- mount(twod_mcp,            namespace="twod")
+  |-- mount(infil2d_mcp,         namespace="infil2d")
+  |
+  |   # Session-less utilities
+  |-- mount(datetime_mcp,        namespace="datetime")
+  |-- mount(xsect_mcp,           namespace="xsect")
+  |
+  |   # RL / optimization orchestration
+  |-- mount(gym_mcp,             namespace="gym")
   |
   |-- mount(resources_mcp)       # no namespace
   |-- mount(prompts_mcp)         # no namespace
 ```
 
-Twenty tool sub-servers are mounted in total — each declared in its
+Thirty tool sub-servers are mounted in total — each declared in its
 own `openswmm_mcp/tools/<name>.py` module as a `FastMCP("<name>")`
-instance.  The full list (and mount order) is in
-`openswmm_mcp/server.py`.
+instance.  Note that a namespace may contain an underscore
+(`water_age`, `initial_quality`, `process_components`), so a tool name
+cannot be split on the first underscore to recover its namespace.  The
+full list (and mount order) is in `openswmm_mcp/server.py`.
 
 ## Server Composition via `mount()`
 

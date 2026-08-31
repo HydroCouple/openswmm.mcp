@@ -245,35 +245,53 @@ async def get_unit_system(ctx: Context, session_id: str = "default") -> dict:
     * ``flow_units`` — the raw token, e.g. ``"CFS"`` / ``"CMS"``.
     * ``unit_system`` — ``"US"`` (CFS/GPM/MGD) or ``"SI"`` (CMS/LPS/MLD).
 
+    ``unit_system`` is the engine's OWN answer, read from the solver rather
+    than inferred from the flow-unit token, so it stays correct if the engine
+    ever grows a flow unit this tool has not heard of. On a BUILDING session
+    there is no solver to ask and the value is derived from ``flow_units``;
+    ``unit_system_source`` says which of the two happened.
+
     Works in BUILDING (ModelBuilder) and OPENED/RUNNING/ENDED (Solver)
     states.
     """
+    # wraps: swmm_get_unit_system swmm_get_flow_units
     _, target = await _get_target(ctx, session_id)
 
-    def _read() -> str:
+    def _read() -> tuple[str, str | None]:
         # Prefer the engine's typed accessor (swmm_get_flow_units) when the
         # target is a Solver that exposes it; fall back to the option string.
         flow_units = getattr(target, "flow_units", None)
         if flow_units is not None:
             name = getattr(flow_units, "name", None)
-            return name if name is not None else str(flow_units)
-        options = _options_mapping(target)
-        if options is not None:
-            return options["FLOW_UNITS"]
-        return target.get_option("FLOW_UNITS")
+            units = name if name is not None else str(flow_units)
+        else:
+            options = _options_mapping(target)
+            units = (
+                options["FLOW_UNITS"] if options is not None else target.get_option("FLOW_UNITS")
+            )
+        # swmm_get_unit_system: the engine's own US/SI classification. Absent
+        # on a ModelBuilder (BUILDING) target, where there is no solver.
+        system = getattr(target, "unit_system", None)
+        return units, (str(system) if system is not None else None)
 
-    raw = await asyncio.to_thread(_read)
+    raw, engine_system = await asyncio.to_thread(_read)
     token = raw.strip().upper()
-    if token in _US_FLOW_UNITS:
+    if engine_system is not None:
+        system = engine_system.strip().upper()
+        source = "engine"
+    elif token in _US_FLOW_UNITS:
         system = "US"
+        source = "derived"
     elif token in _SI_FLOW_UNITS:
         system = "SI"
+        source = "derived"
     else:
         raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] Unrecognised FLOW_UNITS token {raw!r}.")
     return {
         "session_id": session_id,
         "flow_units": token,
         "unit_system": system,
+        "unit_system_source": source,
     }
 
 

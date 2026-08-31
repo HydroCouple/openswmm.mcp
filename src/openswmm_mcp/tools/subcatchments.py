@@ -245,6 +245,7 @@ async def stat_precip(
     ctx: Context, session_id: str = "default", subcatch_id: str | int = ""
 ) -> dict:
     """Return total precipitation volume for a subcatchment."""
+    # wraps: swmm_subcatch_get_stat_precip swmm_stat_subcatch_precip
     return await _read_stat(ctx, session_id, subcatch_id, "precip", "precipitation")
 
 
@@ -253,7 +254,7 @@ async def stat_runoff_vol(
     ctx: Context, session_id: str = "default", subcatch_id: str | int = ""
 ) -> dict:
     """Return total runoff volume for a subcatchment."""
-    # wraps: swmm_subcatch_get_stat_runoff_vol
+    # wraps: swmm_subcatch_get_stat_runoff_vol swmm_stat_subcatch_runoff_vol
     return await _read_stat(ctx, session_id, subcatch_id, "runoff_vol", "runoff_vol")
 
 
@@ -262,7 +263,7 @@ async def stat_max_runoff(
     ctx: Context, session_id: str = "default", subcatch_id: str | int = ""
 ) -> dict:
     """Return the peak runoff rate for a subcatchment."""
-    # wraps: swmm_subcatch_get_stat_max_runoff
+    # wraps: swmm_subcatch_get_stat_max_runoff swmm_stat_subcatch_max_runoff
     return await _read_stat(ctx, session_id, subcatch_id, "max_runoff", "max_runoff")
 
 

@@ -94,6 +94,7 @@ async def _read_stat(
 @links_mcp.tool()
 async def stat_max_flow(ctx: Context, session_id: str = "default", link_id: str | int = "") -> dict:
     """Return the peak flow recorded for a link over the simulation."""
+    # wraps: swmm_link_get_stat_max_flow swmm_stat_link_max_flow
     return await _read_stat(ctx, session_id, link_id, "max_flow", "max_flow")
 
 
@@ -102,7 +103,7 @@ async def stat_max_velocity(
     ctx: Context, session_id: str = "default", link_id: str | int = ""
 ) -> dict:
     """Return the peak velocity for a link."""
-    # wraps: swmm_link_get_stat_max_velocity
+    # wraps: swmm_link_get_stat_max_velocity swmm_stat_link_max_velocity
     return await _read_stat(ctx, session_id, link_id, "max_velocity", "max_velocity")
 
 
@@ -111,13 +112,14 @@ async def stat_max_filling(
     ctx: Context, session_id: str = "default", link_id: str | int = ""
 ) -> dict:
     """Return the peak depth/full-depth ratio (0..1+) for a conduit."""
+    # wraps: swmm_link_get_stat_max_filling swmm_stat_link_max_filling
     return await _read_stat(ctx, session_id, link_id, "max_filling", "max_filling")
 
 
 @links_mcp.tool()
 async def stat_vol_flow(ctx: Context, session_id: str = "default", link_id: str | int = "") -> dict:
     """Return the total volume conveyed through a link."""
-    # wraps: swmm_link_get_stat_vol_flow
+    # wraps: swmm_link_get_stat_vol_flow swmm_stat_link_vol_flow
     return await _read_stat(ctx, session_id, link_id, "vol_flow", "vol_flow")
 
 
@@ -126,8 +128,72 @@ async def stat_surcharge_time(
     ctx: Context, session_id: str = "default", link_id: str | int = ""
 ) -> dict:
     """Return total surcharge duration (hours) for a link."""
-    # wraps: swmm_link_get_stat_surcharge_time
+    # wraps: swmm_link_get_stat_surcharge_time swmm_stat_link_surcharge_time
     return await _read_stat(ctx, session_id, link_id, "surcharge_time", "surcharge_time_hours")
+
+
+@links_mcp.tool()
+async def get_slot_volume(
+    ctx: Context, session_id: str = "default", link_id: str | int = ""
+) -> dict:
+    """Return the water currently held in a conduit's Preissmann slot.
+
+    The Preissmann slot is the narrow notional shaft above the pipe crown that
+    lets a closed conduit be routed as if it still had a free surface once it
+    surcharges. ``slot_volume`` is the part of the link's total volume standing
+    in that shaft, in project volume units.
+
+    **Finite-volume routing only.** Under the dynamic-wave router this reads
+    ``0.0``, which is indistinguishable from "no slot storage" — check the
+    routing model before drawing a conclusion from a zero. Run-level shares are
+    ``links_stat_slot_share`` and ``links_stat_peak_slot_share``.
+    """
+    # wraps: swmm_link_get_slot_volume
+    session = await _get_session(ctx, session_id)
+    idx = await _resolve_link(session, link_id)
+    value = await asyncio.to_thread(lambda: session.links[idx].slot_volume)
+    return {
+        "session_id": session_id,
+        "link_id": link_id,
+        "link_index": idx,
+        "slot_volume": float(value),
+    }
+
+
+@links_mcp.tool()
+async def stat_slot_share(
+    ctx: Context, session_id: str = "default", link_id: str | int = ""
+) -> dict:
+    """Return the run-level Preissmann slot share for a link (0..1).
+
+    Defined as ``(integral of slot_volume dt) / (integral of volume dt)`` — a
+    RATIO OF TIME INTEGRALS, never an average of instantaneous ratios, so brief
+    excursions do not dominate it. It answers "what fraction of this conduit's
+    stored water-time was surcharge?".
+
+    **Finite-volume routing only.** Reads ``0.0`` under the dynamic-wave
+    router, indistinguishable from "no slot flow occurred". The instantaneous
+    peak is ``links_stat_peak_slot_share``.
+    """
+    # wraps: swmm_link_get_stat_slot_share
+    return await _read_stat(ctx, session_id, link_id, "slot_share", "slot_share")
+
+
+@links_mcp.tool()
+async def stat_peak_slot_share(
+    ctx: Context, session_id: str = "default", link_id: str | int = ""
+) -> dict:
+    """Return the peak instantaneous Preissmann slot share for a link (0..1).
+
+    The largest ``slot_volume / volume`` ratio reached at any single step over
+    the run — the worst moment, in contrast to the time-weighted
+    ``links_stat_slot_share``.
+
+    **Finite-volume routing only.** Reads ``0.0`` under the dynamic-wave
+    router, indistinguishable from "no slot flow occurred".
+    """
+    # wraps: swmm_link_get_stat_peak_slot_share
+    return await _read_stat(ctx, session_id, link_id, "peak_slot_share", "peak_slot_share")
 
 
 @links_mcp.tool()

@@ -53,20 +53,26 @@ from openswmm_mcp.tools.editing import editing_mcp  # noqa: E402
 from openswmm_mcp.tools.forcing import forcing_mcp  # noqa: E402
 from openswmm_mcp.tools.geopackage import geopackage_mcp  # noqa: E402
 from openswmm_mcp.tools.gym_envs import gym_mcp  # noqa: E402
+from openswmm_mcp.tools.heat import heat_mcp  # noqa: E402
 from openswmm_mcp.tools.hotstart import hotstart_mcp  # noqa: E402
+from openswmm_mcp.tools.infil2d import infil2d_mcp  # noqa: E402
 from openswmm_mcp.tools.inflows import inflows_mcp  # noqa: E402
 from openswmm_mcp.tools.infrastructure import infrastructure_mcp  # noqa: E402
+from openswmm_mcp.tools.initial_quality import initial_quality_mcp  # noqa: E402
 from openswmm_mcp.tools.lifecycle import lifecycle_mcp  # noqa: E402
 from openswmm_mcp.tools.links import links_mcp  # noqa: E402
 from openswmm_mcp.tools.model import model_mcp  # noqa: E402
 from openswmm_mcp.tools.nodes import nodes_mcp  # noqa: E402
 from openswmm_mcp.tools.pollutants import pollutants_mcp  # noqa: E402
+from openswmm_mcp.tools.process_components import process_components_mcp  # noqa: E402
 from openswmm_mcp.tools.quality import quality_mcp  # noqa: E402
 from openswmm_mcp.tools.query import query_mcp  # noqa: E402
+from openswmm_mcp.tools.reactions import reactions_mcp  # noqa: E402
 from openswmm_mcp.tools.spatial_quality import spatial_quality_mcp  # noqa: E402
 from openswmm_mcp.tools.subcatchments import subcatchments_mcp  # noqa: E402
 from openswmm_mcp.tools.tables import tables_mcp  # noqa: E402
 from openswmm_mcp.tools.twod import twod_mcp  # noqa: E402
+from openswmm_mcp.tools.water_age import water_age_mcp  # noqa: E402
 from openswmm_mcp.tools.xsect import xsect_mcp  # noqa: E402
 
 mcp.mount(lifecycle_mcp, namespace="lifecycle")
@@ -90,9 +96,15 @@ mcp.mount(pollutants_mcp, namespace="pollutants")
 mcp.mount(model_mcp, namespace="model")
 mcp.mount(quality_mcp, namespace="quality")
 mcp.mount(twod_mcp, namespace="twod")
+mcp.mount(infil2d_mcp, namespace="infil2d")
 mcp.mount(datetime_mcp, namespace="datetime")
 mcp.mount(xsect_mcp, namespace="xsect")
 mcp.mount(gym_mcp, namespace="gym")
+mcp.mount(heat_mcp, namespace="heat")
+mcp.mount(reactions_mcp, namespace="reactions")
+mcp.mount(water_age_mcp, namespace="water_age")
+mcp.mount(initial_quality_mcp, namespace="initial_quality")
+mcp.mount(process_components_mcp, namespace="process_components")
 
 # ---------------------------------------------------------------------------
 # Resource and prompt sub-servers (no namespace -- keep URIs short)

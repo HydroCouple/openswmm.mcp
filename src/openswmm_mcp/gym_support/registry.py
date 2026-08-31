@@ -153,6 +153,40 @@ class PumpEnergyParams(_Params):
     name: str = "pump_energy"
 
 
+class TSSLoadParams(_Params):
+    """Params for the C{tss_load} reward term.
+
+    Despite the name it works for B{any} declared pollutant.
+
+    @ivar link_ids: Links across which to integrate load (required),
+        oriented toward the receiving water / outfall.
+    @ivar pollutant: Symbolic pollutant ID as declared in C{[POLLUTANTS]}.
+    @ivar name: Term identifier.
+    """
+
+    link_ids: list[str] = Field(min_length=1)
+    pollutant: str = "TSS"
+    name: str = "tss_load"
+
+
+class SurchargeSlotShareParams(_Params):
+    """Params for the C{surcharge_slot_share} reward term.
+
+    B{Finite-volume routing only.} Every Preissmann-slot statistic reads a
+    hard 0.0 under the dynamic-wave router, so the term refuses a
+    C{ROUTING_MODEL DYNWAVE} model at bind rather than reporting a
+    permanently perfect network.
+
+    @ivar link_ids: Closed-conduit link IDs whose pressurisation to
+        penalise (required). Open channels and pumps have no slot and
+        contribute a structural zero, so do not pass the whole network.
+    @ivar name: Term identifier.
+    """
+
+    link_ids: list[str] = Field(min_length=1)
+    name: str = "surcharge_slot_share"
+
+
 # -- runtime action factories ----------------------------------------------
 
 
@@ -179,6 +213,71 @@ class NodeLateralInflowParams(_Params):
     node_ids: list[str] = Field(min_length=1)
     max_inflow: float = Field(gt=0.0)
     name: str = "node_lateral_inflow"
+
+
+#: Engine refusal range for a heat source temperature, degrees Celsius. The
+#: engine REFUSES (does not clamp) an out-of-range write and a refused write
+#: does not take effect, so bounds outside this range are rejected at config
+#: validation rather than producing silent no-ops mid-episode.
+_HEAT_TEMP_MIN_C = -50.0
+_HEAT_TEMP_MAX_C = 100.0
+
+#: The heat / water-age source pathways both engine modules share.
+_SOURCE_PATHWAYS = (
+    "RAINFALL",
+    "DWF",
+    "GW",
+    "RDII",
+    "EXTERNAL_INFLOW",
+    "IFACE",
+    "INITIAL_STATE",
+)
+
+
+class _HeatSourceTempParams(_Params):
+    """Shared shape for the heat inlet-temperature factories.
+
+    Backs both the design factory (applied once per episode) and the
+    runtime actuator (applied every step) — heat source writes are live, so
+    the same engine call serves both.
+
+    @ivar sources: Heat-source pathway names to drive.
+    @ivar low: Lower bound in degrees Celsius.
+    @ivar high: Upper bound in degrees Celsius.
+    """
+
+    sources: list[str] = Field(min_length=1)
+    low: float = _HEAT_TEMP_MIN_C
+    high: float = _HEAT_TEMP_MAX_C
+
+    @model_validator(mode="after")
+    def _check_heat(self) -> _HeatSourceTempParams:
+        unknown = [s for s in self.sources if s.upper() not in _SOURCE_PATHWAYS]
+        if unknown:
+            raise ValueError(
+                f"unknown heat source(s) {unknown}; valid pathways: "
+                f"{list(_SOURCE_PATHWAYS)}"
+            )
+        if self.high <= self.low:
+            raise ValueError("high must be strictly greater than low")
+        if self.low < _HEAT_TEMP_MIN_C or self.high > _HEAT_TEMP_MAX_C:
+            raise ValueError(
+                f"bounds [{self.low}, {self.high}] degC extend beyond the "
+                f"engine's refusal range [{_HEAT_TEMP_MIN_C}, "
+                f"{_HEAT_TEMP_MAX_C}]; the engine refuses (does not clamp) an "
+                "out-of-range temperature, so a sampled action outside it "
+                "would silently leave the temperature unchanged"
+            )
+        return self
+
+
+class HeatSourceTemperatureSetpointParams(_HeatSourceTempParams):
+    """Params for the C{heat_source_temperature_setpoint} runtime factory.
+
+    @ivar name: Action-space key for this factory.
+    """
+
+    name: str = "heat_source_temperature_setpoint"
 
 
 # -- design action factories -------------------------------------------------
@@ -357,6 +456,114 @@ class RDIIUnitHydrographParams(_Params):
             raise ValueError(
                 "include_ia requires at least one of (dmax, drecov, dinit) to have ia_high > ia_low"
             )
+        return self
+
+
+class ReactionCoefficientValueParams(_Params):
+    """Params for the C{reaction_coefficient_value} design factory.
+
+    Searches over C{[REACTION_COEFFICIENTS]} PARAMETER values — the rate
+    constants, half-saturation constants, yields and stoichiometric factors
+    a multi-species water-quality model is normally calibrated on. Pairing
+    this with an observed-vs-simulated objective makes the search a
+    calibration run.
+
+    CONSTANT coefficients are refused at bind time by the factory: the
+    model declares them fixed, so writing them would change values it was
+    never meant to vary.
+
+    Bounds are in the model's own expression units — the engine does not
+    declare coefficient units and nothing converts them.
+
+    @ivar coefficient_ids: Coefficient names as declared in
+        C{[REACTION_COEFFICIENTS]}; each must be a PARAMETER (required).
+    @ivar low: Lower bound — a scalar applied to every coefficient, or one
+        bound per coefficient.
+    @ivar high: Upper bound, matching C{low}'s shape.
+    @ivar name: Action-space key for this factory.
+    """
+
+    coefficient_ids: list[str] = Field(min_length=1)
+    low: float | list[float]
+    high: float | list[float]
+    name: str = "reaction_coefficient_value"
+
+    @model_validator(mode="after")
+    def _check_bounds(self) -> ReactionCoefficientValueParams:
+        scalar_low = isinstance(self.low, (int, float))
+        scalar_high = isinstance(self.high, (int, float))
+        if scalar_low != scalar_high:
+            raise ValueError(
+                "low and high must both be scalars or both be per-coefficient lists"
+            )
+        n = len(self.coefficient_ids)
+        if scalar_low:
+            if self.high <= self.low:
+                raise ValueError("high must be strictly greater than low")
+            return self
+        if len(self.low) != n or len(self.high) != n:
+            raise ValueError(
+                f"per-coefficient low/high must each have one entry per "
+                f"coefficient_id ({n})"
+            )
+        if any(hi < lo for lo, hi in zip(self.low, self.high)):
+            raise ValueError("every high must be >= its matching low")
+        if not any(hi > lo for lo, hi in zip(self.low, self.high)):
+            raise ValueError("at least one coefficient must have high > low (searchable)")
+        return self
+
+
+class HeatSourceTemperatureParams(_HeatSourceTempParams):
+    """Params for the C{heat_source_temperature} design factory.
+
+    Sets a fixed thermal boundary condition per episode. Use the
+    C{heat_source_temperature_setpoint} runtime factory instead when the
+    agent should modulate an inlet temperature over the event.
+
+    Requires C{[OPTIONS] HEAT_TRANSPORT YES}; binding raises otherwise
+    rather than storing temperatures the model will never route.
+
+    @ivar name: Action-space key for this factory.
+    """
+
+    name: str = "heat_source_temperature"
+
+
+class WaterAgeSourceAgeParams(_Params):
+    """Params for the C{water_age_source_age} design factory.
+
+    Sets the age credited to water entering along each source pathway, in
+    B{hours}. B{Negative bounds are legal and meaningful} — a negative
+    source age extracts age-volume (the engine clamps the resulting age at
+    zero, not the input) — so neither C{low} nor C{high} is floored at zero
+    here. Opt into a non-negative range deliberately if that is what the
+    scenario means.
+
+    Requires C{[OPTIONS] WATER_AGE YES}; binding raises otherwise rather
+    than storing ages the model will never transport.
+
+    @ivar sources: Water-age pathway names to drive (required).
+    @ivar low: Lower bound in hours; may be negative (no default — either
+        default would make a modelling decision for the caller).
+    @ivar high: Upper bound in hours.
+    @ivar name: Action-space key for this factory.
+    """
+
+    sources: list[str] = Field(min_length=1)
+    low: float
+    high: float
+    name: str = "water_age_source_age"
+
+    @model_validator(mode="after")
+    def _check_water_age(self) -> WaterAgeSourceAgeParams:
+        unknown = [s for s in self.sources if s.upper() not in _SOURCE_PATHWAYS]
+        if unknown:
+            raise ValueError(
+                f"unknown water-age source(s) {unknown}; valid pathways: "
+                f"{list(_SOURCE_PATHWAYS)}"
+            )
+        if self.high <= self.low:
+            raise ValueError("high must be strictly greater than low")
         return self
 
 
@@ -569,6 +776,25 @@ for _spec in [
         PumpEnergyParams,
         "Pumping effort = setting x rated_power x dt (cost to minimize).",
     ),
+    KindSpec(
+        "tss_load",
+        "reward_term",
+        "openswmm_gymnasium.rewards:TSSLoad",
+        TSSLoadParams,
+        "Pollutant mass flux (flow x concentration x dt) through links, for "
+        "any declared pollutant (cost to minimize). Units are "
+        "flow x concentration x s, proportional to mass but not in mass units.",
+    ),
+    KindSpec(
+        "surcharge_slot_share",
+        "reward_term",
+        "openswmm_gymnasium.rewards:SurchargeSlotShare",
+        SurchargeSlotShareParams,
+        "Run-level Preissmann-slot storage share as a pressurisation proxy, "
+        "dimensionless in [0,1] (cost to minimize). FINITE-VOLUME ROUTING "
+        "ONLY: reads a hard 0.0 under dynamic wave, so the term refuses a "
+        "DYNWAVE model at bind rather than reporting a perfect network.",
+    ),
     # runtime factories (openswmm_gymnasium.spaces.runtime)
     KindSpec(
         "orifice_setting",
@@ -583,6 +809,16 @@ for _spec in [
         "openswmm_gymnasium.spaces.runtime:NodeLateralInflow",
         NodeLateralInflowParams,
         "Per-step controllable lateral inflow [0,max_inflow] at nodes.",
+    ),
+    KindSpec(
+        "heat_source_temperature_setpoint",
+        "runtime_factory",
+        "openswmm_gymnasium.spaces.runtime:HeatSourceTemperatureSetpoint",
+        HeatSourceTemperatureSetpointParams,
+        "Per-step inlet temperature (degC) per heat-source pathway; heat "
+        "source writes are live. Requires [OPTIONS] HEAT_TRANSPORT YES. Note "
+        "there is no temperature observation counterpart in the C API, so "
+        "this is an open-loop / feed-forward actuator.",
     ),
     # design factories (openswmm_gymnasium.spaces.design)
     KindSpec(
@@ -646,6 +882,35 @@ for _spec in [
         RDIIUnitHydrographParams,
         "Design-time RDII sizing: edit the R fraction (and optionally initial "
         "abstraction) of existing unit-hydrograph entries, preserving T and K.",
+    ),
+    KindSpec(
+        "reaction_coefficient_value",
+        "design_factory",
+        "openswmm_gymnasium.spaces.design:ReactionCoefficientValue",
+        ReactionCoefficientValueParams,
+        "Search over [REACTION_COEFFICIENTS] PARAMETER values — the "
+        "calibration handles of a multi-species reaction model. CONSTANT "
+        "coefficients are refused at bind. Bounds are in the model's own "
+        "expression units; nothing is converted.",
+    ),
+    KindSpec(
+        "heat_source_temperature",
+        "design_factory",
+        "openswmm_gymnasium.spaces.design:HeatSourceTemperature",
+        HeatSourceTemperatureParams,
+        "Design-time global inlet temperature (degC) per heat-source pathway; "
+        "a fixed thermal boundary condition per episode. Bounded to the "
+        "engine's own [-50,100] refusal range. Requires [OPTIONS] "
+        "HEAT_TRANSPORT YES.",
+    ),
+    KindSpec(
+        "water_age_source_age",
+        "design_factory",
+        "openswmm_gymnasium.spaces.design:WaterAgeSourceAge",
+        WaterAgeSourceAgeParams,
+        "Design-time global source age (hours) per water-age pathway. "
+        "Negative values are legal and meaningful (age-volume extraction) and "
+        "are not clamped at zero. Requires [OPTIONS] WATER_AGE YES.",
     ),
     # policy factories (openswmm_gymnasium.spaces.control_curve)
     KindSpec(

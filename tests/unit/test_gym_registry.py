@@ -26,8 +26,14 @@ EXPECTED_KINDS = {
         "uncontrolled_discharge",
         "storage_underutilization",
         "pump_energy",
+        "tss_load",
+        "surcharge_slot_share",
     },
-    "runtime_factory": {"orifice_setting", "node_lateral_inflow"},
+    "runtime_factory": {
+        "orifice_setting",
+        "node_lateral_inflow",
+        "heat_source_temperature_setpoint",
+    },
     "design_factory": {
         "link_roughness",
         "link_length",
@@ -37,6 +43,9 @@ EXPECTED_KINDS = {
         "storage_volume",
         "lid_placement",
         "rdii_unit_hydrograph",
+        "heat_source_temperature",
+        "water_age_source_age",
+        "reaction_coefficient_value",
     },
     "policy_factory": {"control_curve"},
     "wrapper": {

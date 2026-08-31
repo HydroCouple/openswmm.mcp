@@ -209,6 +209,32 @@ async def set_vertex_z(
 
 
 @twod_mcp.tool()
+async def set_vertex_z_bulk(
+    ctx: Context,
+    session_id: str = "default",
+    z: list[float] | None = None,
+) -> dict:
+    """Set EVERY vertex ground elevation from one array (m).
+
+    Positional — index ``i`` is vertex ``i``, so the array length must
+    equal the vertex count from ``twod_get_mesh_summary``. Rescans the
+    mesh once instead of once per vertex, which is what makes whole-terrain
+    edits (regrading, a re-imported DEM) cheap; use ``twod_set_vertex_z``
+    for a single vertex.
+    """
+    # wraps: swmm_2d_set_vertex_z_bulk
+    if not z:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] z must be non-empty.")
+    _, surface = await _get_surface(ctx, session_id)
+    n = await asyncio.to_thread(lambda: surface.n_vertices)
+    if len(z) != n:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] z length {len(z)} != vertex count {n}.")
+    values = [float(v) for v in z]
+    await asyncio.to_thread(surface.set_vertex_z_bulk, values)
+    return {"status": "ok", "session_id": session_id, "count": n}
+
+
+@twod_mcp.tool()
 async def set_triangle_mannings(
     ctx: Context,
     session_id: str = "default",
@@ -593,16 +619,23 @@ async def get_vertex_head(
     """Return the reconstructed water-surface head (m) at one mesh vertex.
 
     Triangle-based state is the solver's native representation; this is the
-    per-vertex value reconstructed for rendering. Use
+    per-vertex value reconstructed for rendering. Also reports the vertex's
+    own ``x`` / ``y`` / ``z`` (project units) so a head reading can be placed
+    on the map without pulling the whole coordinate array. Use
     ``twod_get_state_bulk`` with ``variable="vertex_head"`` to read every
     vertex at once.
     """
+    # wraps: swmm_2d_vertex_get_xyz
     _, surface = await _get_surface(ctx, session_id)
 
     def _read() -> dict:
+        x, y, z = surface.get_vertex_xyz(vertex)
         return {
             "vertex": vertex,
             "head": float(surface.get_vertex_head(vertex)),
+            "x": float(x),
+            "y": float(y),
+            "z": float(z),
         }
 
     out = await asyncio.to_thread(_read)
@@ -1010,8 +1043,14 @@ async def get_edge_bc(
 
     Reports the BC type (WALL / NORMAL_FLOW / SPECIFIED_STAGE /
     SPECIFIED_FLOW / RATING_CURVE), the constant head and slope, the
-    prescribed per-metre flow, and the cumulative flux through the edge.
+    prescribed per-metre flow, the cumulative flux through the edge, and
+    the names of the drivers bound to the edge — ``tseries_name`` (stage),
+    ``flow_tseries_name`` (flow), ``rating_curve_name``. Each name is the
+    read-back mirror of the matching ``twod_set_edge_bc`` argument; ``""``
+    means the slot is clear, so the edge falls back to the constant
+    ``head`` / ``flow``.
     """
+    # wraps: swmm_2d_get_edge_bc_tseries_name swmm_2d_get_edge_bc_flow_tseries_name swmm_2d_get_edge_bc_rating_curve_name  # noqa: E501
     _check_edge(edge)
     _, surface = await _get_surface(ctx, session_id)
 
@@ -1025,6 +1064,9 @@ async def get_edge_bc(
             "slope": float(surface.get_edge_bc_slope(triangle, edge)),
             "flow": float(surface.get_edge_bc_flow(triangle, edge)),
             "cum_flux": float(surface.get_edge_bc_cum_flux(triangle, edge)),
+            "tseries_name": surface.get_edge_bc_tseries_name(triangle, edge),
+            "flow_tseries_name": surface.get_edge_bc_flow_tseries_name(triangle, edge),
+            "rating_curve_name": surface.get_edge_bc_rating_curve_name(triangle, edge),
         }
 
     out = await asyncio.to_thread(_read)
@@ -1054,6 +1096,8 @@ async def set_edge_bc(
     slope), ``flow`` (per-metre discharge, m3/s/m), ``tseries_name``
     (stage timeseries; "" clears), ``flow_tseries_name`` (flow timeseries;
     "" clears), ``rating_curve_name`` (stage-to-flow curve; "" clears).
+
+    Read the result back with ``twod_get_edge_bc``.
     """
     _check_edge(edge)
     if (

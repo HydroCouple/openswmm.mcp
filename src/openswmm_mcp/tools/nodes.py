@@ -181,6 +181,89 @@ async def set_tag(
 
 
 @nodes_mcp.tool()
+async def get_rim_depth(ctx: Context, session_id: str = "default", node_id: str | int = "") -> dict:
+    """Return the rim depth of a node — the depth at which it floods to the surface.
+
+    Rim depth is the distance from the invert to the ground/rim elevation, in
+    project length units. It is the threshold the flooding statistics are
+    measured against, and it is NOT the same as ``max_depth``: a node may be
+    modelled deeper than its rim so that surcharge above the rim is tracked
+    rather than immediately lost.
+
+    Write it with ``nodes_set_rim_depth``.
+    """
+    # wraps: swmm_node_get_rim_depth
+    session = await _get_session(ctx, session_id)
+    idx = await _resolve_node(session, node_id)
+    value = await asyncio.to_thread(lambda: session.nodes[idx].rim_depth)
+    return {
+        "session_id": session_id,
+        "node_id": node_id,
+        "node_index": idx,
+        "rim_depth": float(value),
+    }
+
+
+@nodes_mcp.tool()
+async def set_rim_depth(
+    ctx: Context,
+    session_id: str = "default",
+    node_id: str | int = "",
+    rim_depth: float = 0.0,
+) -> dict:
+    """Set the rim depth of a node — the depth at which it floods to the surface.
+
+    ``rim_depth`` is in project length units, measured from the node invert.
+    Changing it moves the flooding threshold, so the flooding statistics
+    (``nodes_stat_vol_flooded``, ``nodes_stat_time_flooded``) are measured
+    against the new value from the next step on.
+
+    Distinct from the node's ``max_depth``, which ``editing_set_node_properties``
+    writes.
+    """
+    # wraps: swmm_node_set_rim_depth
+    session = await _get_session(ctx, session_id)
+    idx = await _resolve_node(session, node_id)
+    value = float(rim_depth)
+
+    def _set() -> None:
+        session.nodes[idx].rim_depth = value
+
+    await asyncio.to_thread(_set)
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "node_id": node_id,
+        "node_index": idx,
+        "rim_depth": value,
+    }
+
+
+@nodes_mcp.tool()
+async def get_inflow(ctx: Context, session_id: str = "default", node_id: str | int = "") -> dict:
+    """Return the TOTAL inflow rate into one node at the current step.
+
+    Total inflow is everything arriving at the node — upstream link flow plus
+    lateral inflow — in the project's flow units. Contrast the lateral-only
+    figure reported by ``query_get_node_info``.
+
+    This is the single-node read; ``nodes_get_inflows_bulk`` returns the same
+    quantity for every node in one call and is much cheaper when you want more
+    than a handful. Meaningful only once the simulation is stepping.
+    """
+    # wraps: swmm_node_get_inflow
+    session = await _get_session(ctx, session_id)
+    idx = await _resolve_node(session, node_id)
+    value = await asyncio.to_thread(lambda: session.nodes[idx].inflow)
+    return {
+        "session_id": session_id,
+        "node_id": node_id,
+        "node_index": idx,
+        "inflow": float(value),
+    }
+
+
+@nodes_mcp.tool()
 async def get_ids_bulk(ctx: Context, session_id: str = "default") -> dict:
     """Return the IDs of all nodes in storage order as ``{count, ids}``."""
     session = await _get_session(ctx, session_id)
@@ -199,7 +282,7 @@ async def stat_max_depth(
     ctx: Context, session_id: str = "default", node_id: str | int = ""
 ) -> dict:
     """Return the peak depth recorded for a node over the simulation."""
-    # wraps: swmm_node_get_stat_max_depth
+    # wraps: swmm_node_get_stat_max_depth swmm_stat_node_max_depth
     session = await _get_session(ctx, session_id)
     idx = await _resolve_node(session, node_id)
     value = await asyncio.to_thread(lambda: session.nodes[idx].stats.max_depth)
@@ -216,7 +299,7 @@ async def stat_max_overflow(
     ctx: Context, session_id: str = "default", node_id: str | int = ""
 ) -> dict:
     """Return the peak overflow rate for a node over the simulation."""
-    # wraps: swmm_node_get_stat_max_overflow
+    # wraps: swmm_node_get_stat_max_overflow swmm_stat_node_max_overflow
     session = await _get_session(ctx, session_id)
     idx = await _resolve_node(session, node_id)
     value = await asyncio.to_thread(lambda: session.nodes[idx].stats.max_overflow)
@@ -233,7 +316,7 @@ async def stat_vol_flooded(
     ctx: Context, session_id: str = "default", node_id: str | int = ""
 ) -> dict:
     """Return the total flooded volume for a node over the simulation."""
-    # wraps: swmm_node_get_stat_vol_flooded
+    # wraps: swmm_node_get_stat_vol_flooded swmm_stat_node_vol_flooded
     session = await _get_session(ctx, session_id)
     idx = await _resolve_node(session, node_id)
     value = await asyncio.to_thread(lambda: session.nodes[idx].stats.vol_flooded)
@@ -250,7 +333,7 @@ async def stat_time_flooded(
     ctx: Context, session_id: str = "default", node_id: str | int = ""
 ) -> dict:
     """Return the total flooded duration (hours) for a node."""
-    # wraps: swmm_node_get_stat_time_flooded
+    # wraps: swmm_node_get_stat_time_flooded swmm_stat_node_time_flooded
     session = await _get_session(ctx, session_id)
     idx = await _resolve_node(session, node_id)
     value = await asyncio.to_thread(lambda: session.nodes[idx].stats.time_flooded)

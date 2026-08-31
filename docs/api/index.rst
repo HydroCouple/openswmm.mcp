@@ -298,6 +298,102 @@ openswmm_mcp.tools.twod
    :undoc-members:
    :show-inheritance:
 
+openswmm_mcp.tools.climate
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. automodule:: openswmm_mcp.tools.climate
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+openswmm_mcp.tools.datetime_tools
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. automodule:: openswmm_mcp.tools.datetime_tools
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+openswmm_mcp.tools.gym_envs
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. automodule:: openswmm_mcp.tools.gym_envs
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+openswmm_mcp.tools.gym_runs
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. automodule:: openswmm_mcp.tools.gym_runs
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+openswmm_mcp.tools.gym_scoring
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. automodule:: openswmm_mcp.tools.gym_scoring
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+openswmm_mcp.tools.heat
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. automodule:: openswmm_mcp.tools.heat
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+openswmm_mcp.tools.infil2d
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. automodule:: openswmm_mcp.tools.infil2d
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+openswmm_mcp.tools.initial_quality
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. automodule:: openswmm_mcp.tools.initial_quality
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+openswmm_mcp.tools.process_components
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. automodule:: openswmm_mcp.tools.process_components
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+openswmm_mcp.tools.reactions
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. automodule:: openswmm_mcp.tools.reactions
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+openswmm_mcp.tools.water_age
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. automodule:: openswmm_mcp.tools.water_age
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+openswmm_mcp.tools.xsect
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. automodule:: openswmm_mcp.tools.xsect
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Resource Modules
 ----------------
 

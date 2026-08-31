@@ -1,6 +1,6 @@
 # Tools
 
-The OpenSWMM MCP server exposes **473 tools** across **22 domain
+The OpenSWMM MCP server exposes **650 tools** across **30 domain
 namespaces**.  Every tool is a FastMCP `@tool` decorated function in
 `src/openswmm_mcp/tools/<namespace>.py` that returns either a plain
 value or a Pydantic model from `openswmm_mcp.models`.
@@ -17,26 +17,34 @@ section there.
 
 | Namespace | Tools | Purpose |
 |-----------|------:|---------|
-| `lifecycle_*` | 23 | Open / step / run / close models (incl. lenient open + open-diagnostics read-back), list sessions, manage event windows, steady-state skip, runoff-interface files. |
+| `lifecycle_*` | 28 | Open / step / run / close models (incl. lenient open + open-diagnostics read-back), list sessions, manage event windows, steady-state skip, runoff-interface files. |
 | `query_*` | 7 | Read-only "what does this model contain?" queries (nodes, links, subcatchments, gages, pollutants, system summary, free-form search). |
 | `model_*` | 38 | Project-level metadata: title, options + extension options, CRS, unit system, scalar user flags + user-flag schema / per-object values, plugins, file-section paths + typed external-file path slots, aquifer / snowpack listings, pattern factors, report start. |
 | `building_*` | 13 | Programmatic model construction: nodes, links, subcatchments, gages, options, time series, curves, pollutants, validation + write. |
-| `editing_*` | 14 | In-place edits on a parsed model: cascade-delete + impact analysis (nodes, links, subcatchments, gages, tables, transects, pollutants, patterns, aquifers, snowpacks, LID controls, streets, inlets, land uses, hydrographs), type conversion, property setters, renames, gage scale factor. |
-| `nodes_*` | 40 | Per-node accessors: bulk arrays, storage curves, outfall configuration, dividers, exfiltration, quality, tags, head boundary. |
-| `links_*` | 56 | Per-link accessors: bulk arrays, control settings, pump / weir / orifice / outlet / culvert parameters, cross-section, tags, statistics. |
-| `subcatchments_*` | 38 | Per-subcatchment accessors: runoff state, infiltration (incl. model switch), coverage, ponded quality, statistics, tags, outlet routing, aquifer / groundwater assignment + `[GROUNDWATER]` params. |
+| `editing_*` | 31 | In-place edits on a parsed model: cascade-delete + impact analysis (nodes, links, subcatchments, gages, tables, transects, pollutants, patterns, aquifers, snowpacks, LID controls, streets, inlets, land uses, hydrographs), type conversion, property setters, renames, gage scale factor. |
+| `nodes_*` | 47 | Per-node accessors: bulk arrays, storage curves, outfall configuration, dividers, exfiltration, quality, tags, head boundary. |
+| `links_*` | 59 | Per-link accessors: bulk arrays, control settings, pump / weir / orifice / outlet / culvert parameters, cross-section, tags, statistics. |
+| `subcatchments_*` | 56 | Per-subcatchment accessors: runoff state, infiltration (incl. model switch), coverage, ponded quality, statistics, tags, outlet routing, aquifer / groundwater assignment + `[GROUNDWATER]` params. |
 | `inflows_*` | 35 | External / DWF / RDII inflows, unit hydrographs, exponential IA decay — full read / edit / remove lifecycle. |
 | `controls_*` | 11 | SWMM control rules: add, clear, validate, remove one rule, find rules referencing an object, set link setting / status. |
 | `forcing_*` | 11 | Per-step overrides (lateral inflow, rainfall, PET, link control, link quality) and climate-evaporation read-back. |
 | `pollutants_*` | 23 | Pollutant identity + properties (decay, rain/GW/RDII/DWF concentrations, co-pollutant, snow-only, runtime injection). |
-| `quality_*` | 14 | Buildup / washoff / treatment kinetics; landuse and street-sweeping setup. |
+| `quality_*` | 15 | Buildup / washoff / treatment kinetics; landuse and street-sweeping setup. |
 | `tables_*` | 16 | Time series, curves, patterns; type query, lookup helpers, pattern removal. |
-| `infrastructure_*` | 34 | Transects (full profile / bank / encroachment / modifier editing), streets, inlets, LID controls and LID-usage (add / count / get / remove). |
-| `hotstart_*` | 10 | Hot-start save / load, state seeding, session cloning, scheduled-save registry. |
+| `infrastructure_*` | 42 | Transects (full profile / bank / encroachment / modifier editing), streets, inlets, LID controls and LID-usage (add / count / get / remove). |
+| `hotstart_*` | 11 | Hot-start save / load, state seeding, session cloning, scheduled-save registry. |
 | `analysis_*` | 22 | Post-run analytics: statistics, mass balance, flooding / capacity summaries, quality losses, scenario compare, results export, full output-reader breadth (snapshot + series + attribute). |
 | `spatial_*` | 17 | Coordinates, polylines, polygons, CRS, gage coords, bulk node coords, project-wide geometry export, LID placement. |
 | `geopackage_*` | 14 | GeoPackage I/O: plugin registration, open, list simulations, read result series / summaries, raw SQL scalars, topology, compare simulated vs observed, observed-value writes. |
-| `twod_*` | 28 | 2D overland-flow surface: mesh queries + edits (vertex Z, triangle Manning's n, triangle/vertex tags, vertex→node coupling), per-triangle / per-vertex state (incl. vertex render depths), edge geometry, statistics + mass balance, runtime forcing, solver parameters, edge boundary conditions, edge conveyance. |
+| `twod_*` | 35 | 2D overland-flow surface: mesh queries + edits (vertex Z per-vertex or whole-mesh, triangle Manning's n, triangle/vertex tags, vertex→node coupling), per-triangle / per-vertex state (incl. vertex render depths), edge geometry, statistics + mass balance, runtime forcing, solver parameters, edge boundary conditions (incl. driver-name read-back), edge conveyance. |
+| `climate_*` | 7 | Climate *configuration* before a run: `[TEMPERATURE]`, `[EVAPORATION]`, `[WINDSPEED]`, `[ADJUSTMENTS]`, snowmelt globals, areal-depletion curves. |
+| `heat_*` | 18 | Heat transport: `[HEAT_FLUXES]` module toggles, `[RADIATIVE_FLUXES]` / `[SOLAR_RADIATION]` / `[CLOUD_COVER]` parameters, shortwave mode, `[HEAT_SOURCES]` inlet temperatures + per-node overrides. Temperatures are degC and refused (never clamped) outside `[-50, 100]`. |
+| `water_age_*` | 6 | `[WATER_AGE_SOURCES]`: per-pathway global ages plus `dwf` / `external_inflow` node overrides. Values are HOURS and may be negative (age extraction). |
+| `reactions_*` | 26 | Multi-species reactions: species / coefficients / terms, pipe + tank expressions, `[REACTION_OPTIONS]`, initial quality, whole-file `.rxn` text, expression pre-flight, and the static completer vocabulary. |
+| `initial_quality_*` | 3 | `[INITIAL_QUALITY]` per-element seeds — pollutant concentrations plus the reserved `__WATER_AGE__` (hours) and `__TEMPERATURE__` (degC) species. |
+| `process_components_*` | 4 | `[PROCESS_COMPONENTS]` registrations: which process components load, from which config path, and what that path resolved to. |
+| `infil2d_*` | 12 | Per-cell 2D mesh infiltration: `[2D_INFILTRATION_OPTIONS]`, tag defaults, per-cell overrides, rate / cumulative / total-volume readback. |
+| `xsect_*` | 14 | Pure cross-section geometry maths (area, depth, hydraulic radius, section factor, critical depth) — no open session required. |
 | `datetime_*` | 6 | Pure SWMM-DateTime conversion utilities (encode / decode / arithmetic) — no open session required. |
 | `gym_*` | 23 | RL / optimization orchestration via `openswmm.gymnasium`: declarative env configs, episode rollouts, interactive LLM-as-controller stepping, background design- and policy-search jobs (random / grid / Platypus MOEAs), reactive `control_curve` policy tuning + decode, Pareto scoring, apply-design model bridge. See {doc}`/user-guide/optimization`. |
 
@@ -523,6 +531,8 @@ Tools:
   (windowed triangle geometry: vertices, area, centroid, Manning's n,
   neighbours), `get_edge_geometry_bulk` (time-invariant per-edge
   geometry for the whole mesh), `set_vertex_z` (terrain edits),
+  `set_vertex_z_bulk` (every vertex elevation from one positional
+  array — one mesh rescan instead of one per vertex),
   `set_triangle_mannings` (per-triangle roughness edits),
   `get_triangle_tag` / `set_triangle_tag` and
   `get_vertex_tag` / `set_vertex_tag` (`[2D_TRIANGLES]` / `[2D_VERTICES]`
@@ -531,7 +541,8 @@ Tools:
   couples a vertex to a 1D node by id, `""` clears it).
 * State — `get_state` (one triangle: depth, head, rainfall, net
   source, coupling flux), `get_vertex_head` (reconstructed
-  water-surface head at one vertex), `get_state_bulk` (`depth` /
+  water-surface head at one vertex, plus that vertex's own x / y / z),
+  `get_state_bulk` (`depth` /
   `head` / `vertex_head` / `vertex_render_depth` / `coupling_flux` /
   `edge_flux` summaries; `vertex_render_depth` is the signed
   `eta_v - z_v` field for water-surface rendering),
@@ -548,10 +559,216 @@ Tools:
   `model_set_option_ext`).
 * Boundaries — `get_edge_bc` / `set_edge_bc` (WALL, NORMAL_FLOW,
   SPECIFIED_STAGE, SPECIFIED_FLOW, RATING_CURVE; constants,
-  timeseries, or rating-curve drivers).
+  timeseries, or rating-curve drivers). The getter mirrors back the
+  bound driver names (`tseries_name`, `flow_tseries_name`,
+  `rating_curve_name`); `""` means the slot is clear and the edge
+  falls back to its constant head / flow.
 * Conveyance — `get_edge_conveyance` (single edge or whole-mesh scan
   of restricted edges), `set_edge_conveyance` (0 = wall, 1 = open;
   interior edges mirror to the neighbour), `reset_edge_conveyance`.
+
+----
+
+## 2D Infiltration (`infil2d_*`)
+
+Per-cell infiltration on the 2D overland-flow mesh — the `GROUNDWATER
+OFF` loss model. **Row parameters are in project units** (the numbers a
+user types into a legacy `[INFILTRATION]` row); every readback channel is
+SI, like the rest of the 2D surface (rate m/s, cumulative depth m, total
+volume m³). Resolution is most-specific-wins: per-cell override > tag row
+> `'*'` row > no infiltration.
+
+Tools:
+
+* Options — `get_options`, `set_options` (`[2D_INFILTRATION_OPTIONS]`,
+  including the evaluation cadence).
+* Tag defaults — `get_defaults`, `set_default`, `remove_default`
+  (`[2D_INFILTRATION_DEFAULTS]`; the tag `"*"` is the mesh-wide fallback).
+* Per-cell overrides — `get_cell`, `set_cell`, `set_cells`,
+  `clear_cells` (`[2D_INFILTRATION]`).
+* Readback — `get_rate_bulk`, `get_cum_bulk`, `get_total_volume`.
+
+----
+
+## Climate configuration (`climate_*`)
+
+The model's climate *configuration*, edited before a run — as distinct
+from the runtime climate *forcing* in `forcing_*`, which overrides live
+temperature / wind / evaporation while a simulation is running. Values
+use the project's display units, exactly as in the `.inp` file. Reads
+work from `opened` onwards; edits require `opened`, because once the
+engine is initialized the configuration has been baked into the
+climate / snow solver.
+
+Tools: `get_climate_config`, `set_temperature_config`,
+`set_evaporation_config`, `set_windspeed_config`,
+`set_snowmelt_config`, `set_areal_depletion`, `set_adjustments`.
+
+----
+
+## Cross-section geometry (`xsect_*`)
+
+Pure cross-section geometry maths — **no open session required**. Given a
+shape and its dimensions, these compute the hydraulic properties SWMM
+itself uses, so a caller can size a conduit or invert a rating without
+constructing a model first.
+
+Tools:
+
+* Properties — `properties` (a shape by name + dimensions),
+  `properties_from_transect`, `properties_from_street`,
+  `properties_from_curve`, `list_shapes` (the authoritative shape
+  vocabulary).
+* Forward lookups — `area_of_depth`, `width_of_depth`,
+  `hydrad_of_depth`, `sectfactor_of_area`, `hydrad_of_area`.
+* Inverse lookups — `depth_of_area`, `area_of_sectfactor`,
+  `critical_depth`, `dsda`.
+
+----
+
+## Heat transport (`heat_*`)
+
+Heat-transport configuration: which flux modules run, the radiative /
+solar / cloud parameters they read, and the temperature water enters the
+network at. **Temperatures are degrees Celsius; radiation is W/m²;
+albedo, emissivity and cloud fraction are fractions in `[0, 1]`, never
+percents.**
+
+Two contracts matter before writing. First, **values are refused, not
+clamped** — every setter mirrors the `.inp` parser's own range check, and
+a refused write does not take effect at all. Inlet temperatures must lie
+in `[-50, 100]` degC. Second, **edits are live**: the flux modules re-read
+their configuration every routing step, so these tools work in `opened`
+through `ended` and a mid-run edit applies on the next step.
+
+Three refusals worth anticipating rather than discovering:
+`computed` shortwave requires BOTH latitude and longitude to have been set
+(check `solar_sited` on `get_config` first — the engine will not borrow the
+`[TEMPERATURE]` SNOWMELT latitude, which defaults to 0); the `shortwave`
+radiative constant is writable only while the mode is `constant`; and only
+the `dwf` and `external_inflow` sources take per-node overrides.
+
+Tools:
+
+* Overview — `get_config` (enabled flag, all module toggles, shortwave
+  mode, `solar_sited`, `cloud_configured`, and the current resolved
+  shortwave / cloud state), `set_module`.
+* Radiative — `get_radiative`, `set_radiative` (keyed by parameter name;
+  omit the name to read every parameter at once).
+* Solar — `get_solar`, `set_solar` (`[SOLAR_RADIATION]`; latitude degrees
+  north, longitude degrees east, elevation metres, timezone hours from UTC).
+* Cloud — `get_cloud`, `set_cloud`, `set_cloud_timeseries`, `clear_cloud`.
+* Shortwave — `set_shortwave_mode` (`constant` / `timeseries` /
+  `computed`; pass a `timeseries` name to bind and select in one call).
+* Inlet temperatures — `list_sources`, `set_source_temp`,
+  `clear_source_temp`, `list_node_overrides`, `set_node_override`,
+  `remove_node_override`, `get_effective_source_temp` (the resolved value
+  the engine itself uses, override-then-global).
+
+----
+
+## Water age (`water_age_*`)
+
+The `[WATER_AGE_SOURCES]` table: the age carried by water entering the
+network on each pathway. **Ages are HOURS**, and **negative values are
+legal and meaningful** — a negative source age extracts age-volume rather
+than adding it, clamped so a computed age never falls below zero.
+
+Like the heat table, edits are LIVE (the loaders re-read every routing
+step) and only `dwf` and `external_inflow` take per-node overrides; every
+other pathway refuses NODE scope exactly as the parser does. Initial
+per-element ages are seeded through `[INITIAL_QUALITY]`'s reserved
+`__WATER_AGE__` constituent — see `initial_quality_*`.
+
+Tools: `get_config` (the `[OPTIONS] WATER_AGE` switch plus every
+pathway's global age), `set_global_source`, `list_node_overrides`,
+`set_node_override`, `remove_node_override` (keyed on the source / node
+pair, not a row position), `save_sources`.
+
+----
+
+## Reactions (`reactions_*`)
+
+The multi-species reaction system — `[REACTION_*]` sections and the
+`.rxn` whole-file surface.
+
+**Pre-flight expressions rather than submitting blind.**
+`validate_expression` compiles ONE expression against the model's live
+vocabulary and returns a 1-based error column; `check_text` dry-runs a
+whole `.rxn` file. Neither changes state on success or failure.
+
+**The vocabulary is authoritative, not guessable.** Enumerate what an
+expression may reference from `list_species`, `list_coefficients`,
+`list_terms`, `hydraulic_variables` and `functions` rather than
+hard-coding identifier lists. The last two are engine-less statics —
+they take **no session** and work before any model is open.
+
+**Mutation is transactional and BUILDING/OPENED only.** Every mutator
+recompiles the whole system before returning and rolls back anything that
+would leave an expression uncompilable, so the model can never store
+something that will not compile. Removing a species, coefficient or term
+that is still referenced is refused. `apply_text` is staged the same way
+and invalidates every index on success.
+
+Tools:
+
+* Species — `list_species`, `add_species`, `remove_species`,
+  `get_species_expression`, `set_species_expression` (`pipe` / `tank`
+  scope; form `rate` / `equil` / `formula` / `none`, where `none` clears).
+* Coefficients — `list_coefficients`, `add_coefficient`,
+  `set_coefficient_value`, `remove_coefficient`.
+* Terms — `list_terms`, `add_term`, `set_term_expression`, `remove_term`.
+* Options — `get_option`, `set_option` (`SOLVER`, `COUPLING`,
+  `RATE_UNITS`, `AREA_UNITS`, `TIMESTEP`, `ATOL`, `RTOL`).
+* Initial quality — `list_initial_quality`, `set_initial_global`,
+  `set_initial_element`, `remove_initial_element`.
+* Validation — `validate_expression`, `check_text`.
+* Whole file — `serialize`, `apply_text`, `save`. `serialize` →
+  `apply_text` → `serialize` is byte-identical, so serialize-edit-apply
+  is a safe editing loop.
+* Static vocabulary (no session) — `hydraulic_variables`, `functions`.
+
+----
+
+## Initial quality (`initial_quality_*`)
+
+The `[INITIAL_QUALITY]` table: per-element starting values, in contrast to
+`pollutants_set_init_conc`, which sets one network-wide default per
+pollutant.
+
+The table is an **upsert** keyed on (element kind, element, constituent),
+so writing the same triple twice edits the existing row. Two constituent
+names are reserved: `__WATER_AGE__` (hours) and `__TEMPERATURE__` (degC),
+both of which accept negative values; every other constituent must be a
+`[POLLUTANTS]` pollutant whose value is a non-negative concentration in
+its own declared units.
+
+Rows only seed state at initialize(), so mutation is `building` /
+`opened` only; reads work in later states. Removal shifts later row
+indices down, so re-enumerate between removals.
+
+Tools: `list_entries`, `set_entry`, `remove_entry`.
+
+----
+
+## Process components (`process_components_*`)
+
+The `[PROCESS_COMPONENTS]` registrations — which process components (heat,
+water age, reactions, …) a model loads and from which config file.
+
+Each registration reports `config` (the argument as written, possibly
+empty or relative) and `resolved` (the path the config was actually READ
+from at the last open, empty until resolution). When a component is not
+behaving as expected, `resolved` is what says which file it really loaded.
+
+**A config path need not exist yet.** Registering against a file you have
+not written is legal and is the intended order: register first, write the
+file second, resolve at the next open — so an empty `resolved` on a fresh
+registration is expected, not a failure. Registration and removal are
+`building` / `opened` only, and a duplicate id is refused.
+
+Tools: `list_components`, `find_component`, `register_component`,
+`remove_component`.
 
 ----
 

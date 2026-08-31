@@ -54,6 +54,7 @@ from openswmm_mcp.tools.twod import (  # noqa: E402
     set_triangle_initial_conditions,
     set_vertex_coupling_params,
     set_vertex_z,
+    set_vertex_z_bulk,
 )
 
 _TWOD_INP = (Path(__file__).parent / "data" / "twod_parking_lot.inp").resolve()
@@ -154,6 +155,26 @@ class TestMesh:
         geo = await get_mesh_geometry(ctx, session_id="twod", offset=0, limit=1)
         assert geo["vertex_z"]["max"] == pytest.approx(102.5)
 
+    async def test_set_vertex_z_bulk(self, session_manager, twod_inp_path):
+        ctx = await _open(session_manager, twod_inp_path)
+        # Flatten the fixture's 100 -> 101 m slope onto a level 105 m pad.
+        out = await set_vertex_z_bulk(ctx, session_id="twod", z=[105.0] * N_VERTICES)
+        assert out["status"] == "ok"
+        assert out["count"] == N_VERTICES
+        geo = await get_mesh_geometry(ctx, session_id="twod", offset=0, limit=1)
+        assert geo["vertex_z"]["min"] == pytest.approx(105.0)
+        assert geo["vertex_z"]["max"] == pytest.approx(105.0)
+
+    async def test_set_vertex_z_bulk_wrong_length_raises(self, session_manager, twod_inp_path):
+        ctx = await _open(session_manager, twod_inp_path)
+        with pytest.raises(ToolError):
+            await set_vertex_z_bulk(ctx, session_id="twod", z=[105.0] * (N_VERTICES - 1))
+
+    async def test_set_vertex_z_bulk_empty_raises(self, session_manager, twod_inp_path):
+        ctx = await _open(session_manager, twod_inp_path)
+        with pytest.raises(ToolError):
+            await set_vertex_z_bulk(ctx, session_id="twod", z=[])
+
     async def test_coupling_map(self, session_manager, twod_inp_path):
         ctx = await _open(session_manager, twod_inp_path)
         out = await get_coupling_map(ctx, session_id="twod")
@@ -208,6 +229,15 @@ class TestStateAndStats:
         out = await get_vertex_head(ctx, session_id="twod", vertex=0)
         assert out["vertex"] == 0
         assert isinstance(out["head"], float)
+
+    async def test_get_vertex_head_reports_vertex_xyz(self, session_manager, twod_inp_path):
+        ctx = await _open_and_step(session_manager, twod_inp_path)
+        # The fixture's [2D_VERTICES]: v0 = SW corner (0, 0, 100),
+        # v8 = NE corner (20, 20, 101).
+        sw = await get_vertex_head(ctx, session_id="twod", vertex=0)
+        assert (sw["x"], sw["y"], sw["z"]) == pytest.approx((0.0, 0.0, 100.0))
+        ne = await get_vertex_head(ctx, session_id="twod", vertex=8)
+        assert (ne["x"], ne["y"], ne["z"]) == pytest.approx((20.0, 20.0, 101.0))
 
     async def test_get_state_bulk_each_variable(self, session_manager, twod_inp_path):
         ctx = await _open_and_step(session_manager, twod_inp_path)
@@ -362,6 +392,60 @@ class TestEdgeBc:
         )
         for key in ("head", "slope", "flow", "cum_flux"):
             assert isinstance(out[key], float)
+        for key in ("tseries_name", "flow_tseries_name", "rating_curve_name"):
+            assert isinstance(out[key], str)
+
+    async def test_authored_driver_names_read_back(self, session_manager, twod_inp_path):
+        # [2D_BOUNDARY_CONDITIONS]: T2 e0 is TS_STAGE TIDAL_TS, T6 e0 is
+        # RATING_CURVE DOWN_RC — the SVBC A8 getters mirror the authored names.
+        ctx = await _open(session_manager, twod_inp_path)
+        stage = await get_edge_bc(ctx, session_id="twod", triangle=2, edge=0)
+        assert stage["tseries_name"] == "TIDAL_TS"
+        assert stage["rating_curve_name"] == ""
+        rating = await get_edge_bc(ctx, session_id="twod", triangle=6, edge=0)
+        assert rating["rating_curve_name"] == "DOWN_RC"
+        assert rating["tseries_name"] == ""
+
+    async def test_driver_name_roundtrip_and_clear(self, session_manager, twod_inp_path):
+        ctx = await _open(session_manager, twod_inp_path)
+        await set_edge_bc(
+            ctx,
+            session_id="twod",
+            triangle=0,
+            edge=0,
+            bc_type="SPECIFIED_STAGE",
+            tseries_name="TIDAL_TS",
+        )
+        got = await get_edge_bc(ctx, session_id="twod", triangle=0, edge=0)
+        assert got["bc_type"] == "SPECIFIED_STAGE"
+        assert got["tseries_name"] == "TIDAL_TS"
+        # "" clears the slot — the edge falls back to the constant head.
+        await set_edge_bc(ctx, session_id="twod", triangle=0, edge=0, tseries_name="")
+        cleared = await get_edge_bc(ctx, session_id="twod", triangle=0, edge=0)
+        assert cleared["tseries_name"] == ""
+
+    async def test_flow_and_rating_driver_names_roundtrip(self, session_manager, twod_inp_path):
+        ctx = await _open(session_manager, twod_inp_path)
+        await set_edge_bc(
+            ctx,
+            session_id="twod",
+            triangle=1,
+            edge=0,
+            bc_type="SPECIFIED_FLOW",
+            flow_tseries_name="RAIN_TS",
+        )
+        got = await get_edge_bc(ctx, session_id="twod", triangle=1, edge=0)
+        assert got["flow_tseries_name"] == "RAIN_TS"
+        await set_edge_bc(
+            ctx,
+            session_id="twod",
+            triangle=3,
+            edge=0,
+            bc_type="RATING_CURVE",
+            rating_curve_name="DOWN_RC",
+        )
+        got = await get_edge_bc(ctx, session_id="twod", triangle=3, edge=0)
+        assert got["rating_curve_name"] == "DOWN_RC"
 
     async def test_set_edge_bc_roundtrip(self, session_manager, twod_inp_path):
         ctx = await _open(session_manager, twod_inp_path)
