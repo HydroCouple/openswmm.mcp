@@ -315,6 +315,22 @@ class TestToolRegistration:
         "infrastructure_lid_usage_count",
         "infrastructure_lid_usage_get",
         "infrastructure_lid_usage_remove",
+        # Inlet-junction round (engine 544c79f8 / d38152ea): full [INLETS]
+        # record, the inlet placement table, the node flag, and the
+        # promote / split / fuse edits.
+        "infrastructure_get_inlet_design",
+        "infrastructure_set_inlet_design",
+        "infrastructure_inlet_usage_count",
+        "infrastructure_inlet_usage_list",
+        "infrastructure_inlet_usage_get",
+        "infrastructure_inlet_usage_find",
+        "infrastructure_inlet_usage_set",
+        "infrastructure_inlet_usage_remove",
+        "nodes_is_inlet",
+        "nodes_inlet_eligible",
+        "editing_set_node_inlet",
+        "editing_split_conduit_inlet",
+        "editing_fuse_inlet_junction",
         "twod_set_triangle_mannings",
         "twod_set_triangle_tag",
         "twod_get_triangle_tag",

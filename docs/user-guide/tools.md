@@ -21,8 +21,8 @@ section there.
 | `query_*` | 7 | Read-only "what does this model contain?" queries (nodes, links, subcatchments, gages, pollutants, system summary, free-form search). |
 | `model_*` | 38 | Project-level metadata: title, options + extension options, CRS, unit system, scalar user flags + user-flag schema / per-object values, plugins, file-section paths + typed external-file path slots, aquifer / snowpack listings, pattern factors, report start. |
 | `building_*` | 13 | Programmatic model construction: nodes, links, subcatchments, gages, options, time series, curves, pollutants, validation + write. |
-| `editing_*` | 31 | In-place edits on a parsed model: cascade-delete + impact analysis (nodes, links, subcatchments, gages, tables, transects, pollutants, patterns, aquifers, snowpacks, LID controls, streets, inlets, land uses, hydrographs), type conversion, property setters, renames, gage scale factor. |
-| `nodes_*` | 47 | Per-node accessors: bulk arrays, storage curves, outfall configuration, dividers, exfiltration, quality, tags, head boundary. |
+| `editing_*` | 34 | In-place edits on a parsed model: cascade-delete + impact analysis (nodes, links, subcatchments, gages, tables, transects, pollutants, patterns, aquifers, snowpacks, LID controls, streets, inlets, land uses, hydrographs), type conversion, inlet-junction promote / split-in / fuse-out, property setters, renames, gage scale factor. |
+| `nodes_*` | 49 | Per-node accessors: bulk arrays, storage curves, outfall configuration, dividers, exfiltration, quality, tags, head boundary, virtual- and inlet-junction flags + eligibility checks. |
 | `links_*` | 59 | Per-link accessors: bulk arrays, control settings, pump / weir / orifice / outlet / culvert parameters, cross-section, tags, statistics. |
 | `subcatchments_*` | 56 | Per-subcatchment accessors: runoff state, infiltration (incl. model switch), coverage, ponded quality, statistics, tags, outlet routing, aquifer / groundwater assignment + `[GROUNDWATER]` params. |
 | `inflows_*` | 35 | External / DWF / RDII inflows, unit hydrographs, exponential IA decay — full read / edit / remove lifecycle. |
@@ -31,7 +31,7 @@ section there.
 | `pollutants_*` | 23 | Pollutant identity + properties (decay, rain/GW/RDII/DWF concentrations, co-pollutant, snow-only, runtime injection). |
 | `quality_*` | 15 | Buildup / washoff / treatment kinetics; landuse and street-sweeping setup. |
 | `tables_*` | 16 | Time series, curves, patterns; type query, lookup helpers, pattern removal. |
-| `infrastructure_*` | 42 | Transects (full profile / bank / encroachment / modifier editing), streets, inlets, LID controls and LID-usage (add / count / get / remove). |
+| `infrastructure_*` | 50 | Transects (full profile / bank / encroachment / modifier editing), streets, inlets (full `[INLETS]` design records + the inlet placement table shared by `[INLET_USAGE]` rows and inlet junctions), LID controls and LID-usage (add / count / get / remove). |
 | `hotstart_*` | 11 | Hot-start save / load, state seeding, session cloning, scheduled-save registry. |
 | `analysis_*` | 22 | Post-run analytics: statistics, mass balance, flooding / capacity summaries, quality losses, scenario compare, results export, full output-reader breadth (snapshot + series + attribute). |
 | `spatial_*` | 17 | Coordinates, polylines, polygons, CRS, gage coords, bulk node coords, project-wide geometry export, LID placement. |
@@ -205,7 +205,19 @@ Tools: `analyze_impact`, `delete_object`, `convert_node`,
 `convert_link`, `set_node_properties`, `set_link_properties`,
 `set_subcatchment_properties`, `configure_gage`,
 `get_gage_scale_factor`, `set_gage_scale_factor`, `rename_node`,
-`rename_link`, `rename_subcatchment`, `rename_gage`.
+`rename_link`, `rename_subcatchment`, `rename_gage`; inlet junctions
+(`set_node_inlet`, `split_conduit_inlet`, `fuse_inlet_junction`).
+
+An **inlet junction** (`[INLET_JUNCTIONS]`, refactored engine only) is a
+virtual junction between two STREET conduits that also carries a street
+inlet: it captures the gutter flow arriving on the upstream conduit,
+delivers it to a capture node, and passes the bypass on downstream.
+`set_node_inlet` promotes an eligible node (preview with
+`nodes_inlet_eligible`) or demotes it back to a virtual junction;
+`split_conduit_inlet` inserts one into a street conduit together with its
+placement row in a single step; `fuse_inlet_junction` removes it and
+re-fuses the two conduits. The placement itself (design, capture node,
+`[INLET_USAGE]` tail) is edited through `infrastructure_inlet_usage_*`.
 
 `analyze_impact` and `delete_object` dispatch on `object_type`, which is
 one of `node`, `link`, `subcatchment`, `gage`, `table`, `transect`,
@@ -247,7 +259,10 @@ Tools: bulk getters (`get_depths_bulk`, `get_heads_bulk`,
 (`get_tag` / `set_tag`); statistics
 (`stat_max_depth`, `stat_max_overflow`, `stat_vol_flooded`,
 `stat_time_flooded`); helpers (`depth_from_volume`,
-`set_head_boundary`).
+`set_head_boundary`); virtual / inlet junctions (`is_virtual`,
+`virtual_eligible`, `is_inlet`, `inlet_eligible` — the eligibility checks
+are read-only dry runs returning the violated rule code, 609-621 for the
+virtual-junction rules and 623 when the conduits are not STREET, or 0).
 
 ----
 
@@ -436,7 +451,10 @@ Tools: transects (`transect_count`, `add_transect`, `remove_transect`,
 `get_comments` / `set_comments`); streets
 (`street_count`, `add_street`, `set_street_params`,
 `get_street_params`); inlets
-(`inlet_count`, `add_inlet`, `set_inlet_params`); LIDs
+(`inlet_count`, `add_inlet`, `set_inlet_params`,
+`get_inlet_design` / `set_inlet_design`); inlet placements
+(`inlet_usage_count`, `inlet_usage_list`, `inlet_usage_get`,
+`inlet_usage_find`, `inlet_usage_set`, `inlet_usage_remove`); LIDs
 (`lid_count`, `add_lid`, `get_lid_surface` / `set_lid_surface`,
 `get_lid_soil` / `set_lid_soil`, `get_lid_storage` / `set_lid_storage`,
 `get_lid_drain` / `set_lid_drain`, `get_lid_pavement` / `set_lid_pavement`,
@@ -451,6 +469,21 @@ string LID ID or an integer index for `lid_index`.
 The LID-usage read/remove tools let the `[LID_USAGE]` block round-trip:
 `lid_usage_count` reports the number of placement rows, `lid_usage_get`
 returns one row by global index, and `lid_usage_remove` deletes one.
+
+`get_inlet_design` / `set_inlet_design` cover the whole `[INLETS]` record
+for every design type — `grate`, `curb`, `combo` (grate plus curb opening),
+`slotted`, `drop_grate`, `drop_curb`, `custom` (a DIVERSION or RATING
+capture curve) — with enum fields as lower-case tokens (`curved_vane`,
+`inclined`, ...). `set_inlet_design` is a read-modify-write: pass only the
+fields that change.
+
+The inlet placement table is shared by conduit-hosted `[INLET_USAGE]` rows
+(`host_kind="link"`) and inlet junctions (`host_kind="node"`,
+`[INLET_JUNCTIONS]`). Each row names the inlet design, the capture node the
+captured flow is delivered to, and the `[INLET_USAGE]` tail (`num_inlets`,
+`pct_clogged`, `flow_limit`, `local_depress`, `local_width`, `placement`);
+`inlet_usage_find` looks a host up, `inlet_usage_set` creates or replaces
+the host's single row, `inlet_usage_remove` deletes one by index.
 
 ----
 

@@ -832,6 +832,67 @@ async def virtual_eligible(
     }
 
 
+@nodes_mcp.tool()
+async def is_inlet(ctx: Context, session_id: str = "default", node_id: str | int = "") -> dict:
+    """Report whether a node is an inlet junction.
+
+    An inlet junction is a virtual junction between two STREET conduits that
+    also carries a street inlet (INP ``[INLET_JUNCTIONS]``): it captures the
+    gutter flow arriving on the upstream conduit, delivers it to a capture
+    (underdrain) node, passes the bypass on downstream and takes the capture
+    node's surcharge back as backflow. ``is_inlet`` implies ``is_virtual``.
+    Its inlet design and capture node live in its placement row
+    (``infrastructure_inlet_usage_find`` with ``host_kind="node"``). Use
+    ``inlet_eligible`` to test whether a node could be promoted and
+    ``editing_set_node_inlet`` to promote or demote it.
+    """
+    # wraps: swmm_node_is_inlet
+    session = await _get_session(ctx, session_id)
+    idx = await _resolve_node(session, node_id)
+    value = await asyncio.to_thread(lambda: session.nodes[idx].is_inlet)
+    return {
+        "session_id": session_id,
+        "node_id": node_id,
+        "node_index": idx,
+        "is_inlet": bool(value),
+    }
+
+
+@nodes_mcp.tool()
+async def inlet_eligible(
+    ctx: Context,
+    session_id: str = "default",
+    node_id: str | int = "",
+    for_drop_inlet: bool = False,
+) -> dict:
+    """Dry-run check of the inlet-junction usage rules for a node.
+
+    Read-only; nothing is changed. ``eligible`` is ``True`` (``rule_code`` 0)
+    when promoting the node with ``editing_set_node_inlet`` would succeed:
+    every virtual-junction rule holds (see ``virtual_eligible``) and both
+    attached conduits carry the cross-section the inlet needs — STREET, or
+    RECT_OPEN / TRAPEZOIDAL when ``for_drop_inlet`` is ``True`` (a
+    DROP_GRATE / DROP_CURB design in a drainage channel). Otherwise
+    ``rule_code`` is the violated rule: one of the ERR_VJ_* codes 609-621
+    reported by ``virtual_eligible``, or 623 when the conduits have the
+    wrong shape.
+    """
+    # wraps: swmm_node_inlet_eligible
+    session = await _get_session(ctx, session_id)
+    idx = await _resolve_node(session, node_id)
+    code = await asyncio.to_thread(
+        lambda: session.nodes[idx].inlet_rule_violation(bool(for_drop_inlet))
+    )
+    return {
+        "session_id": session_id,
+        "node_id": node_id,
+        "node_index": idx,
+        "for_drop_inlet": bool(for_drop_inlet),
+        "eligible": int(code) == 0,
+        "rule_code": int(code),
+    }
+
+
 # ===========================================================================
 # Outfall-node subtype config
 # ===========================================================================

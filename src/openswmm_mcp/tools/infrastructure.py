@@ -15,7 +15,13 @@ Module coverage (17 of 17 Python ``Infrastructure`` runtime methods):
 * Transects: ``transect_count``, ``add_transect``, ``set_transect_roughness``,
   ``add_transect_station``.
 * Streets: ``street_count``, ``add_street``, ``set_street_params``.
-* Inlets: ``inlet_count``, ``add_inlet``, ``set_inlet_params``.
+* Inlets: ``inlet_count``, ``add_inlet``, ``set_inlet_params``, plus the
+  full ``[INLETS]`` record — ``get_inlet_design`` / ``set_inlet_design``
+  (every type: grate, curb, combo, slotted, drop grate / curb, custom curve).
+* Inlet usage: ``inlet_usage_count``, ``inlet_usage_list``,
+  ``inlet_usage_get``, ``inlet_usage_find``, ``inlet_usage_set``,
+  ``inlet_usage_remove`` — the placement table shared by conduit-hosted
+  ``[INLET_USAGE]`` rows and ``[INLET_JUNCTIONS]`` nodes.
 * LID controls: ``lid_count``, ``add_lid``, and per-layer setters/getters for
   all six layers — ``{set,get}_lid_surface``, ``{set,get}_lid_soil``,
   ``{set,get}_lid_storage``, ``{set,get}_lid_drain``,
@@ -39,8 +45,18 @@ import asyncio
 from typing import Any
 
 from fastmcp import Context, FastMCP
-from openswmm.engine import Infrastructure, Subcatchments
+from openswmm.engine import Infrastructure, Links, Nodes, Subcatchments
 
+from openswmm_mcp._util.inlet_enums import (
+    coerce_enum,
+    grate_type_codes,
+    inlet_curve_kind_codes,
+    inlet_host_kind_codes,
+    inlet_placement_codes,
+    inlet_type_codes,
+    name_for,
+    throat_type_codes,
+)
 from openswmm_mcp.dependencies import get_session_manager, require_new_engine
 from openswmm_mcp.errors import ErrorCode, ToolError, resolve_index
 from openswmm_mcp.session import SimSession
@@ -626,6 +642,356 @@ async def set_inlet_params(
         "width": width,
         "grate_type": grate_type,
     }
+
+
+# ---------------------------------------------------------------------------
+# Full [INLETS] record (every design type) and the inlet placement table —
+# conduit-hosted [INLET_USAGE] rows and [INLET_JUNCTIONS] nodes share it.
+# ---------------------------------------------------------------------------
+
+
+# get_design() key -> token map for the enum-valued fields.
+_DESIGN_ENUM_FIELDS = {
+    "type": inlet_type_codes,
+    "grate_type": grate_type_codes,
+    "throat": throat_type_codes,
+    "curve_kind": inlet_curve_kind_codes,
+}
+
+
+def _design_to_tokens(design: dict[str, Any]) -> dict[str, Any]:
+    """Replace the IntEnum values of a design mapping with lower-case token names."""
+    out = dict(design)
+    for key, codes in _DESIGN_ENUM_FIELDS.items():
+        out[key] = name_for(int(design[key]), codes())
+    return out
+
+
+def _node_link_views(session: SimSession) -> tuple[Any, Any]:
+    """``(nodes, links)`` accessors for id <-> index resolution in any editable state."""
+    if session.state == "building":
+        return Nodes(session.model_builder), Links(session.model_builder)
+    return session.nodes, session.links
+
+
+async def _resolve_inlet_idx(infra: Any, inlet_id: str | int) -> int:
+    if isinstance(inlet_id, int):
+        return inlet_id
+    if not inlet_id:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] inlet_id must not be empty.")
+    return await resolve_index(infra.inlets, inlet_id, "Inlet")
+
+
+async def _resolve_host(
+    nodes: Any, links: Any, host_kind: str | int, host_id: str | int
+) -> tuple[int, int]:
+    """Return ``(host_kind_code, host_index)`` for a link- or node-hosted placement."""
+    kind = coerce_enum(host_kind, inlet_host_kind_codes(), "host_kind")
+    if not isinstance(host_id, int) and not host_id:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] host_id must not be empty.")
+    if kind == inlet_host_kind_codes()["link"]:
+        return kind, await resolve_index(links, host_id, "Link")
+    return kind, await resolve_index(nodes, host_id, "Node")
+
+
+def _usage_row(infra: Any, nodes: Any, links: Any, usage_idx: int, raw: dict[str, Any]) -> dict:
+    """Resolve one ``InletUsages.get`` mapping to ids and token names (engine calls: off-loop)."""
+    host_kind = int(raw["host_kind"])
+    host_idx = int(raw["host_idx"])
+    design_idx = int(raw["design_idx"])
+    capture_idx = int(raw["capture_node_idx"])
+    link_host = host_kind == inlet_host_kind_codes()["link"]
+    return {
+        "usage_index": usage_idx,
+        "host_kind": name_for(host_kind, inlet_host_kind_codes()),
+        "host_id": links[host_idx].id if link_host else nodes[host_idx].id,
+        "host_index": host_idx,
+        "inlet_id": infra.inlets.get_id(design_idx),
+        "inlet_index": design_idx,
+        "capture_node_id": nodes[capture_idx].id,
+        "capture_node_index": capture_idx,
+        "num_inlets": int(raw["num_inlets"]),
+        "pct_clogged": float(raw["pct_clogged"]),
+        "flow_limit": float(raw["flow_limit"]),
+        "local_depress": float(raw["local_depress"]),
+        "local_width": float(raw["local_width"]),
+        "placement": name_for(int(raw["placement"]), inlet_placement_codes()),
+    }
+
+
+@infrastructure_mcp.tool()
+async def get_inlet_design(
+    ctx: Context, session_id: str = "default", inlet_id: str | int = ""
+) -> dict:
+    """Read every field of an inlet design (the full ``[INLETS]`` record).
+
+    Superset of the legacy ``set_inlet_params`` surface. ``design.type`` is
+    one of ``grate``, ``curb``, ``combo``, ``slotted``, ``drop_grate``,
+    ``drop_curb``, ``custom``; the fields each type uses are ``grate_length``
+    / ``grate_width`` / ``grate_type`` / ``open_area`` / ``splash_veloc`` for
+    grates, ``curb_length`` / ``curb_height`` / ``throat`` for curb openings
+    (a ``combo`` carries both), ``slot_length`` / ``slot_width`` for slotted
+    drains, and ``curve_id`` / ``curve_kind`` (``diversion`` or ``rating``)
+    for a custom design. Fields the type does not use read back as zero.
+    Enum fields are returned as lower-case token names.
+    """
+    # wraps: swmm_inlet_get_design
+    _, infra, _ = await _get_accessors(ctx, session_id)
+    idx = await _resolve_inlet_idx(infra, inlet_id)
+    design, name = await asyncio.to_thread(
+        lambda: (infra.inlets.get_design(idx), infra.inlets.get_id(idx))
+    )
+    return {
+        "session_id": session_id,
+        "inlet_id": name,
+        "inlet_index": idx,
+        "design": _design_to_tokens(design),
+    }
+
+
+@infrastructure_mcp.tool()
+async def set_inlet_design(
+    ctx: Context,
+    session_id: str = "default",
+    inlet_id: str | int = "",
+    inlet_type: str | int | None = None,
+    grate_length: float | None = None,
+    grate_width: float | None = None,
+    grate_type: str | int | None = None,
+    open_area: float | None = None,
+    splash_veloc: float | None = None,
+    curb_length: float | None = None,
+    curb_height: float | None = None,
+    throat: str | int | None = None,
+    slot_length: float | None = None,
+    slot_width: float | None = None,
+    curve_id: str | None = None,
+    curve_kind: str | int | None = None,
+) -> dict:
+    """Update an inlet design; omitted fields keep their values (the type may change).
+
+    Read-modify-write of the whole ``[INLETS]`` record: pass only what
+    changes, e.g. ``throat="inclined"`` on a curb inlet, or
+    ``inlet_type="combo"`` together with both grate and curb dimensions. The
+    engine validates only the fields the resulting type uses (positive
+    dimensions, ``open_area`` in (0, 1] for a ``generic`` grate, a non-empty
+    ``curve_id`` for ``custom``) and rejects a ``curve_kind`` that
+    contradicts the named curve's own ``[CURVES]`` type. Enum fields accept
+    the token names ``get_inlet_design`` returns, or int codes. Returns the
+    design as it reads back.
+    """
+    # wraps: swmm_inlet_set_design swmm_inlet_get_design
+    values: dict[str, Any] = {}
+    if inlet_type is not None:
+        values["type"] = coerce_enum(inlet_type, inlet_type_codes(), "inlet_type")
+    if grate_type is not None:
+        values["grate_type"] = coerce_enum(grate_type, grate_type_codes(), "grate_type")
+    if throat is not None:
+        values["throat"] = coerce_enum(throat, throat_type_codes(), "throat")
+    if curve_kind is not None:
+        values["curve_kind"] = coerce_enum(curve_kind, inlet_curve_kind_codes(), "curve_kind")
+    if curve_id is not None:
+        values["curve_id"] = curve_id
+    for key, val in (
+        ("grate_length", grate_length),
+        ("grate_width", grate_width),
+        ("open_area", open_area),
+        ("splash_veloc", splash_veloc),
+        ("curb_length", curb_length),
+        ("curb_height", curb_height),
+        ("slot_length", slot_length),
+        ("slot_width", slot_width),
+    ):
+        if val is not None:
+            values[key] = float(val)
+    if not values:
+        raise ToolError(
+            f"[{ErrorCode.VALIDATION_ERROR}] Nothing to set: pass at least one design field."
+        )
+    _, infra, _ = await _get_accessors(ctx, session_id)
+    idx = await _resolve_inlet_idx(infra, inlet_id)
+
+    def _apply() -> tuple[dict, str]:
+        infra.inlets.set_design(idx, values)
+        return infra.inlets.get_design(idx), infra.inlets.get_id(idx)
+
+    design, name = await asyncio.to_thread(_apply)
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "inlet_id": name,
+        "inlet_index": idx,
+        "design": _design_to_tokens(design),
+    }
+
+
+@infrastructure_mcp.tool()
+async def inlet_usage_count(ctx: Context, session_id: str = "default") -> dict:
+    """Number of inlet placements: ``[INLET_USAGE]`` rows plus ``[INLET_JUNCTIONS]`` nodes.
+
+    Both host kinds live in one table, so the count covers both; each row's
+    ``host_kind`` (``inlet_usage_get`` / ``inlet_usage_list``) says which
+    it is.
+    """
+    # wraps: swmm_inlet_usage_count
+    _, infra, _ = await _get_accessors(ctx, session_id)
+    n = await asyncio.to_thread(lambda: len(infra.inlet_usages))
+    return {"session_id": session_id, "count": n}
+
+
+@infrastructure_mcp.tool()
+async def inlet_usage_get(ctx: Context, session_id: str = "default", usage_index: int = 0) -> dict:
+    """Read one inlet placement row by its index in the placement table.
+
+    A row places inlet design ``inlet_id`` on a host — ``host_kind``
+    ``"link"`` is a conduit's ``[INLET_USAGE]`` row (captured flow leaves at
+    the conduit's downstream node), ``"node"`` is an inlet junction
+    (``[INLET_JUNCTIONS]``) — and names the ``capture_node_id`` the captured
+    flow is delivered to. The remaining fields are the ``[INLET_USAGE]``
+    tail: ``num_inlets`` per side, ``pct_clogged`` (0-99), ``flow_limit`` per
+    inlet (0 = unlimited), ``local_depress`` / ``local_width`` of a local
+    gutter depression, and ``placement`` (``automatic``, ``on_grade``,
+    ``on_sag``). Flow and length values are in the project's display units.
+    """
+    # wraps: swmm_inlet_usage_get
+    session, infra, _ = await _get_accessors(ctx, session_id)
+    nodes, links = _node_link_views(session)
+    row = await asyncio.to_thread(
+        lambda: _usage_row(infra, nodes, links, usage_index, infra.inlet_usages.get(usage_index))
+    )
+    return {"session_id": session_id, **row}
+
+
+@infrastructure_mcp.tool()
+async def inlet_usage_list(ctx: Context, session_id: str = "default") -> dict:
+    """List every inlet placement row (``inlet_usage_get`` describes the fields)."""
+    # wraps: swmm_inlet_usage_count swmm_inlet_usage_get
+    session, infra, _ = await _get_accessors(ctx, session_id)
+    nodes, links = _node_link_views(session)
+
+    def _all() -> list[dict]:
+        usages = infra.inlet_usages
+        return [_usage_row(infra, nodes, links, i, usages.get(i)) for i in range(len(usages))]
+
+    rows = await asyncio.to_thread(_all)
+    return {"session_id": session_id, "count": len(rows), "usages": rows}
+
+
+@infrastructure_mcp.tool()
+async def inlet_usage_find(
+    ctx: Context,
+    session_id: str = "default",
+    host_kind: str | int = "link",
+    host_id: str | int = "",
+) -> dict:
+    """Find the inlet placement hosted by a conduit (``"link"``) or an inlet junction (``"node"``).
+
+    At most one row exists per host. ``found`` is ``False`` (``usage_index``
+    -1, no ``usage``) when the host carries no inlet.
+    """
+    # wraps: swmm_inlet_usage_find_link swmm_inlet_usage_find_node
+    session, infra, _ = await _get_accessors(ctx, session_id)
+    nodes, links = _node_link_views(session)
+    kind, host_idx = await _resolve_host(nodes, links, host_kind, host_id)
+    link_host = kind == inlet_host_kind_codes()["link"]
+
+    def _find() -> tuple[int, dict | None]:
+        usages = infra.inlet_usages
+        i = usages.find_link(host_idx) if link_host else usages.find_node(host_idx)
+        return i, (None if i < 0 else _usage_row(infra, nodes, links, i, usages.get(i)))
+
+    i, row = await asyncio.to_thread(_find)
+    out = {
+        "session_id": session_id,
+        "host_kind": name_for(kind, inlet_host_kind_codes()),
+        "host_id": host_id,
+        "host_index": host_idx,
+        "found": i >= 0,
+        "usage_index": i,
+    }
+    if row is not None:
+        out["usage"] = row
+    return out
+
+
+@infrastructure_mcp.tool()
+async def inlet_usage_set(
+    ctx: Context,
+    session_id: str = "default",
+    host_kind: str | int = "link",
+    host_id: str | int = "",
+    inlet_id: str | int = "",
+    capture_node_id: str | int = "",
+    num_inlets: int = 1,
+    pct_clogged: float = 0.0,
+    flow_limit: float = 0.0,
+    local_depress: float = 0.0,
+    local_width: float = 0.0,
+    placement: str | int = "automatic",
+) -> dict:
+    """Create or replace the inlet placement on a host.
+
+    ``host_kind="link"`` writes a conduit's ``[INLET_USAGE]`` row;
+    ``"node"`` writes an inlet junction's placement — the node must already
+    be an inlet junction (``editing_set_node_inlet`` or
+    ``editing_split_conduit_inlet``). An existing row for the host is
+    overwritten, otherwise one is appended; the row is returned either way.
+    The capture node must exist, must not be the host node and must not
+    itself be a virtual junction. Values are in the project's display units
+    as authored in ``[INLET_USAGE]``: ``num_inlets`` per side (>= 1),
+    ``pct_clogged`` 0-99, ``flow_limit`` per inlet (0 = unlimited),
+    ``local_depress`` / ``local_width`` of a local gutter depression, and
+    ``placement`` ``automatic`` / ``on_grade`` / ``on_sag``.
+    """
+    # wraps: swmm_inlet_usage_set
+    place = coerce_enum(placement, inlet_placement_codes(), "placement")
+    if not isinstance(capture_node_id, int) and not capture_node_id:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] capture_node_id must not be empty.")
+    session, infra, _ = await _get_accessors(ctx, session_id)
+    nodes, links = _node_link_views(session)
+    kind, host_idx = await _resolve_host(nodes, links, host_kind, host_id)
+    design_idx = await _resolve_inlet_idx(infra, inlet_id)
+    capture_idx = await resolve_index(nodes, capture_node_id, "Node")
+
+    def _apply() -> dict:
+        row = infra.inlet_usages.set(
+            kind,
+            host_idx,
+            design_idx,
+            capture_idx,
+            num_inlets=int(num_inlets),
+            pct_clogged=float(pct_clogged),
+            flow_limit=float(flow_limit),
+            local_depress=float(local_depress),
+            local_width=float(local_width),
+            placement=place,
+        )
+        return _usage_row(infra, nodes, links, row, infra.inlet_usages.get(row))
+
+    usage = await asyncio.to_thread(_apply)
+    return {"status": "ok", "session_id": session_id, **usage}
+
+
+@infrastructure_mcp.tool()
+async def inlet_usage_remove(
+    ctx: Context, session_id: str = "default", usage_index: int = 0
+) -> dict:
+    """Delete one inlet placement row by index (other rows may be renumbered).
+
+    Removing an inlet junction's row leaves the node flagged as an inlet with
+    nothing to capture, which validation rejects — demote it with
+    ``editing_set_node_inlet(make_inlet=False)`` instead (that deletes the
+    row too), or give it a new row with ``inlet_usage_set``.
+    """
+    # wraps: swmm_inlet_usage_remove
+    _, infra, _ = await _get_accessors(ctx, session_id)
+
+    def _apply() -> int:
+        infra.inlet_usages.remove(usage_index)
+        return len(infra.inlet_usages)
+
+    n = await asyncio.to_thread(_apply)
+    return {"status": "ok", "session_id": session_id, "usage_index": usage_index, "count": n}
 
 
 # ===========================================================================

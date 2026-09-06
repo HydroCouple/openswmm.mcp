@@ -12,7 +12,7 @@ import asyncio
 import logging
 
 from fastmcp import Context, FastMCP
-from openswmm.engine import ModelEditor
+from openswmm.engine import EngineError, Links, ModelEditor
 
 from openswmm_mcp._util.xsect_shapes import resolve_shape
 from openswmm_mcp.dependencies import get_session_manager, require_new_engine
@@ -469,6 +469,188 @@ async def convert_link(
         cleared_fields=result.cleared_fields,
         warnings=result.warnings,
     )
+
+
+# ---------------------------------------------------------------------------
+# Tools — inlet junctions ([INLET_JUNCTIONS]): promote / demote, split-in,
+# fuse-out. Refactored engine only.
+# ---------------------------------------------------------------------------
+
+
+def _links_view(session: SimSession) -> Links:
+    """Link accessor for whichever engine handle is live (ids after a fuse)."""
+    if session.state == "building":
+        return Links(session.model_builder)
+    return session.links
+
+
+@editing_mcp.tool()
+async def set_node_inlet(
+    ctx: Context,
+    session_id: str = "default",
+    node_id: str | int = "",
+    make_inlet: bool = True,
+) -> dict:
+    """Promote a node to an inlet junction, or demote it back to a plain virtual junction.
+
+    An inlet junction is a virtual junction between two STREET conduits that
+    also carries a street inlet (INP ``[INLET_JUNCTIONS]``). Promotion runs
+    the virtual-junction rules plus the street-shape rule (623) *before*
+    changing anything and makes the node virtual first if it is not; a
+    violated rule fails with the node untouched (preview it with
+    ``nodes_inlet_eligible``). A promoted node still needs a placement row —
+    ``infrastructure_inlet_usage_set`` with ``host_kind="node"`` — before the
+    model validates. Demotion clears the flag and deletes the node's
+    placement row; the node stays a virtual junction.
+    """
+    # wraps: swmm_node_set_inlet
+    if not isinstance(node_id, int) and not node_id:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] node_id must not be empty.")
+    session = await _get_editable_session(ctx, session_id)
+    editor = _make_editor(session)
+
+    try:
+        await asyncio.to_thread(editor.set_node_inlet, node_id, bool(make_inlet))
+    except KeyError as exc:
+        raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Node '{node_id}' not found: {exc}")
+    except EngineError as exc:
+        raise ToolError(f"[{ErrorCode.ENGINE_ERROR}] {exc}")
+
+    logger.info(
+        "Session '%s': node '%s' %s an inlet junction.",
+        session_id,
+        node_id,
+        "promoted to" if make_inlet else "demoted from",
+    )
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "node_id": str(node_id),
+        "is_inlet": bool(make_inlet),
+    }
+
+
+@editing_mcp.tool()
+async def split_conduit_inlet(
+    ctx: Context,
+    session_id: str = "default",
+    link_id: str | int = "",
+    position: float = 0.5,
+    new_node_id: str = "",
+    new_link_id: str = "",
+    inlet_id: str = "",
+    capture_node_id: str = "",
+) -> dict:
+    """Split a STREET conduit at a fractional position and insert an inlet junction there.
+
+    One step for: split the conduit at ``position`` (exclusive (0, 1) along
+    its length; the new downstream piece is named ``new_link_id``), make the
+    inserted node ``new_node_id`` a virtual junction, promote it to an inlet
+    junction carrying design ``inlet_id``, and give it a placement row that
+    delivers the captured flow to ``capture_node_id``. The row takes the
+    ``[INLET_USAGE]`` defaults (one inlet, no clogging, no flow limit, no
+    local depression, automatic placement); adjust it afterwards with
+    ``infrastructure_inlet_usage_set(host_kind="node", ...)``. The conduit
+    may not itself carry an ``[INLET_USAGE]`` row (rule 629) — remove that
+    first. ``fuse_inlet_junction`` is the inverse.
+    """
+    # wraps: swmm_conduit_split_inlet
+    if not isinstance(link_id, int) and not link_id:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] link_id must not be empty.")
+    if not 0.0 < position < 1.0:
+        raise ToolError(
+            f"[{ErrorCode.VALIDATION_ERROR}] position must lie strictly between 0 and 1, "
+            f"got {position}."
+        )
+    for name, value in (
+        ("new_node_id", new_node_id),
+        ("new_link_id", new_link_id),
+        ("inlet_id", inlet_id),
+        ("capture_node_id", capture_node_id),
+    ):
+        if not value:
+            raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] {name} must not be empty.")
+    session = await _get_editable_session(ctx, session_id)
+    editor = _make_editor(session)
+
+    try:
+        new_node, new_link = await asyncio.to_thread(
+            editor.split_conduit_inlet,
+            link_id,
+            float(position),
+            new_node_id,
+            new_link_id,
+            inlet_id,
+            capture_node_id,
+        )
+    except KeyError as exc:
+        raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Link '{link_id}' not found: {exc}")
+    except EngineError as exc:
+        raise ToolError(f"[{ErrorCode.ENGINE_ERROR}] {exc}")
+
+    logger.info(
+        "Session '%s': conduit '%s' split at %.3f; inlet junction '%s' (%s -> %s) inserted.",
+        session_id,
+        link_id,
+        position,
+        new_node_id,
+        inlet_id,
+        capture_node_id,
+    )
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "link_id": str(link_id),
+        "position": float(position),
+        "new_node_id": new_node_id,
+        "new_node_index": int(new_node),
+        "new_link_id": new_link_id,
+        "new_link_index": int(new_link),
+        "inlet_id": inlet_id,
+        "capture_node_id": capture_node_id,
+    }
+
+
+@editing_mcp.tool()
+async def fuse_inlet_junction(
+    ctx: Context, session_id: str = "default", node_id: str | int = ""
+) -> dict:
+    """Remove an inlet junction by fusing its two conduits back into one.
+
+    Inverse of ``split_conduit_inlet``: the node's placement row is deleted,
+    the node is removed, and its upstream and downstream conduits become a
+    single conduit. Returns the surviving conduit; indices of later nodes and
+    links are renumbered. Fails if the node is not a two-conduit through
+    junction.
+    """
+    # wraps: swmm_inlet_junction_fuse
+    if not isinstance(node_id, int) and not node_id:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] node_id must not be empty.")
+    session = await _get_editable_session(ctx, session_id)
+    editor = _make_editor(session)
+
+    try:
+        surviving = await asyncio.to_thread(editor.fuse_inlet_junction, node_id)
+    except KeyError as exc:
+        raise ToolError(f"[{ErrorCode.ELEMENT_NOT_FOUND}] Node '{node_id}' not found: {exc}")
+    except EngineError as exc:
+        raise ToolError(f"[{ErrorCode.ENGINE_ERROR}] {exc}")
+
+    links = _links_view(session)
+    surviving_id = await asyncio.to_thread(lambda: links[int(surviving)].id)
+    logger.info(
+        "Session '%s': inlet junction '%s' fused; conduit '%s' survives.",
+        session_id,
+        node_id,
+        surviving_id,
+    )
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "node_id": str(node_id),
+        "surviving_link_index": int(surviving),
+        "surviving_link_id": surviving_id,
+    }
 
 
 # ---------------------------------------------------------------------------

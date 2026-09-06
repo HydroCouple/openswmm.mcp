@@ -39,7 +39,7 @@ The server exposes **650 tools** organized across 30 namespaced sub-servers, alo
 - **forcing\_\***: Apply runtime forcing overrides (rainfall, inflows, PET, boundary conditions), read back the climate evaporation rate, set link controls, add control rules
 - **pollutants\_\*** / **quality\_\***: Pollutant properties, buildup / washoff / treatment kinetics, landuse and street sweeping
 - **tables\_\***: Time series, curves, and patterns with lookup helpers
-- **infrastructure\_\***: Transects, streets, inlets, LID controls and usage
+- **infrastructure\_\***: Transects, streets, inlets (full design records and the inlet placement table shared by `[INLET_USAGE]` rows and inlet junctions), LID controls and usage
 - **hotstart\_\***: Save and load simulation state checkpoints; seed state; clone sessions for scenario branching
 - **analysis\_\***: Retrieve post-simulation statistics, mass balance, time series, flooding summaries, capacity summaries, scenario comparison, and CSV/JSON export
 - **spatial\_\***: Query and set element coordinates, retrieve water-quality concentrations, assign treatment expressions, add LID controls
@@ -213,6 +213,9 @@ Claude: [calls hotstart_clone_session] Cloned "default" to "whatif_upsize".
 | `editing_delete_object` | Delete a model object and cascade-delete or nullify all references |
 | `editing_convert_node` | Convert a node to a different type in place, preserving common properties |
 | `editing_convert_link` | Convert a link to a different type in place, preserving endpoints and offsets |
+| `editing_set_node_inlet` | Promote a node to an inlet junction (`[INLET_JUNCTIONS]`), or demote it back to a virtual junction |
+| `editing_split_conduit_inlet` | Split a STREET conduit and insert an inlet junction with its placement row in one step |
+| `editing_fuse_inlet_junction` | Remove an inlet junction by fusing its two conduits back into one |
 
 ### hotstart (State Management)
 
