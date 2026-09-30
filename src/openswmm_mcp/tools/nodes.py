@@ -813,11 +813,13 @@ async def virtual_eligible(
 
     Read-only; nothing is changed. ``eligible`` is ``True`` (``rule_code`` 0)
     when the node satisfies every structural rule — exactly two attached
-    conduits of identical cross-section, zero offsets, no lateral inflow
-    sources, dynamic-wave routing — so converting it would succeed. Otherwise
+    conduits of identical cross-section, zero offsets, not a 2D
+    surface-coupling point, dynamic-wave or FV routing — so converting it
+    would succeed. Point lateral inflows ([INFLOWS], [DWF], RDII,
+    subcatchment outlets, LID drains) do not disqualify a node. Otherwise
     ``rule_code`` is the distinct ERR_VJ_* code identifying the violated rule
     (609 = not exactly two conduits, 611 = cross-section mismatch, 613 =
-    nonzero offset, 617 = a lateral inflow source targets the node).
+    nonzero offset, 617 = the node is a 2D surface-coupling point).
     """
     # wraps: swmm_node_virtual_eligible
     session = await _get_session(ctx, session_id)
