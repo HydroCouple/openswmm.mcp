@@ -18,14 +18,13 @@ extensions = [
 templates_path = ["_templates"]
 exclude_patterns = [
     "_build",
-    # Internal work-plan / handoff docs kept in the repo but not published.
-    "CLOUD_OFFLOADING_PLAN.md",
-    "developer/CONTROL_CURVE_TEST_HANDOFF.md",
-    "developer/CONTROL_CURVE_VERIFICATION_RESULTS.md",
-    "developer/GYMNASIUM_INTEGRATION_PLAN.md",
-    "developer/GYM_TEST_RUN_INSTRUCTIONS.md",
-    "developer/MCP_GAP_CLOSURE_TEST_INSTRUCTIONS.md",
-    "developer/V1_MIGRATION_PLAN.md",
+    # Plans, handoffs, test instructions and verification write-ups are working
+    # records: not committed, and not published if present in a local checkout.
+    "*_PLAN*.md",
+    "**/*_PLAN*.md",
+    "**/*HANDOFF*.md",
+    "**/*VERIFICATION*.md",
+    "**/*_INSTRUCTIONS.md",
 ]
 
 html_theme = "pydata_sphinx_theme"

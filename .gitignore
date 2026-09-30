@@ -36,3 +36,11 @@ Thumbs.db
 
 # Environment
 .env
+
+# Plans, handoffs, test instructions and verification write-ups are working
+# records, never committed.
+*_PLAN.md
+*_PLAN_*.md
+*HANDOFF*.md
+*VERIFICATION*.md
+docs/**/*_INSTRUCTIONS.md
