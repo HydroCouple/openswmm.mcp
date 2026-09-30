@@ -22,8 +22,8 @@ openswmm_mcp
 openswmm_mcp.server
 ~~~~~~~~~~~~~~~~~~~
 
-The FastMCP composition root.  Mounts every tool / resource / prompt
-sub-server.
+The FastMCP composition root: registers the core (and optional gym) tools and
+mounts the resource, prompt and skill sub-servers.
 
 .. automodule:: openswmm_mcp.server
    :members:
@@ -57,14 +57,6 @@ acquisition).
    :undoc-members:
    :show-inheritance:
 
-openswmm_mcp.models
-~~~~~~~~~~~~~~~~~~~
-
-.. automodule:: openswmm_mcp.models
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 openswmm_mcp.errors
 ~~~~~~~~~~~~~~~~~~~
 
@@ -81,118 +73,26 @@ openswmm_mcp.auth
    :undoc-members:
    :show-inheritance:
 
-Backend Modules
----------------
+openswmm_mcp.catalog
+~~~~~~~~~~~~~~~~~~~~
 
-The backend layer abstracts the underlying SWMM engine so that the same
-tool surface can drive either the refactored ``openswmm.engine`` (v6.0)
-or the legacy SWMM 5 solver.
+Addressing, value coercion and JSON serialisation over ``openswmm.engine.catalog``.
 
-openswmm_mcp.backends.base
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. automodule:: openswmm_mcp.backends.base
+.. automodule:: openswmm_mcp.catalog
    :members:
    :undoc-members:
    :show-inheritance:
 
-openswmm_mcp.backends.openswmm
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+openswmm_mcp.resources
+~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: openswmm_mcp.backends.openswmm
+.. automodule:: openswmm_mcp.resources
    :members:
    :undoc-members:
    :show-inheritance:
 
-openswmm_mcp.backends.legacy
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. automodule:: openswmm_mcp.backends.legacy
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-Utility Modules
----------------
-
-openswmm_mcp._util.formatting
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. automodule:: openswmm_mcp._util.formatting
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-openswmm_mcp._util.validation
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. automodule:: openswmm_mcp._util.validation
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-Tool Modules
-------------
-
-Each tool module exposes a FastMCP sub-server whose tools are mounted
-under the matching namespace prefix (e.g. ``tools.nodes`` →
-``nodes_*`` tools).
-
-openswmm_mcp.tools.lifecycle
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. automodule:: openswmm_mcp.tools.lifecycle
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-openswmm_mcp.tools.query
-~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. automodule:: openswmm_mcp.tools.query
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-openswmm_mcp.tools.forcing
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. automodule:: openswmm_mcp.tools.forcing
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-openswmm_mcp.tools.controls
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. automodule:: openswmm_mcp.tools.controls
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-openswmm_mcp.tools.analysis
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. automodule:: openswmm_mcp.tools.analysis
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-openswmm_mcp.tools.building
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. automodule:: openswmm_mcp.tools.building
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-openswmm_mcp.tools.editing
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. automodule:: openswmm_mcp.tools.editing
-   :members:
-   :undoc-members:
-   :show-inheritance:
+Tools
+-----
 
 openswmm_mcp.tools.model
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -202,216 +102,128 @@ openswmm_mcp.tools.model
    :undoc-members:
    :show-inheritance:
 
-openswmm_mcp.tools.nodes
-~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. automodule:: openswmm_mcp.tools.nodes
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-openswmm_mcp.tools.links
-~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. automodule:: openswmm_mcp.tools.links
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-openswmm_mcp.tools.subcatchments
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. automodule:: openswmm_mcp.tools.subcatchments
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-openswmm_mcp.tools.inflows
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. automodule:: openswmm_mcp.tools.inflows
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-openswmm_mcp.tools.pollutants
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. automodule:: openswmm_mcp.tools.pollutants
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-openswmm_mcp.tools.quality
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. automodule:: openswmm_mcp.tools.quality
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-openswmm_mcp.tools.tables
+openswmm_mcp.tools.access
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: openswmm_mcp.tools.tables
+.. automodule:: openswmm_mcp.tools.access
    :members:
    :undoc-members:
    :show-inheritance:
 
-openswmm_mcp.tools.infrastructure
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. automodule:: openswmm_mcp.tools.infrastructure
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-openswmm_mcp.tools.hotstart
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. automodule:: openswmm_mcp.tools.hotstart
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-openswmm_mcp.tools.spatial_quality
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. automodule:: openswmm_mcp.tools.spatial_quality
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-openswmm_mcp.tools.geopackage
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. automodule:: openswmm_mcp.tools.geopackage
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-openswmm_mcp.tools.twod
-~~~~~~~~~~~~~~~~~~~~~~~
-
-.. automodule:: openswmm_mcp.tools.twod
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-openswmm_mcp.tools.climate
+openswmm_mcp.tools.results
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: openswmm_mcp.tools.climate
+.. automodule:: openswmm_mcp.tools.results
    :members:
    :undoc-members:
    :show-inheritance:
 
-openswmm_mcp.tools.datetime_tools
+openswmm_mcp.tools.gym
+~~~~~~~~~~~~~~~~~~~~~~
+
+.. automodule:: openswmm_mcp.tools.gym
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+openswmm_mcp.tools.code
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. automodule:: openswmm_mcp.tools.code
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Gym support
+-----------
+
+openswmm_mcp.gym_support.config
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. automodule:: openswmm_mcp.gym_support.config
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+openswmm_mcp.gym_support.registry
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: openswmm_mcp.tools.datetime_tools
+.. automodule:: openswmm_mcp.gym_support.registry
    :members:
    :undoc-members:
    :show-inheritance:
 
-openswmm_mcp.tools.gym_envs
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. automodule:: openswmm_mcp.tools.gym_envs
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-openswmm_mcp.tools.gym_runs
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. automodule:: openswmm_mcp.tools.gym_runs
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-openswmm_mcp.tools.gym_scoring
+openswmm_mcp.gym_support.store
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: openswmm_mcp.tools.gym_scoring
+.. automodule:: openswmm_mcp.gym_support.store
    :members:
    :undoc-members:
    :show-inheritance:
 
-openswmm_mcp.tools.heat
-~~~~~~~~~~~~~~~~~~~~~~~
+openswmm_mcp.gym_support.envs
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: openswmm_mcp.tools.heat
+.. automodule:: openswmm_mcp.gym_support.envs
    :members:
    :undoc-members:
    :show-inheritance:
 
-openswmm_mcp.tools.infil2d
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+openswmm_mcp.gym_support.jobs
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: openswmm_mcp.tools.infil2d
+.. automodule:: openswmm_mcp.gym_support.jobs
    :members:
    :undoc-members:
    :show-inheritance:
 
-openswmm_mcp.tools.initial_quality
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. automodule:: openswmm_mcp.tools.initial_quality
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-openswmm_mcp.tools.process_components
+openswmm_mcp.gym_support.config_tools
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: openswmm_mcp.tools.process_components
+.. automodule:: openswmm_mcp.gym_support.config_tools
    :members:
    :undoc-members:
    :show-inheritance:
 
-openswmm_mcp.tools.reactions
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+openswmm_mcp.gym_support.run_tools
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: openswmm_mcp.tools.reactions
+.. automodule:: openswmm_mcp.gym_support.run_tools
    :members:
    :undoc-members:
    :show-inheritance:
 
-openswmm_mcp.tools.water_age
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+openswmm_mcp.gym_support.score_tools
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: openswmm_mcp.tools.water_age
+.. automodule:: openswmm_mcp.gym_support.score_tools
    :members:
    :undoc-members:
    :show-inheritance:
 
-openswmm_mcp.tools.xsect
-~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. automodule:: openswmm_mcp.tools.xsect
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-Resource Modules
-----------------
-
-openswmm_mcp.resources.model
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. automodule:: openswmm_mcp.resources.model
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-Prompt Modules
---------------
+Prompts and skills
+------------------
 
 openswmm_mcp.prompts.workflows
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. automodule:: openswmm_mcp.prompts.workflows
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+openswmm_mcp.skills
+~~~~~~~~~~~~~~~~~~~
+
+.. automodule:: openswmm_mcp.skills
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+openswmm_mcp._util.validation
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. automodule:: openswmm_mcp._util.validation
    :members:
    :undoc-members:
    :show-inheritance:

@@ -17,7 +17,7 @@ pytest.importorskip("fastmcp")
 
 from openswmm_mcp.config import ServerSettings
 from openswmm_mcp.errors import ToolError
-from openswmm_mcp.tools.gym_envs import (
+from openswmm_mcp.gym_support.config_tools import (
     create_env_config,
     delete_env_config,
     get_env_config,

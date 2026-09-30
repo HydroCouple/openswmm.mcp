@@ -6,13 +6,12 @@ the `Model Context Protocol <https://modelcontextprotocol.io/>`_ (MCP),
 allowing large-language models and AI assistants to open, run, query, and
 modify EPA-SWMM hydraulic and hydrologic models.
 
-Built on `FastMCP 3.x <https://github.com/jlowin/fastmcp>`_, the server
-provides 650 tools organised into 30 domain namespaces — including a
-2D overland-flow surface namespace (``twod_*``) and the transport
-configuration namespaces (``heat_*``, ``reactions_*``, ``water_age_*``,
-``initial_quality_*``, ``process_components_*``) — nine ``swmm://``
-resources for structured data access, and seven guided-workflow
-prompts for common stormwater modelling tasks.
+Built on `FastMCP 3.x <https://gofastmcp.com/>`_, the server provides 14 core
+tools (plus five optional gym tools) that reach every property and method of
+the engine through its machine-readable catalog, ``swmm://`` resources for the
+catalog and sessions, seven guided-workflow prompts and three bundled skills.
+The whole tool set costs under 5k tokens of context, so it loads in any MCP
+client.
 
 .. toctree::
    :maxdepth: 2

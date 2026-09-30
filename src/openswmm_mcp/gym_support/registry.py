@@ -20,7 +20,7 @@ Single source of truth for the vocabulary the C{gym_*} tools accept
 (plan §3.3). Each registered *kind* carries the import path of the gym
 class it constructs and a Pydantic params model, so:
 
-  - C{gym_list_capabilities} derives its output (names + JSON schemas)
+  - C{gym_describe()} derives its output (names + JSON schemas)
     from this table, and
   - L{build_env<openswmm_mcp.gym_support.config.build_env>} validates
     and constructs from the same table —
@@ -213,6 +213,24 @@ class NodeLateralInflowParams(_Params):
     node_ids: list[str] = Field(min_length=1)
     max_inflow: float = Field(gt=0.0)
     name: str = "node_lateral_inflow"
+
+
+class FieldSetpointParams(_Params):
+    """Params for the C{field_setpoint} runtime factory.
+
+    @ivar path: Catalog path of a writable numeric element field, e.g.
+        C{"link.target_setting"} (see C{describe} / openswmm.engine.catalog).
+    @ivar ids: Element IDs to drive (required).
+    @ivar low: Lower bound of every component, in the field's units.
+    @ivar high: Upper bound of every component.
+    @ivar name: Action-space key; defaults to the path.
+    """
+
+    path: str
+    ids: list[str] = Field(min_length=1)
+    low: float
+    high: float
+    name: str | None = None
 
 
 #: Engine refusal range for a heat source temperature, degrees Celsius. The
@@ -809,6 +827,13 @@ for _spec in [
         "openswmm_gymnasium.spaces.runtime:NodeLateralInflow",
         NodeLateralInflowParams,
         "Per-step controllable lateral inflow [0,max_inflow] at nodes.",
+    ),
+    KindSpec(
+        "field_setpoint",
+        "runtime_factory",
+        "openswmm_gymnasium.spaces.runtime:FieldSetpoint",
+        FieldSetpointParams,
+        "Per-step value of any writable numeric engine field (catalog path) on elements.",
     ),
     KindSpec(
         "heat_source_temperature_setpoint",

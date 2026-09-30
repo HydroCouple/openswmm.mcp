@@ -40,6 +40,13 @@ class NodeLateralInflowParams(_Params):
     max_inflow: float
     name: str
 
+class FieldSetpointParams(_Params):
+    path: str
+    ids: list[str]
+    low: float
+    high: float
+    name: str | None
+
 class _BoundedLinkDesignParams(_Params):
     link_ids: list[str]
     low: float

@@ -45,8 +45,8 @@ package automatically.
    description is the trigger: state when to use the skill *and* when not to,
    with concrete keywords. See `calibrate-model/SKILL.md` for the house style.
 3. Write the body as an ordered, tool-driven workflow that references the
-   actual MCP tool names (e.g. `lifecycle_open_model`,
-   `geopackage_compare_sim_vs_observed`). Follow the project file-IO policy:
+   actual MCP tool names (e.g. `open_model`,
+   `compare`). Follow the project file-IO policy:
    intermediate outputs go to user-reviewable locations, not temp dirs.
 4. Nothing else to wire up — the loader discovers it at import time.
 

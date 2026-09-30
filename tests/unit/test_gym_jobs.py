@@ -208,7 +208,7 @@ def _copy_inp(output_dir: Path) -> str:
 @pytest.mark.integration
 async def test_random_search_job_runs_in_background(ctx, output_dir, job_manager):
     pytest.importorskip("openswmm_gymnasium")
-    from openswmm_mcp.tools.gym_runs import get_job, get_job_results, start_optimization
+    from openswmm_mcp.gym_support.run_tools import get_job, get_job_results, start_optimization
 
     snap = await start_optimization(
         ctx,
@@ -248,7 +248,7 @@ async def test_random_search_job_runs_in_background(ctx, output_dir, job_manager
 @pytest.mark.integration
 async def test_cancel_stops_between_evaluations(ctx, output_dir, job_manager):
     pytest.importorskip("openswmm_gymnasium")
-    from openswmm_mcp.tools.gym_runs import cancel_job, get_job_results, start_optimization
+    from openswmm_mcp.gym_support.run_tools import cancel_job, get_job_results, start_optimization
 
     snap = await start_optimization(
         ctx,
@@ -269,7 +269,7 @@ async def test_cancel_stops_between_evaluations(ctx, output_dir, job_manager):
 @pytest.mark.integration
 async def test_grid_search_covers_levels(ctx, output_dir, job_manager):
     pytest.importorskip("openswmm_gymnasium")
-    from openswmm_mcp.tools.gym_runs import start_optimization
+    from openswmm_mcp.gym_support.run_tools import start_optimization
 
     cfg = _cip_config(_copy_inp(output_dir))
     # Single 1-component dimension keeps the grid tiny: 3 evaluations.
@@ -297,7 +297,7 @@ async def test_grid_search_covers_levels(ctx, output_dir, job_manager):
 async def test_nsga2_produces_nondominated_front(ctx, output_dir, job_manager):
     pytest.importorskip("openswmm_gymnasium")
     pytest.importorskip("platypus")
-    from openswmm_mcp.tools.gym_runs import get_job_results, start_optimization
+    from openswmm_mcp.gym_support.run_tools import get_job_results, start_optimization
 
     snap = await start_optimization(
         ctx,
@@ -336,7 +336,7 @@ def _copy_b01(output_dir: Path) -> str:
 async def test_control_curve_nsga2_front_and_decode(ctx, output_dir, job_manager):
     pytest.importorskip("openswmm_gymnasium")
     pytest.importorskip("platypus")
-    from openswmm_mcp.tools.gym_runs import (
+    from openswmm_mcp.gym_support.run_tools import (
         decode_policy,
         get_job_results,
         start_optimization,
@@ -371,7 +371,7 @@ async def test_control_curve_nsga2_front_and_decode(ctx, output_dir, job_manager
 @pytest.mark.integration
 async def test_decode_policy_rejects_non_control_curve(ctx, output_dir, job_manager):
     pytest.importorskip("openswmm_gymnasium")
-    from openswmm_mcp.tools.gym_runs import decode_policy, start_optimization
+    from openswmm_mcp.gym_support.run_tools import decode_policy, start_optimization
 
     snap = await start_optimization(
         ctx,
@@ -409,7 +409,7 @@ async def test_start_optimization_accepts_json_string_and_echoes_resolved(
     # downgraded), and the resolved settings are echoed in the snapshot and the
     # results so a downgrade would be unmissable.
     pytest.importorskip("openswmm_gymnasium")
-    from openswmm_mcp.tools.gym_runs import get_job_results, start_optimization
+    from openswmm_mcp.gym_support.run_tools import get_job_results, start_optimization
 
     snap = await start_optimization(
         ctx,

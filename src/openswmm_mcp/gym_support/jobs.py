@@ -91,7 +91,7 @@ class OptimizationConfig(BaseModel):
         snapshot and result.
 
         Surfacing these makes a silent algorithm/budget downgrade impossible to
-        miss: a caller who reads the start response or C{gym_get_job} sees the
+        miss: a caller who reads the start response or C{gym_job(action='status')} sees the
         real C{algorithm}/C{budget} the run used, not just whatever it
         requested (previously these lived only in C{job.json}). Only the fields
         that affect the chosen algorithm are included.
@@ -331,7 +331,7 @@ def _term_directions(env_config: EnvConfig) -> dict[str, str]:
 class Job:
     """One optimization job and its mutable progress/result state.
 
-    @ivar job_id: Unique identifier returned by C{gym_start_optimization}.
+    @ivar job_id: Unique identifier returned by C{gym_job(action='start')}.
     @ivar env_config: The environment config being searched.
     @ivar opt_config: The optimization settings.
     @ivar output_dir: User-visible artifact directory.
@@ -711,7 +711,7 @@ class JobManager:
                 _run_platypus(evaluator, dims, job.opt_config)
             result = _assemble_result(evaluator)
             # Echo the applied search settings into the result so result.json
-            # and gym_get_job_results both record what actually ran (#9).
+            # and gym_job(action='results') both record what actually ran (#9).
             result["optimization"] = job.opt_config.resolved()
             (job.output_dir / "result.json").write_text(
                 json.dumps(json_safe(result), indent=2) + "\n", encoding="utf-8"
@@ -784,7 +784,7 @@ class JobManager:
     def get_env_config(self, job_id: str) -> EnvConfig:
         """Return the env config a job was started with.
 
-        Used by C{gym_apply_design} to map decision vectors back onto
+        Used by C{gym_score(action='apply_design')} to map decision vectors back onto
         model elements.
 
         @param job_id: The job to look up.

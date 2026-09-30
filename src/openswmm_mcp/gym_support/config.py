@@ -163,7 +163,7 @@ _OBS_SPECIAL: frozenset[str] = frozenset(
 )
 
 #: Valid C{observations} feature keys (each maps element IDs -> features), in
-#: builder/concatenation order. Surfaced by C{gym_list_capabilities} and in
+#: builder/concatenation order. Surfaced by C{gym_describe()} and in
 #: config-validation errors so the C{ObservationSpec} field names are
 #: discoverable without reading source.
 OBSERVATION_FEATURES: tuple[str, ...] = tuple(_OBS_METHODS)
@@ -207,6 +207,9 @@ class ObservationSpec(BaseModel):
         observe. Requires an engine built with the 2D module B{and} a model
         with an active 2D surface; binding fails with a clear error
         otherwise, including on episodes run with the C{IGNORE_2D} gate on.
+    @ivar fields: Map of engine catalog field path (any numeric element
+        field, e.g. C{"link.stats.max_flow"}, C{"subcatchment.infil"}) to the
+        element IDs to observe. Appended after the named features above.
     @ivar include_clock: Whether to append simulation-clock features.
     """
 
@@ -230,6 +233,7 @@ class ObservationSpec(BaseModel):
     node_pollutant_concentration: dict[str, list[str]] = {}
     link_pollutant_concentration: dict[str, list[str]] = {}
     vertex_depths_2d: list[int] = []
+    fields: dict[str, list[str]] = {}
     include_clock: bool = False
 
     def is_empty(self) -> bool:
@@ -238,7 +242,11 @@ class ObservationSpec(BaseModel):
         @return: C{True} when every list is empty and the clock is off.
         @rtype: bool
         """
-        return not self.include_clock and not any(getattr(self, field) for field in _OBS_METHODS)
+        return (
+            not self.include_clock
+            and not self.fields
+            and not any(getattr(self, field) for field in _OBS_METHODS)
+        )
 
     def build(self) -> Any:
         """Construct the C{ObservationBuilder} this spec describes.
@@ -276,6 +284,13 @@ class ObservationSpec(BaseModel):
                 builder.add_link_pollutant_concentration(link_ids, pollutant)
         if self.vertex_depths_2d:
             builder.add_2d_vertex_depths(self.vertex_depths_2d)
+        for path, ids in self.fields.items():
+            try:
+                builder.add_field(path, ids)
+            except ValueError as exc:
+                raise ToolError(
+                    f"[{ErrorCode.VALIDATION_ERROR}] observations.fields: {exc}"
+                ) from exc
         if self.include_clock:
             builder.add_clock()
         return builder
@@ -287,7 +302,7 @@ class _KindSpecModel(BaseModel):
     Subclasses set L{_category}; the validator checks the kind exists
     in that category and that params satisfy its schema.
 
-    @ivar kind: Registry name (see C{gym_list_capabilities}).
+    @ivar kind: Registry name (see C{gym_describe()}).
     @ivar params: Kind-specific constructor params.
     """
 
@@ -435,7 +450,7 @@ class EnvConfig(BaseModel):
         """Enforce per-env-type structural constraints at schema time.
 
         Mirrors the C{ValueError}s the env constructors raise, so a bad
-        config fails at C{gym_create_env_config} rather than mid-run.
+        config fails at C{gym_config(action='create')} rather than mid-run.
 
         @return: C{self}, unchanged, when valid.
         @rtype: L{EnvConfig}

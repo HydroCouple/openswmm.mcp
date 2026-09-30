@@ -165,7 +165,7 @@ def _copy_inp(output_dir: Path) -> str:
 @pytest.mark.integration
 async def test_run_episode_constant_policy_writes_artifacts(ctx, output_dir):
     pytest.importorskip("openswmm_gymnasium")
-    from openswmm_mcp.tools.gym_runs import run_episode
+    from openswmm_mcp.gym_support.run_tools import run_episode
 
     run_dir = output_dir / "run"
     summary = await run_episode(
@@ -192,7 +192,7 @@ async def test_run_episode_constant_policy_writes_artifacts(ctx, output_dir):
 @pytest.mark.integration
 async def test_run_episode_replay_stops_when_exhausted(ctx, output_dir):
     pytest.importorskip("openswmm_gymnasium")
-    from openswmm_mcp.tools.gym_runs import run_episode
+    from openswmm_mcp.gym_support.run_tools import run_episode
 
     summary = await run_episode(
         ctx,
@@ -207,7 +207,7 @@ async def test_run_episode_replay_stops_when_exhausted(ctx, output_dir):
 @pytest.mark.integration
 async def test_run_episode_default_run_dir_beside_model(ctx, output_dir):
     pytest.importorskip("openswmm_gymnasium")
-    from openswmm_mcp.tools.gym_runs import run_episode
+    from openswmm_mcp.gym_support.run_tools import run_episode
 
     inp = _copy_inp(output_dir)
     summary = await run_episode(ctx, config=_rtc_config(inp), seed=2)
@@ -225,7 +225,13 @@ async def test_run_episode_default_run_dir_beside_model(ctx, output_dir):
 async def test_interactive_loop_matches_direct_env(ctx, output_dir):
     pytest.importorskip("openswmm_gymnasium")
     from openswmm_mcp.gym_support.config import EnvConfig, build_env
-    from openswmm_mcp.tools.gym_runs import env_close, env_open, env_reset, env_step, list_envs
+    from openswmm_mcp.gym_support.run_tools import (
+        env_close,
+        env_open,
+        env_reset,
+        env_step,
+        list_envs,
+    )
 
     cfg = _rtc_config(_copy_inp(output_dir))
 
@@ -266,7 +272,7 @@ async def test_interactive_loop_matches_direct_env(ctx, output_dir):
 @pytest.mark.integration
 async def test_env_open_duplicate_and_capacity(ctx, output_dir):
     pytest.importorskip("openswmm_gymnasium")
-    from openswmm_mcp.tools.gym_runs import env_close, env_open
+    from openswmm_mcp.gym_support.run_tools import env_close, env_open
 
     ctx.lifespan_context["env_manager"] = EnvManager(max_envs=1)
     cfg = _rtc_config(_copy_inp(output_dir))
@@ -282,7 +288,7 @@ async def test_env_open_duplicate_and_capacity(ctx, output_dir):
 @pytest.mark.integration
 async def test_idle_envs_are_swept(ctx, output_dir):
     pytest.importorskip("openswmm_gymnasium")
-    from openswmm_mcp.tools.gym_runs import env_open, list_envs
+    from openswmm_mcp.gym_support.run_tools import env_open, list_envs
 
     ctx.lifespan_context["env_manager"] = EnvManager(idle_timeout_s=0.05)
     await env_open(ctx, env_id="leaky", config=_rtc_config(_copy_inp(output_dir)))

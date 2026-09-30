@@ -76,6 +76,7 @@ The *Duration & velocity* tab needs no extra arrays — exceedance curves are
 computed from each asset's `util`, and the velocity screening from `vel` vs the
 `meta` velocity limits.
 
-Source the series from the temporal step: per-element `analysis_get_time_series`
+Source the series from the temporal step: per-element `timeseries`
 for `util`, and the system-wide available-capacity series for context. Coordinates
-come from `spatial_get_all_coordinates` / `spatial_get_all_vertices`.
+come from `call(target="spatial", method="node_coords")` and per-link
+`link_vertices`.

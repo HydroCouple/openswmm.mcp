@@ -98,8 +98,8 @@ treatment routing. A better score that violates these is not a valid solution.
 
 ### 0. Baseline and opportunity
 
-1. `lifecycle_open_model`; run a baseline (`lifecycle_run_simulation` only if
-   results are not already `ended`).
+1. `open_model`; run a baseline (`run(until="end")` only if results are not
+   already `ENDED`).
 2. Reuse/generate `capacity-assessment` outputs to locate hotspots, untreated-
    outfall volumes, and idle-capacity-during-stress. Record the baseline
    objective vector. → verify: baseline objectives saved to a review file.
@@ -110,26 +110,27 @@ Author a reviewable JSON config (written to the output folder) specifying: the
 agent set per commodity and their stress metrics; each cost-curve's onset /
 steepness / ceiling; the trade routes (controllable structure ↔ buyer/seller
 regions); per-structure PID gains; the control interval; and the constraint
-limits. Resolve all element IDs against the model with the `query_*` tools.
+limits. Resolve all element IDs against the model with `find` / `get`.
 → verify: every trade route references a real controllable link and two regions.
 
 ### 2. Run the reactive control loop
 
 Drive the simulation stepwise, acting each control interval:
 
-1. Initialize and step: `lifecycle_step_simulation` / `lifecycle_stride`
-   (auto-starts the solver from `initialized` → `running`).
-2. Read live state in bulk: `nodes_get_depths_bulk`, `nodes_get_overflows_bulk`,
-   `links_get_depths_bulk`, `links_get_flows_bulk`; derive storage volumes from
-   depth + the storage curve.
+1. Initialize and step: `run(until="+<control interval>")` or
+   `run(max_steps=n)` (starts the solver when needed).
+2. Read live state in bulk: `get(kind="node", fields=["depth", "overflow",
+   "volume"])` and `get(kind="link", fields=["depth", "flow"])` (whole-network
+   reads use the engine's bulk arrays).
 3. Compute each agent's normalized price from its cost curve.
 4. For each trade route, compute the cost differential and update its PID.
-5. Apply settings: `links_set_target_setting` (gates/orifices/weirs; requires
-   `running`), pump setpoints via `links_set_pump_startup_depth` /
-   `_shutoff_depth` / `links_set_target_setting`, or `forcing_set_link_control`
-   for rule-style overrides.
-6. Advance one control interval and repeat until
-   `lifecycle_get_simulation_state` reports completion.
+5. Apply settings: `set(kind="link", changes=[{"id": ..., "field":
+   "target_setting", "value": ...}])` (gates/orifices/weirs; requires a
+   running simulation), pump setpoints via the `pump.startup_depth` /
+   `pump.shutoff_depth` fields, or `call(target="forcing",
+   method="link_setting", ...)` for rule-style overrides.
+6. Advance one control interval and repeat until `run` reports
+   `finished: true`.
 
 Record per-step time series of prices, differentials, settings, and the running
 objectives. → verify: loop completes and constraint compliance is logged.
@@ -150,16 +151,17 @@ the reactive controller internally per candidate, so there is **no outer loop**.
    - `observations` — a few nodes/links to record for the report.
    - optional `policy_bounds` to override per-field search ranges; `tune_full`
      to also tune piecewise-linear knees.
-2. `gym_create_env_config` → `gym_validate_env_config` → `gym_start_optimization`
-   (`algorithm: nsga2`, set `budget`/`population_size`). Each evaluation runs one
+2. `gym_config(action="create")` → `gym_config(action="validate")` →
+   `gym_job(action="start")` (`algorithm: nsga2`, set `budget`/`population_size`). Each evaluation runs one
    full episode under the controller built from a candidate vector (curve
    onset/ceiling/steepness + PID Kp/Ki/Kd).
-3. `gym_pareto_filter` / `gym_score_front` to inspect the front, then
-   `gym_apply_design` to write the selected **`market_config.tuned.json`** to the
+3. `gym_score(action="pareto")` / `gym_score(action="score")` to inspect the
+   front, then `gym_score(action="apply_design")` to write the selected **`market_config.tuned.json`** to the
    job's output dir. A market job tunes the controller, not the model, so no
    model session is edited.
 
-Inspect available reward terms / env support with `gym_list_capabilities`.
+Inspect available reward terms / env support with `gym_describe`. These gym tools
+need the server started with `OPENSWMM_MCP_TOOLSETS=core,gym`.
 
 The output is a **Pareto set** of market configurations, not one answer.
 → verify: the applied configuration reproduces its reported objectives.
@@ -169,8 +171,8 @@ fixed operating plan for a *known* event rather than a reactive controller,
 optimize a precomputed per-structure setting schedule directly: set
 `structure_ids`, `n_points` (settings per structure over the event), and
 `control_interval_seconds`; the decision vector is the schedule itself. Same
-`gym_start_optimization` → `gym_pareto_filter` → `gym_apply_design` flow;
-`gym_apply_design` writes **`schedule.tuned.json`**. This is open-loop (no live
+`gym_job(action="start")` → `gym_score(action="pareto")` →
+`gym_score(action="apply_design")` flow; applying writes **`schedule.tuned.json`**. This is open-loop (no live
 feedback) — full-event optimal control. (A true receding-horizon MPC predictor
 is not offered: SWMM hot-start does not faithfully resume mid-event on this
 engine, so a re-simulated horizon would be unreliable.)
@@ -206,7 +208,7 @@ baseline-vs-optimized macro and granular time series together. Additional tabs:
 
 Persist the market config and tuned parameters as JSON, export the iteration/
 Pareto evaluations as CSV, and write the controlled model to a **new** `.inp`
-(`building_write_model`) — never overwrite the original.
+(`save`) — never overwrite the original.
 
 ## Reference files
 
@@ -220,8 +222,8 @@ Start from these bundled templates instead of improvising the config each run
 - `references/control_loop.py` — reference implementation of the cost curves,
   the direct-acting PID (with anti-windup), buyer/seller matching, and the
   reactive loop. The pure logic is complete; its `Adapter` methods mark exactly
-  where the MCP tool calls plug in (bulk state read / `links_set_target_setting`
-  / `lifecycle_stride`). Reuse this logic for the gym env or the outer NSGA-II
+  where the MCP tool calls plug in (bulk state read with `get` / setting
+  writes with `set` / advancing with `run`). Reuse this logic for the gym env or the outer NSGA-II
   loop so tuning scores the same controller it ships.
 - `references/optimization_dashboard.template.html` — the interactive results
   dashboard (clickable Pareto front → objective/cost-savings panels, reduction

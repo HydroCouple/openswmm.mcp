@@ -16,7 +16,7 @@
 
 """Episode execution and live interactive-env management (plan Phase 3).
 
-Two responsibilities behind the C{gym_run_episode} and C{gym_env_*}
+Two responsibilities behind the C{gym_env(action='run_episode')} and C{gym_env_*}
 tools:
 
   - L{run_episode} — synchronous single-rollout runner driving a
@@ -349,7 +349,7 @@ class EnvManager:
     Mirrors the model C{SessionManager}: explicit lifecycle with a
     capacity cap, plus a lazy idle sweep — any operation first closes
     envs idle longer than I{idle_timeout_s}, so leaked envs (an LLM
-    that forgot C{gym_env_close}) do not pin engine handles forever.
+    that forgot C{gym_env(action='close')}) do not pin engine handles forever.
 
     @ivar max_envs: Maximum simultaneously open envs.
     @ivar idle_timeout_s: Idle seconds before an env is swept.
@@ -401,7 +401,7 @@ class EnvManager:
             if len(self._envs) >= self.max_envs:
                 raise ToolError(
                     f"[{ErrorCode.MAX_SESSIONS_REACHED}] {self.max_envs} envs "
-                    "already open. Close one with gym_env_close."
+                    "already open. Close one with gym_env(action='close')."
                 )
             env = build_env(config)
             handle = EnvHandle(env_id=env_id, env=env, config=config)

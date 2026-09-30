@@ -17,9 +17,10 @@ is relative to it.
 
 ## Inputs you must confirm before starting
 
-- Path to the `.inp` model file (use `lifecycle_open_model`).
-- Source of observed data (a GeoPackage via `geopackage_import_observed_data`,
-  or a time series the user provides).
+- Path to the `.inp` model file (use `open_model`).
+- Source of observed data: a CSV (ISO datetime column, then one column per
+  element id) that `compare` reads directly, or a GeoPackage results database
+  read through `call(target="geopackage", ...)`.
 - Which element(s) and attribute(s) are being calibrated (e.g. outfall flow,
   a specific node depth).
 - Acceptance criteria. Default targets: Nash–Sutcliffe Efficiency (NSE) ≥ 0.5
@@ -29,37 +30,38 @@ If any of these is unknown, ask before running anything.
 
 ## Workflow
 
-1. **Open and snapshot the model.** `lifecycle_open_model`, then
-   `query_get_system_summary` to record element counts and units. Capture the
+1. **Open and snapshot the model.** `open_model`, then
+   `report(name="summary")` to record element counts and units. Capture the
    current values of the parameters you intend to change so the baseline is
    reproducible. → verify: model opens, summary returned.
 
-2. **Establish the baseline.** Run `lifecycle_run_simulation`, then pull the
-   simulated series with `analysis_get_time_series` for the calibration target.
-   Load observed data and compute initial fit with
-   `geopackage_compare_sim_vs_observed`. Record baseline NSE/PBIAS.
+2. **Establish the baseline.** `run`, then pull the simulated series with
+   `timeseries` for the calibration target. Compute the initial fit with
+   `compare(a=<observed.csv>, b=<session>, kind=..., variable=...)`, which
+   returns NSE, RMSE, bias and peak/volume differences. Record baseline NSE and
+   PBIAS (bias relative to the observed volume).
    → verify: baseline metrics exist and are written to a review file.
 
 3. **Identify sensitive parameters.** Calibrate the few parameters that matter,
    not everything. Typical order for hydrology/hydraulics:
-   - Subcatchment width and % imperviousness (`editing_set_subcatchment_properties`)
-   - Infiltration parameters (`subcatchments_set_infil_horton` /
-     `_green_ampt` / `_curve_number`)
-   - Conduit roughness (Manning's n) via `editing_set_link_properties`
-   - Storage/routing options via `model_set_option`
+   - Subcatchment width and % imperviousness
+     (`set(kind="subcatchment", ...)` on `width` / `imperv_pct`)
+   - Infiltration parameters (`call(target="subcatchment:<id>.infiltration",
+     method="set_horton" | "set_green_ampt" | "set_curve_number", ...)`)
+   - Conduit roughness (Manning's n) via `set(kind="link", ...)` on `roughness`
+   - Storage/routing options via `call(target="options", method="set_item", ...)`
 
 4. **Adjust → re-run → re-score, one change set at a time.** Apply a bounded
    change, re-run, and recompute fit. Keep changes within physically plausible
    ranges. If fit improves, keep it; if not, revert. Use
-   `hotstart_save_hotstart` / `hotstart_clone_session` to branch experiments
-   cheaply. → verify: each iteration's metrics are logged with the parameter
+   `session(action="clone")` (or open the model into a second session) to
+   branch experiments cheaply. → verify: each iteration's metrics are logged with the parameter
    delta that produced them.
 
 5. **Stop when acceptance criteria are met** or improvements stall (change in
    NSE < 0.01 over an iteration). Do not over-fit.
 
-6. **Write the calibrated model and a report.** `building_write_model` to a new
-   `.inp` (never silently overwrite the original), and produce a calibration
+6. **Write the calibrated model and a report.** `save` to a new `.inp` (never silently overwrite the original), and produce a calibration
    summary table: parameter, baseline value, calibrated value, and the
    before/after NSE and PBIAS.
 

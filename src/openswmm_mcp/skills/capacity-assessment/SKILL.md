@@ -13,7 +13,7 @@ diagnosis with interactive maps, and a **temporal** analysis that exposes when
 the system is stressed and where spare capacity sits idle during those events.
 The headline metric for conveyance is the filling ratio **hmax/Hmax**
 (max water depth / full depth, a.k.a. d/D), reported by
-`analysis_get_capacity_summary` as `max_filling`.
+`report(name="capacity")` as `max_filling`.
 
 Work the tiers in order — granular and temporal findings are interpreted
 relative to the macro baseline. Do not skip the run-state check; every analysis
@@ -21,7 +21,7 @@ tool requires completed results.
 
 ## Inputs to confirm before starting
 
-- Path to the `.inp` model (open with `lifecycle_open_model`).
+- Path to the `.inp` model (open with `open_model`).
 - Output folder for the report, figures, and CSVs (must be user-reviewable,
   per project file-IO policy — never a temp dir).
 - The constraint thresholds below. Present the defaults and let the engineer
@@ -53,25 +53,22 @@ considered to hold *excess* capacity during a stress event.
 
 ### 0. Load the model and ensure results exist
 
-1. `lifecycle_open_model` with the `.inp` path. Ensure the session uses the new
-   engine (`engine="openswmm"`, the default) — the granular/temporal map steps
-   call spatial tools that return `NOT_SUPPORTED` on a `legacy` session. If a
-   pre-existing session is on legacy (`lifecycle_get_simulation_state` reports
-   `engine`), re-open with `engine="openswmm"` before proceeding.
-2. `lifecycle_get_simulation_state` — if the session is not `ended`, run it with
-   `lifecycle_run_simulation`. If it is already `ended`, reuse the existing
-   results (do not re-run). → verify: state is `ended` before any analysis.
+1. `open_model` with the `.inp` path (or reuse an open session).
+2. `session(action="state")` — if the state is not `ENDED`, run it with
+   `run(until="end")`. If it is already `ENDED`, reuse the existing results
+   (do not re-run). → verify: state is `ENDED` before any analysis.
 
 ### 1. Macro-level assessment
 
 Establish the system-wide picture from a few aggregate calls:
 
-- `analysis_get_report_snapshot` → flow-routing continuity (total **flooding**
-  volume vs. total outflow and inflow, continuity error), the **storage volume
-  summary** (per-storage depth/volume), the **link flow summary**, and the
-  **pump summary**.
-- `analysis_get_mass_balance` → confirm the volume balance closes (flag if
-  continuity error is large; results are unreliable above ~5–10%).
+- `report(name="mass_balance")` → flow-routing continuity (total **flooding**
+  volume vs. total outflow and inflow, continuity error) and routing
+  diagnostics; confirm the volume balance closes (flag if the continuity error
+  is large; results are unreliable above ~5–10%).
+- `report(name="storage")`, `report(name="capacity", top=...)` and
+  `report(name="pumps")` → the **storage volume summary**, the **link flow
+  summary** and the **pump summary**.
 
 Report: total flood volume and % of inflow lost to flooding; aggregate storage
 utilization; and the **distribution of hmax/Hmax** across all conduits
@@ -81,21 +78,21 @@ constrained at isolated bottlenecks. → verify: macro KPIs written to the repor
 
 ### 2. Granular per-asset assessment
 
-1. `analysis_get_capacity_summary` (pass `max_filling_threshold` =
-   `spare_capacity_filling` to retrieve the broad distribution, then classify in
-   code using the threshold table) → per-conduit hmax/Hmax, max flow, max
-   velocity, surcharge time.
-2. `analysis_get_flooding_summary` → per-node flood volume, max overflow rate,
-   time flooded, max depth.
+1. `report(name="capacity", top=<number of links>)` → per-conduit hmax/Hmax
+   (`max_filling`), max flow, max velocity, surcharge time, sorted by filling;
+   classify in code using the threshold table (and `spare_capacity_filling`).
+2. `report(name="flooding", top=<number of nodes>)` → per-node flood volume,
+   max overflow rate, time flooded, max depth.
 3. Pull storage and pump constraints from the macro snapshot; classify each per
    the threshold table.
 4. Build the **constrained-asset register**: every flagged asset with its class,
    the governing metric, its value, and constrained/critical status.
 
-Then map it. Geometry comes from `spatial_get_all_coordinates`,
-`spatial_get_all_vertices`, and `spatial_get_all_polygons`
-(`spatial_get_model_geometry` for the bundle); cross-section context from
-`links_get_xsect`. Produce **interactive Plotly figures** (Plotly only — no
+Then map it. Geometry comes from the `spatial` service:
+`call(target="spatial", method="node_coords")` for all node coordinates, and
+`link_vertices` / `subcatchment_polygon` per element (`describe("spatial")`
+lists them); cross-section context from
+`get(kind="link", fields=["xsect.shape", "xsect.g1"])`. Produce **interactive Plotly figures** (Plotly only — no
 matplotlib/folium):
 
 - Network map with conduits colored by hmax/Hmax (continuous scale, surcharged
@@ -112,10 +109,10 @@ The goal is to understand *when* the system is constrained and to surface
 downstream operational optimization.
 
 1. Identify adverse-event windows from system time series:
-   `analysis_get_time_series` for the system **flooding** variable (and
-   `analysis_output_system_result`) to find when flooding/overflow is active.
+   `timeseries(kind="system", variable="flooding")` to find when
+   flooding/overflow is active.
 2. For the most stressed assets, pull per-element series with
-   `analysis_get_time_series` (node depth/flooding, link flow/depth).
+   `timeseries` (node depth/overflow, link flow/depth).
 3. **Excess-capacity diagnosis:** during each adverse-event window, find
    conduits and storages whose filling stays below `spare_capacity_filling`.
    Spare capacity *concurrent with* flooding elsewhere indicates spatial
@@ -131,8 +128,9 @@ downstream operational optimization.
    - **Treatment** — spare throughput at `TREATED` facilities,
      `Σ (capacity − current_throughput)`.
 4. **Uncontrolled-discharge analysis:** identify outfall nodes lacking the
-   treatment tag via `nodes_get_tag` (confirm the outfall set with
-   `nodes_get_outfall_type` / `nodes_get_outfall_route_to`). For each untreated
+   treatment tag via `get(kind="node", fields=["tag"])` (confirm the outfall set
+   with `find(kind="node", type="OUTFALL")` and
+   `get(kind="node", fields=["outfall.type", "outfall.route_to"])`). For each untreated
    outfall, get its discharge series and integrate the volume released **during**
    flood/overflow windows. Report total uncontrolled release volume and its
    timing relative to system stress.
@@ -179,8 +177,7 @@ include_plotlyjs=...)` so the file opens standalone). Structure:
 10. Methods & thresholds — the exact threshold values used this run.
 
 Also export the constrained-asset register, temporal tables, and the
-recommendations register as CSV (`analysis_export_results` and/or written
-directly) alongside the HTML.
+recommendations register as CSV (`export` and/or written directly) alongside the HTML.
 
 These sections are delivered as the **multi-tab interactive dashboard** (see
 Reference files), not just static figures.
@@ -204,7 +201,7 @@ In this skill's `references/` folder:
 
 ## Guardrails
 
-- Never re-run a model that already has `ended` results unless the user asks.
+- Never re-run a model that already has `ENDED` results unless the user asks.
 - Check continuity error first; flag the assessment as unreliable if it is high
   rather than reporting capacity numbers as fact.
 - hmax/Hmax ≥ 1.0 means the conduit reached full depth, not that flow exceeded

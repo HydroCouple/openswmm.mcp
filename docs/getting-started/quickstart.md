@@ -13,10 +13,10 @@ tools.
 
 ## Step 1: Open a Model
 
-Use the `lifecycle_open_model` tool to load a SWMM input file:
+Use the `open_model` tool to load a SWMM input file:
 
 ```
-Tool: lifecycle_open_model
+Tool: `open_model`
 Arguments:
   inp_path: "/path/to/site_drainage.inp"
   session_id: "demo"
@@ -44,11 +44,11 @@ The server parses the `.inp` file, initialises the engine, and returns a
 
 ## Step 2: Run the Simulation
 
-Use the `lifecycle_run_simulation` tool. This is a background task that
+Use the `run` tool. This is a background task that
 reports progress as a percentage:
 
 ```
-Tool: lifecycle_run_simulation
+Tool: `run`
 Arguments:
   session_id: "demo"
 ```
@@ -71,7 +71,7 @@ When complete, the tool returns continuity errors and timing:
 ### Inspect a Node
 
 ```
-Tool: query_get_node_info
+Tool: `get(kind='node', ...)`
 Arguments:
   session_id: "demo"
   node_id: "J1"
@@ -83,7 +83,7 @@ lateral inflow, overflow).
 ### Get Flooding Summary
 
 ```
-Tool: analysis_get_flooding_summary
+Tool: `report(name='flooding')`
 Arguments:
   session_id: "demo"
 ```
@@ -94,7 +94,7 @@ volume.
 ### Retrieve a Time Series
 
 ```
-Tool: analysis_get_time_series
+Tool: `timeseries`
 Arguments:
   session_id: "demo"
   element_type: "node"
@@ -109,7 +109,7 @@ Returns the full depth hydrograph for node J1 across all reporting periods.
 When you are done, close the session to release engine resources:
 
 ```
-Tool: lifecycle_close_model
+Tool: `session(action='close')`
 Arguments:
   session_id: "demo"
 ```

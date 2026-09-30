@@ -18,6 +18,13 @@ class ServerSettings(BaseSettings):
     http_port: int = 8080
     log_level: str = "INFO"
 
+    # Comma-separated tool sets to register: "core" (always), "gym".
+    toolsets: str = "core"
+    # Register the ``run_python`` tool (Python with the session's Solver in
+    # scope). Honoured only on the stdio transport; never enable it on a
+    # server reachable by others.
+    enable_python: bool = False
+
     # Optional OAuth / JWT fields for authenticated transports
     oauth_issuer: str | None = None
     oauth_audience: str | None = None

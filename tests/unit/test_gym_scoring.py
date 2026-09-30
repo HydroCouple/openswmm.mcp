@@ -20,7 +20,7 @@ pytest.importorskip("fastmcp")
 from openswmm_mcp.config import ServerSettings
 from openswmm_mcp.errors import ToolError
 from openswmm_mcp.gym_support.jobs import JobManager
-from openswmm_mcp.tools.gym_scoring import _as_matrix, _check_indicator_args, _pick_evaluation
+from openswmm_mcp.gym_support.score_tools import _as_matrix, _check_indicator_args, _pick_evaluation
 
 _REFERENCE_INP = (Path(__file__).parents[1] / "data" / "site_drainage_example.inp").resolve()
 _OUTPUT_ROOT = Path(__file__).parents[1] / "_output" / "gym_scoring"
@@ -62,10 +62,12 @@ async def test_pareto_filter_accepts_json_string_front_via_binding_layer():
     # error before the tool body ever runs. Goes through mcp.call_tool to
     # exercise that binding layer (a plain function call would bypass it).
     pytest.importorskip("openswmm_gymnasium")
-    from openswmm_mcp.server import mcp
+    from openswmm_mcp.config import ServerSettings
+    from openswmm_mcp.server import build_server
 
+    mcp = build_server(ServerSettings(toolsets="core,gym"))
     res = await mcp.call_tool(
-        "gym_pareto_filter", {"front": "[[1.0, 2.0], [2.0, 1.0], [3.0, 3.0]]"}
+        "gym_score", {"action": "pareto", "front": "[[1.0, 2.0], [2.0, 1.0], [3.0, 3.0]]"}
     )
     data = getattr(res, "structured_content", None) or res.data
     assert data["input_count"] == 3
@@ -121,7 +123,7 @@ async def test_score_front_matches_direct_calls(output_dir):
     import numpy as np
     from openswmm_gymnasium import scoring
 
-    from openswmm_mcp.tools.gym_scoring import score_front
+    from openswmm_mcp.gym_support.score_tools import score_front
 
     ctx = _Ctx(str(output_dir))
     weights = [[1.0, 0.0], [0.5, 0.5], [0.0, 1.0]]
@@ -163,7 +165,7 @@ async def test_score_front_matches_direct_calls(output_dir):
 @pytest.mark.integration
 async def test_pareto_filter_inline(output_dir):
     pytest.importorskip("openswmm_gymnasium")
-    from openswmm_mcp.tools.gym_scoring import pareto_filter
+    from openswmm_mcp.gym_support.score_tools import pareto_filter
 
     ctx = _Ctx(str(output_dir))
     # [2.5, 2.5] is dominated by [2, 2]; the three corners survive.
@@ -203,7 +205,7 @@ def _cip_config(inp: str) -> dict:
 
 
 async def _finished_job(ctx, job_manager, config: dict, out: Path, seed: int) -> str:
-    from openswmm_mcp.tools.gym_runs import start_optimization
+    from openswmm_mcp.gym_support.run_tools import start_optimization
 
     snap = await start_optimization(
         ctx,
@@ -221,7 +223,7 @@ async def _finished_job(ctx, job_manager, config: dict, out: Path, seed: int) ->
 @pytest.mark.integration
 async def test_compare_runs_and_apply_design(output_dir, session_manager, inp_path):
     pytest.importorskip("openswmm_gymnasium")
-    from openswmm_mcp.tools.gym_scoring import apply_design, compare_runs
+    from openswmm_mcp.gym_support.score_tools import apply_design, compare_runs
 
     job_manager = JobManager(max_workers=2)
     ctx = _Ctx(str(output_dir), job_manager=job_manager, session_manager=session_manager)
@@ -245,16 +247,14 @@ async def test_compare_runs_and_apply_design(output_dir, session_manager, inp_pa
             await compare_runs(ctx, job_ids=[job_a], indicators=["spread"])
 
         # Apply the best design onto a live session and read it back.
-        session = await session_manager.create_session(
-            session_id="default", inp_path=inp_path, engine="openswmm"
-        )
-        session.backend.solver.open()
-        session.state = "opened"
+        from openswmm_mcp.tools.model import open_model
 
+        await open_model(ctx, path=inp_path, session_id="default")
         applied = await apply_design(ctx, job_id=job_a, session_id="default")
         assert {a["element_id"] for a in applied["applied"]} == {"C1", "C2", "J1"}
 
-        links, nodes = session.links, session.nodes
+        session = await session_manager.get("default")
+        links, nodes = session.solver.links, session.solver.nodes
         for change in applied["applied"]:
             if change["kind"] == "link_roughness":
                 idx = links.get_index(change["element_id"])

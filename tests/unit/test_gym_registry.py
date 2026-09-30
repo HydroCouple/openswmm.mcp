@@ -32,6 +32,7 @@ EXPECTED_KINDS = {
     "runtime_factory": {
         "orifice_setting",
         "node_lateral_inflow",
+        "field_setpoint",
         "heat_source_temperature_setpoint",
     },
     "design_factory": {

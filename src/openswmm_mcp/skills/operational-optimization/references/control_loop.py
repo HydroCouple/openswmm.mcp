@@ -111,25 +111,26 @@ class Adapter(Protocol):
     def read_metrics(self) -> dict[str, float]:
         """Return {agent_id: stress_metric in [0,1]} for the current step.
 
-        Live mapping: nodes_get_depths_bulk / nodes_get_overflows_bulk /
-        links_get_depths_bulk / links_get_flows_bulk, plus the storage curve to
-        turn depth into a fill fraction. Normalize each raw value to [0,1] per
+        Live mapping: get(kind="node", fields=["depth", "overflow", "volume"]) and
+        get(kind="link", fields=["depth", "flow"]), plus node full volume to
+        turn stored volume into a fill fraction. Normalize each raw value to [0,1] per
         the agent's stress_metric before returning.
         """
 
     def apply_setting(self, structure_link_id: str, setting: float) -> None:
         """Apply a [0,1] setting to a structure.
 
-        Live mapping: links_set_target_setting (gates/orifices/weirs; requires
-        the session 'running'), pump setpoints via links_set_pump_startup_depth
-        / _shutoff_depth / links_set_target_setting, or forcing_set_link_control.
+        Live mapping: set(kind="link", field "target_setting") (gates/orifices/
+        weirs; requires a running simulation), pump setpoints via the
+        "pump.startup_depth" / "pump.shutoff_depth" fields, or
+        call(target="forcing", method="link_setting").
         """
 
     def step(self, dt_seconds: float) -> bool:
         """Advance the simulation by *dt_seconds*; return True when complete.
 
-        Live mapping: lifecycle_stride / lifecycle_step_simulation (auto-starts
-        the solver), then lifecycle_get_simulation_state to detect completion.
+        Live mapping: run(until="+<dt_seconds>") (starts the solver when needed);
+        its result's "finished" flag detects completion.
         """
 
 
@@ -191,13 +192,13 @@ def run(config: dict, adapter: Adapter) -> list[dict]:
 def score(config: dict) -> dict[str, float]:
     """Return the four objective costs after a completed run.
 
-    Live mapping: analysis_get_report_snapshot (flooding volume, pump summary),
-    analysis_get_flooding_summary, the storage volume summary, and the
-    untreated-outfall discharge integral (nodes_get_tag + discharge series).
+    Live mapping: report(name="mass_balance") (flooding volume), report(name=
+    "pumps"), report(name="flooding"), report(name="storage"), and the
+    untreated-outfall discharge integral (node "tag" field + timeseries).
     NSGA-II minimizes these; weights in config['objectives'] are applied by the
     caller when collapsing to a scalar for single-objective baselining.
     """
-    raise NotImplementedError("wire to analysis_* tools at call time")
+    raise NotImplementedError("wire to the report / timeseries tools at call time")
 
 
 # ---------------------------------------------------------------------------

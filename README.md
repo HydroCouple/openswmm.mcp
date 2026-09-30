@@ -24,45 +24,33 @@
 
 ## Features
 
-The server exposes **650 tools** organized across 30 namespaced sub-servers, along with **9 URI-based resources**, **7 prompt templates**, and full authentication support.
+The server exposes **14 core tools**, **5 optional gym tools** and an opt-in
+`run_python` tool. Together their definitions take about 17k characters (under
+5k tokens), so the server loads in any MCP client, including Claude Desktop.
+v1 registered 663 tools and could not.
 
-### Tool Namespaces
+Five generic tools (`describe`, `find`, `get`, `set`, `call`) reach every
+property and method of the engine through its machine-readable catalog
+(`openswmm.engine.catalog`). New engine capabilities reach the server without
+new tool code.
 
-- **lifecycle\_\***: Open models, run or step simulations, inspect session state, manage event windows and runoff-interface files, manage multiple concurrent sessions
-- **query\_\***: Read properties and runtime state for nodes, links, subcatchments, and gages; search elements by regex pattern
-- **model\_\***: Project-level metadata — title, options, CRS, unit system, scalar user flags plus user-flag schema / per-object values, plugins, file-section paths and typed external-file path slots
-- **building\_\***: Construct models from scratch — add nodes, links, subcatchments, gages, time series, curves; pop (undo) the last added element; set options; validate and write `.inp` files
-- **editing\_\***: Delete model objects with cascade analysis, preview impacts non-destructively, and convert nodes or links to different types in place
-- **nodes\_\*** / **links\_\*** / **subcatchments\_\***: Fine-grained per-element accessors — bulk state arrays, configuration setters, per-element statistics
-- **inflows\_\***: External / dry-weather / RDII inflows, unit hydrographs, exponential IA decay
-- **controls\_\***: SWMM control rules — add, list, clear, set link setting / status
-- **forcing\_\***: Apply runtime forcing overrides (rainfall, inflows, PET, boundary conditions), read back the climate evaporation rate, set link controls, add control rules
-- **pollutants\_\*** / **quality\_\***: Pollutant properties, buildup / washoff / treatment kinetics, landuse and street sweeping
-- **tables\_\***: Time series, curves, and patterns with lookup helpers
-- **infrastructure\_\***: Transects, streets, inlets (full design records and the inlet placement table shared by `[INLET_USAGE]` rows and inlet junctions), LID controls and usage
-- **hotstart\_\***: Save and load simulation state checkpoints; seed state; clone sessions for scenario branching
-- **analysis\_\***: Retrieve post-simulation statistics, mass balance, time series, flooding summaries, capacity summaries, scenario comparison, and CSV/JSON export
-- **spatial\_\***: Query and set element coordinates, retrieve water-quality concentrations, assign treatment expressions, add LID controls
-- **geopackage\_\***: GeoPackage I/O — simulations, result series, observed-data comparison
-- **twod\_\***: 2D overland-flow surface — mesh queries, per-triangle state, statistics and mass balance, runtime forcing, solver parameters, edge boundary conditions, edge conveyance
-- **infil2d\_\***: Per-cell infiltration on the 2D mesh — options, tag defaults, per-cell overrides, rate / cumulative / total-volume readback
-- **climate\_\***: Pre-run climate configuration — temperature, evaporation, wind, snowmelt globals, areal-depletion curves, monthly adjustments
-- **heat\_\***: Heat transport — flux-module toggles, radiative / solar / cloud parameters, shortwave mode, `[HEAT_SOURCES]` inlet temperatures (degC, refused not clamped outside `[-50, 100]`) and per-node overrides
-- **water\_age\_\***: `[WATER_AGE_SOURCES]` — per-pathway global ages in HOURS (negative values legal: age extraction) plus `dwf` / `external_inflow` node overrides
-- **reactions\_\***: Multi-species reactions — species, coefficients, terms, pipe / tank expressions, options, initial quality, whole-file `.rxn` text, expression pre-flight, and the session-less completer vocabulary
-- **initial\_quality\_\***: `[INITIAL_QUALITY]` per-element seeds, including the reserved `__WATER_AGE__` (hours) and `__TEMPERATURE__` (degC) constituents
-- **process\_components\_\***: `[PROCESS_COMPONENTS]` registrations — enumerate, find, register (the config path need not exist yet), remove
-- **xsect\_\***: Cross-section geometry maths — area, depth, hydraulic radius, section factor, critical depth; no open session required
+- **Sessions and runs** -- `open_model`, `run`, `session`, `save`
+- **Catalog access** -- `describe`, `find`, `get`, `set`, `call`, `edit`
+- **Results** -- `timeseries`, `report`, `compare`, `export`
+- **Gym** (`OPENSWMM_MCP_TOOLSETS=core,gym`) -- `gym_describe`, `gym_config`,
+  `gym_env`, `gym_job`, `gym_score`
 
-See the [tools guide](docs/user-guide/tools.md) for the per-namespace tool inventory.
+See the [tools guide](docs/user-guide/tools.md) for details and the v1-to-v2
+mapping.
 
 ### Additional Capabilities
 
-- **9 URI-based resources** (`swmm://sessions`, `swmm://session/{id}/nodes`, etc.) for structured data access
-- **7 prompt templates** for guided workflows (model analysis, flooding diagnosis, scenario comparison, design review, what-if setup, model construction, result explanation)
-- **Full OAuth/JWT authentication** for HTTP transport via `fastmcp[auth]`
-- **Background task support** with progress reporting for long-running simulations
-- **Multi-session management** with configurable session limits
+- **Resources** for the engine catalog (`swmm://catalog`, `swmm://catalog/{target}`),
+  sessions and bundled skills
+- **7 prompt templates** and **3 bundled skills** (capacity assessment,
+  calibration, operational optimisation)
+- **OAuth/JWT authentication** for HTTP transport via `fastmcp[auth]`
+- **Progress reporting** for long runs and **multi-session management**
 
 ## Installation
 
@@ -79,8 +67,8 @@ pip install "openswmm-mcp[dev,docs]"
 ### Requirements
 
 - Python 3.10+
-- `openswmm >= 6.0.0a1` (the OpenSWMM engine Python bindings)
-- `fastmcp >= 3.0`
+- `openswmm >= 6.0.0a4` built with `openswmm.engine.catalog` (the OpenSWMM engine Python bindings)
+- `fastmcp >= 3.2`
 - `pydantic >= 2.0`
 - `numpy >= 1.21`
 
@@ -122,147 +110,30 @@ Add the following to your MCP configuration (e.g. `~/.claude/settings.json` or `
 ```
 User:  Open the model at /data/site_drainage.inp and run the simulation.
 
-Claude: [calls lifecycle_open_model] Model opened -- 12 nodes, 11 links, 8 subcatchments, CFS units, DYNWAVE routing.
-        [calls lifecycle_run_simulation] Completed in 2.3 s, 1440 steps. Routing continuity error: -0.02%.
+Claude: [open_model] 12 nodes, 11 links, 7 subcatchments, CFS units, DYNWAVE routing.
+        [run] Finished: 3,164 steps, routing continuity error 0.02 %.
 
 User:  Which nodes flooded?
 
-Claude: [calls analysis_get_flooding_summary] 2 nodes flooded:
-        - J5: 1,247 cu ft total volume, peak overflow 3.8 CFS, flooded for 45 min
-        - J8: 312 cu ft total volume, peak overflow 1.1 CFS, flooded for 12 min
+Claude: [report(name="flooding")] 6 nodes flooded; J10 worst: 231,937 ft3 over 29 min.
 
-User:  What if we upsize the pipe from J4 to J5 to 24 inches?
+User:  What if we upsize C10, the conduit leaving J10, to 3 ft?
 
-Claude: [calls hotstart_clone_session] Cloned "default" to "whatif_upsize".
-        [calls building_set_option] Updated conduit C4 diameter to 2.0 ft.
-        [calls lifecycle_run_simulation] Completed. Routing error: -0.01%.
-        [calls analysis_compare_scenarios] Flooding at J5 reduced by 89%, J8 eliminated.
+Claude: [open_model(session_id="upsize")]
+        [set(kind="link.xsect", changes=[{"id": "C10", "field": "g1", "value": 3.0}])]
+        [run] [compare(a="default", b="upsize", kind="node", variable="depth")]
+        Reports the change in peak depth and flood volume at each node.
 ```
-
-## Available Tools
-
-### lifecycle (Session and Simulation Management)
-
-| Tool | Description |
-|------|-------------|
-| `lifecycle_open_model` | Open a SWMM `.inp` file and initialize the engine |
-| `lifecycle_run_simulation` | Run the full simulation to completion with progress reporting |
-| `lifecycle_step_simulation` | Advance by one or more timesteps |
-| `lifecycle_get_simulation_time` | Return current simulation timing information |
-| `lifecycle_get_simulation_state` | Return session and solver state metadata |
-| `lifecycle_close_model` | Close and clean up a simulation session |
-| `lifecycle_list_sessions` | List all active simulation sessions |
-
-### query (Model Inspection)
-
-| Tool | Description |
-|------|-------------|
-| `query_get_node_info` | Properties and runtime state for one or all nodes |
-| `query_get_link_info` | Properties and runtime state for one or all links |
-| `query_get_subcatchment_info` | Properties and runtime state for one or all subcatchments |
-| `query_get_gage_info` | Properties and state for one or all rain gages |
-| `query_get_system_summary` | Full system summary including counts, options, and timing |
-| `query_find_elements` | Search elements by regex pattern and/or type |
-
-### forcing (Runtime Overrides)
-
-| Tool | Description |
-|------|-------------|
-| `forcing_set_forcing` | Apply a runtime forcing override to any element variable |
-| `forcing_set_persistent_forcing` | Apply an override that persists across timesteps |
-| `forcing_clear_forcing` | Clear forcing overrides (single element or all) |
-| `forcing_get_climate_evap_rate` | Read back the climate-derived PET rate for caller-side composition |
-| `forcing_set_link_control` | Override a link's control setting (pump speed, orifice opening) |
-| `forcing_add_control_rule` | Add a new control rule in SWMM rule syntax |
-| `forcing_set_rainfall_override` | Convenience shortcut for persistent rainfall override on a gage |
-
-### analysis (Post-Simulation Analysis)
-
-| Tool | Description |
-|------|-------------|
-| `analysis_get_statistics` | Peak/max values and duration statistics for a single element |
-| `analysis_get_mass_balance` | Continuity errors and volumetric totals (runoff, routing, quality) |
-| `analysis_get_time_series` | Time-series output from the binary `.out` file with downsampling |
-| `analysis_get_flooding_summary` | Flooding across all nodes, sorted by volume |
-| `analysis_get_capacity_summary` | Hydraulic capacity utilization across all links |
-| `analysis_compare_scenarios` | Compare time-series output between two sessions |
-| `analysis_export_results` | Export node and link results to CSV or JSON |
-
-### building (Programmatic Model Construction)
-
-| Tool | Description |
-|------|-------------|
-| `building_create_model` | Create an empty model and start a building session |
-| `building_add_node` | Add a junction, outfall, storage, or divider node |
-| `building_pop_last_node` | Remove the most recently added node (undo) |
-| `building_add_link` | Add a conduit, pump, orifice, weir, or outlet |
-| `building_pop_last_link` | Remove the most recently added link (undo) |
-| `building_add_subcatchment` | Add a subcatchment with hydrological parameters |
-| `building_add_gage` | Add a rain gage |
-| `building_set_option` | Set a simulation option (flow units, routing model, etc.) |
-| `building_add_timeseries` | Add a time series (e.g. rainfall hyetograph) |
-| `building_add_curve` | Add a curve (storage, pump, rating, diversion, etc.) |
-| `building_validate_model` | Run built-in validation checks |
-| `building_write_model` | Finalize and write the model to an `.inp` file |
-
-### editing (Object Deletion and Type Conversion)
-
-| Tool | Description |
-|------|-------------|
-| `editing_analyze_impact` | Preview what would be deleted or nullified without making any changes |
-| `editing_delete_object` | Delete a model object and cascade-delete or nullify all references |
-| `editing_convert_node` | Convert a node to a different type in place, preserving common properties |
-| `editing_convert_link` | Convert a link to a different type in place, preserving endpoints and offsets |
-| `editing_set_node_inlet` | Promote a node to an inlet junction (`[INLET_JUNCTIONS]`), or demote it back to a virtual junction |
-| `editing_split_conduit_inlet` | Split a STREET conduit and insert an inlet junction with its placement row in one step |
-| `editing_fuse_inlet_junction` | Remove an inlet junction by fusing its two conduits back into one |
-
-### hotstart (State Management)
-
-| Tool | Description |
-|------|-------------|
-| `hotstart_save_hotstart` | Save current simulation state to a hot-start file |
-| `hotstart_load_hotstart` | Load a hot-start file into a session |
-| `hotstart_clone_session` | Clone a session by saving and re-applying hot-start state |
-
-### spatial (Coordinates, Quality, and LID)
-
-| Tool | Description |
-|------|-------------|
-| `spatial_get_coordinates` | Retrieve spatial coordinates for a model element |
-| `spatial_set_coordinates` | Set spatial coordinates for a model element |
-| `spatial_get_quality` | Retrieve water-quality concentrations |
-| `spatial_set_treatment` | Assign a treatment expression to a node |
-| `spatial_add_lid` | Add a Low Impact Development control to a subcatchment |
-
-### twod (2D Overland-Flow Surface)
-
-| Tool | Description |
-|------|-------------|
-| `twod_get_mesh_summary` | Mesh activity flag, vertex/triangle counts, boundary edges, 1D couplings |
-| `twod_get_mesh_geometry` | Windowed triangle geometry: vertices, area, centroid, Manning's n, neighbours |
-| `twod_get_state` / `twod_get_state_bulk` | Per-triangle depth/head/rainfall/coupling state, single or summarised |
-| `twod_get_stats` | Per-triangle max depth/velocity/continuity-residual hot spots |
-| `twod_get_mass_balance` | Global 2D mass-balance terms and continuity error |
-| `twod_force_rainfall` / `twod_force_coupling_flux` / `twod_force_clear` | Runtime 2D forcing overrides |
-| `twod_get_edge_bc` / `twod_set_edge_bc` | Edge boundary conditions (wall, normal flow, stage, flow, rating curve) |
-| `twod_get_edge_conveyance` / `twod_set_edge_conveyance` / `twod_reset_edge_conveyance` | Per-edge conveyance factors (berms / barriers) |
-
-The full twod inventory (35 tools, including `twod_get_coupling_map`, `twod_get_totals`, `twod_set_vertex_z`, and `twod_get_solver_params` / `twod_set_solver_params`) is in the [tools guide](docs/user-guide/tools.md).
 
 ## Available Resources
 
-| URI Pattern | Description |
-|-------------|-------------|
-| `swmm://sessions` | JSON array of all active sessions |
-| `swmm://session/{id}/summary` | Model summary (counts, flow units, routing, time range) |
-| `swmm://session/{id}/nodes` | All node IDs with types |
-| `swmm://session/{id}/nodes/{node_id}` | Full properties and state for a single node |
-| `swmm://session/{id}/links` | All link IDs with types |
-| `swmm://session/{id}/links/{link_id}` | Full properties and state for a single link |
-| `swmm://session/{id}/subcatchments` | All subcatchment IDs |
-| `swmm://session/{id}/mass_balance` | Continuity errors and volumetric totals |
-| `swmm://session/{id}/options` | Simulation options (flow units, routing method, time-step) |
+| URI | Contents |
+|-----|----------|
+| `swmm://catalog` | Every engine target with its class and description |
+| `swmm://catalog/{target}` | Fields and methods of one target |
+| `swmm://sessions` | Open sessions |
+| `swmm://session/{id}/summary` | Counts, options, time window and files of one session |
+| `swmm://skills`, `swmm://skills/{name}` | Bundled skills |
 
 ## Available Prompts
 
@@ -275,6 +146,7 @@ The full twod inventory (35 tools, including `twod_get_coupling_map`, `twod_get_
 | `what_if` | Set up and evaluate a what-if scenario | `session_id`, `description` |
 | `build_simple_model` | Guided construction of a model from a text description | `description` |
 | `explain_results` | Plain-language result explanation for stakeholders | `session_id` |
+| `use_skill` | Load a bundled skill's instructions | `skill_name` |
 
 ## Configuration
 
@@ -287,6 +159,8 @@ All settings are controlled via environment variables with the `OPENSWMM_MCP_` p
 | `OPENSWMM_MCP_TRANSPORT` | `"stdio"` | Transport protocol: `stdio`, `http`, or `sse` |
 | `OPENSWMM_MCP_HTTP_PORT` | `8080` | Port for HTTP/SSE transport |
 | `OPENSWMM_MCP_LOG_LEVEL` | `"INFO"` | Logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
+| `OPENSWMM_MCP_TOOLSETS` | `"core"` | Tool sets to register: `core`, or `core,gym` for the gym tools |
+| `OPENSWMM_MCP_ENABLE_PYTHON` | `false` | Register `run_python` (stdio transport only; runs code with the server's permissions) |
 | `OPENSWMM_MCP_OAUTH_ISSUER` | `None` | OAuth issuer URL for JWT validation |
 | `OPENSWMM_MCP_OAUTH_AUDIENCE` | `None` | Expected OAuth audience claim |
 | `OPENSWMM_MCP_JWT_JWKS_URL` | `None` | JWKS endpoint URL for JWT signature verification |
@@ -323,9 +197,8 @@ pip install -e ".[dev,docs]"
 ### Running Tests
 
 ```bash
-pytest tests/unit/ -v
+pytest tests/unit/ -v                        # requires the compiled engine
 pytest tests/unit/ --cov=openswmm_mcp         # with coverage
-OPENSWMM_RUN_INTEGRATION=1 pytest tests/integration/ -v  # integration tests (requires engine)
 ```
 
 ### Linting

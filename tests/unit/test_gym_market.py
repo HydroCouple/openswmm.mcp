@@ -123,8 +123,8 @@ def _market_config(output_dir: Path) -> dict:
 @pytest.mark.integration
 async def test_market_random_search_then_apply(ctx, output_dir, job_manager):
     pytest.importorskip("openswmm_gymnasium")
-    from openswmm_mcp.tools.gym_runs import get_job_results, start_optimization
-    from openswmm_mcp.tools.gym_scoring import apply_design
+    from openswmm_mcp.gym_support.run_tools import get_job_results, start_optimization
+    from openswmm_mcp.gym_support.score_tools import apply_design
 
     snap = await start_optimization(
         ctx,
@@ -186,8 +186,8 @@ async def test_schedule_optimize_then_apply(ctx, output_dir, job_manager):
     pytest.importorskip("openswmm_gymnasium")
     import json
 
-    from openswmm_mcp.tools.gym_runs import get_job_results, start_optimization
-    from openswmm_mcp.tools.gym_scoring import apply_design
+    from openswmm_mcp.gym_support.run_tools import get_job_results, start_optimization
+    from openswmm_mcp.gym_support.score_tools import apply_design
 
     snap = await start_optimization(
         ctx,
@@ -216,7 +216,7 @@ async def test_schedule_optimize_then_apply(ctx, output_dir, job_manager):
 async def test_market_nsga2_front(ctx, output_dir, job_manager):
     pytest.importorskip("openswmm_gymnasium")
     pytest.importorskip("platypus")
-    from openswmm_mcp.tools.gym_runs import get_job_results, start_optimization
+    from openswmm_mcp.gym_support.run_tools import get_job_results, start_optimization
 
     snap = await start_optimization(
         ctx,

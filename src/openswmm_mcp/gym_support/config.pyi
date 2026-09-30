@@ -27,6 +27,7 @@ class ObservationSpec(BaseModel):
     link_volumes: list[str]
     subcatch_runoff: list[str]
     rainfall_gages: list[str]
+    fields: dict[str, list[str]]
     include_clock: bool
 
     def is_empty(self) -> bool:

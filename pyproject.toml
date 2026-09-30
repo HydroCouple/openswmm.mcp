@@ -24,16 +24,15 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Hydrology",
 ]
 dependencies = [
-    "fastmcp[auth]>=3.0",
+    "fastmcp[auth]>=3.2",
     "pydantic>=2.0",
     "pydantic-settings>=2.0",
     "numpy>=1.21",
+    # The handle-based v6 engine with its API catalog (openswmm.engine.catalog).
+    "openswmm>=6.0.0a4",
 ]
 
 [project.optional-dependencies]
-engine = [
-    "openswmm",
-]
 gym = [
     "openswmm.gymnasium",
 ]

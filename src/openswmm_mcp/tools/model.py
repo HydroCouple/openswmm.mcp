@@ -1,973 +1,517 @@
-"""Model tools: title / userflag / options / CRS access.
-
-The Python ``ModelBuilder`` (BUILDING state) and ``Solver`` (OPENED state
-and later) both expose:
-
-* [TITLE] section accessors: get_title_count / get_title_line /
-  add_title_line / set_title / clear_title.
-* SWMM options: get_option / set_option (string-keyed) and
-  get_option_ext / set_option_ext for extension options.
-* User flags: get/set_userflag_{bool,int,real}, application-defined
-  metadata persisted alongside the model.
-* CRS string: get_crs.
-
-This module surfaces all of those via the ``model`` MCP namespace. State
-handling: works against the ModelBuilder for BUILDING sessions, against
-the Solver for OPENED / INITIALIZED / RUNNING / ENDED.
-"""
+"""Model and session tools: ``open_model``, ``run``, ``session``, ``save``, ``edit``."""
 
 from __future__ import annotations
 
-import asyncio
-from datetime import datetime
-from typing import Any
+import re
+import time
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any, Literal
 
-from fastmcp import Context, FastMCP
-
-from openswmm_mcp.dependencies import (
-    get_session_manager,
-    require_new_engine,
+from fastmcp import Context
+from openswmm.engine import (
+    GEOPACKAGE_PLUGIN_ID,
+    EngineState,
+    HotStart,
+    InpProfile,
+    Solver,
 )
+
+from openswmm_mcp import catalog as cat
+from openswmm_mcp._util.validation import resolve_path
+from openswmm_mcp.dependencies import get_session, get_session_manager
 from openswmm_mcp.errors import ErrorCode, ToolError
 from openswmm_mcp.session import SimSession
 
-model_mcp = FastMCP("model")
+HDF5_PLUGIN_ID = "org.hydrocouple.openswmm.plugins.hdf5"
+_ACTIVE = (EngineState.STARTED, EngineState.RUNNING)
+_SUMMARY_OPTIONS = (
+    "FLOW_UNITS",
+    "FLOW_ROUTING",
+    "INFILTRATION",
+    "ROUTING_STEP",
+    "REPORT_STEP",
+    "LINK_OFFSETS",
+)
+_NEW_MODEL = """[TITLE]
+New model created by openswmm.mcp
+
+[OPTIONS]
+FLOW_UNITS           CFS
+FLOW_ROUTING         DYNWAVE
+START_DATE           01/01/2026
+START_TIME           00:00:00
+END_DATE             01/01/2026
+END_TIME             06:00:00
+"""
+# ModelEditor method stems per element kind (delete_<stem>, analyze_<stem>_impact).
+_EDITOR_STEM = {"subcatchment": "subcatch"}
 
 
-async def _get_target(ctx: Context, session_id: str) -> tuple[SimSession, Any]:
-    """Return ``(session, target)`` where target is ModelBuilder or Solver.
+# ---------------------------------------------------------------------------
+# Helpers shared with the other tool modules
+# ---------------------------------------------------------------------------
+def summary(session: SimSession) -> dict[str, Any]:
+    """Counts, key options, time window and file paths for a session (worker thread)."""
+    solver = session.require_solver()
+    counts = {}
+    for kind, entry in cat.element_kinds().items():
+        if "." in entry["collection"]:
+            continue
+        try:
+            counts[kind] = len(cat.resolve(solver, entry["collection"], None))
+        except Exception:
+            pass
+    options = {}
+    for key in _SUMMARY_OPTIONS:
+        try:
+            options[key] = solver.options[key]
+        except Exception:
+            pass
+    out = {
+        "session_id": session.session_id,
+        "state": session.state,
+        "counts": {k: v for k, v in counts.items() if v},
+        "options": options,
+        "unit_system": solver.unit_system,
+        "start": cat.to_json(solver.start_datetime),
+        "end": cat.to_json(solver.end_datetime),
+        "files": {"inp": session.inp_path, "rpt": session.rpt_path, "out": session.out_path},
+    }
+    if int(solver.state) in _ACTIVE:
+        out["current_time"] = cat.to_json(solver.current_datetime)
+    return out
 
-    Use for methods that exist on BOTH classes (options, CRS).
-    """
-    sm = get_session_manager(ctx)
-    session = await sm.get_session(session_id)
-    require_new_engine(session, "Model (title / options / userflags)")
-    if session.state == "closed":
-        raise ToolError(f"[{ErrorCode.INVALID_STATE}] Session '{session_id}' is closed.")
-    if session.state == "building":
-        if session.model_builder is None:
+
+def _new_solver(inp: str, rpt: str, out: str, lenient: bool) -> Solver:
+    """Open a solver on *inp*; on failure destroy it and raise with its parse errors."""
+    solver = Solver(inp, rpt, out)
+    if lenient:
+        solver.set_lenient_open(True)
+    try:
+        solver.open()
+    except Exception:
+        errors = []
+        try:
+            errors = list(solver.open_errors)
+        except Exception:
+            pass
+        solver.destroy()
+        if errors:
             raise ToolError(
-                f"[{ErrorCode.INVALID_STATE}] Session '{session_id}' has no ModelBuilder attached."
-            )
-        return session, session.model_builder
-    return session, session.solver
+                f"[{ErrorCode.ENGINE_ERROR}] Could not open {inp}: " + "; ".join(errors[:20])
+            ) from None
+        raise
+    return solver
 
 
-async def _get_builder(ctx: Context, session_id: str) -> tuple[SimSession, Any]:
-    """Return ``(session, model_builder)``; requires BUILDING state.
+def _open_solver(session: SimSession, lenient: bool) -> dict[str, Any]:
+    session.solver = _new_solver(session.inp_path, session.rpt_path, session.out_path, lenient)
+    session.structure_edited = False
+    out = summary(session)
+    for name in ("open_errors", "open_warnings"):
+        messages = list(getattr(session.solver, name, []) or [])
+        if messages:
+            out[name.split("_")[1]] = messages[:50]
+    return out
 
-    Use for methods that only exist on ModelBuilder: title section,
-    user flags, [PLUGINS] / [FILES] editors, write_with_plugin.
+
+def _write_model(session: SimSession, dest: Path) -> str:
+    """Write the session's current model, every edit included, to *dest*."""
+    session.require_solver().write(str(dest))
+    return str(dest)
+
+
+def _reopen(session: SimSession) -> dict[str, Any]:
+    """Reopen the session on its current model (edits included) at the simulation start.
+
+    The written model is test-opened first, so a model the engine refuses leaves
+    the session exactly as it was.
+    """
+    stem = Path(session.inp_path).stem.removesuffix("_edited")
+    edited = _write_model(session, session.working_dir / f"{stem}_edited.inp")
+    probe = _new_solver(
+        edited,
+        str(session.working_dir / "_check.rpt"),
+        str(session.working_dir / "_check.out"),
+        lenient=False,
+    )
+    probe.close()
+    probe.destroy()
+    session.cleanup()
+    session.inp_path = edited
+    return _open_solver(session, lenient=False)
+
+
+def _target_time(solver: Solver, until: str) -> datetime | None:
+    if until == "end":
+        return None
+    m = re.fullmatch(r"\+\s*([\d.]+)\s*([smhd]?)", until.strip())
+    if m:
+        seconds = float(m.group(1)) * {"": 1, "s": 1, "m": 60, "h": 3600, "d": 86400}[m.group(2)]
+        return solver.current_datetime + timedelta(seconds=seconds)
+    try:
+        return datetime.fromisoformat(until)
+    except ValueError:
+        raise ToolError(
+            f"[{ErrorCode.VALIDATION_ERROR}] until must be 'end', an ISO datetime "
+            f"or '+<n>[s|m|h|d]', got '{until}'."
+        ) from None
+
+
+def _start(solver: Solver) -> None:
+    if int(solver.state) == EngineState.OPENED:
+        solver.initialize()
+    solver.start()
+
+
+def _continuity(solver: Solver) -> dict[str, Any]:
+    mb = solver.mass_balance
+    out = {"runoff": mb.runoff_continuity_error, "routing": mb.routing_continuity_error}
+    quality = {}
+    for i, pollutant in enumerate(solver.pollutants):
+        try:
+            quality[pollutant.id] = mb.quality_continuity_error(i)
+        except Exception:
+            pass
+    if quality:
+        out["quality"] = quality
+    return {k: cat.to_json(v) for k, v in out.items()}
+
+
+# ---------------------------------------------------------------------------
+# Tools
+# ---------------------------------------------------------------------------
+async def open_model(
+    ctx: Context, path: str | None = None, session_id: str = "default", lenient: bool = False
+) -> dict:
+    """Open a SWMM .inp model into a session, or start an empty model when path is omitted.
+
+    Returns object counts, key options, the simulation window, file paths and any parse
+    warnings/errors. lenient=True keeps loading past recoverable errors so they can be
+    listed and fixed with `set`/`edit`. Report and output files go to the session's
+    working folder. An empty model starts with default options; change them with
+    call(session_id, "options", "set_item", {"key": "FLOW_UNITS", "value": "CMS"}).
     """
     sm = get_session_manager(ctx)
-    session = await sm.get_session(session_id)
-    require_new_engine(session, "Model (title / userflags / plugins / files)")
-    if session.state != "building":
+    folder = sm.session_dir(session_id)
+    if await sm.exists(session_id):
         raise ToolError(
-            f"[{ErrorCode.INVALID_STATE}] Session '{session_id}' is in state "
-            f"'{session.state}'; this tool requires 'building'. Create the "
-            f"model via building.create_model first."
+            f"[{ErrorCode.VALIDATION_ERROR}] Session '{session_id}' already exists; "
+            "close it or choose another session_id."
         )
-    if session.model_builder is None:
-        raise ToolError(
-            f"[{ErrorCode.INVALID_STATE}] Session '{session_id}' has no ModelBuilder attached."
-        )
-    return session, session.model_builder
-
-
-# ===========================================================================
-# [TITLE] section
-# ===========================================================================
-
-
-@model_mcp.tool()
-async def get_title_count(ctx: Context, session_id: str = "default") -> dict:
-    """Return the number of lines in the C{[TITLE]} section (BUILDING)."""
-    _, target = await _get_builder(ctx, session_id)
-    n = await asyncio.to_thread(target.get_title_count)
-    return {"session_id": session_id, "count": n}
-
-
-@model_mcp.tool()
-async def get_title_line(ctx: Context, session_id: str = "default", line_index: int = 0) -> dict:
-    """Return the I{line_index}-th line of the [TITLE] section (BUILDING)."""
-    _, target = await _get_builder(ctx, session_id)
-    text = await asyncio.to_thread(target.get_title_line, line_index)
-    return {
-        "session_id": session_id,
-        "line_index": line_index,
-        "text": text,
-    }
-
-
-@model_mcp.tool()
-async def get_title(ctx: Context, session_id: str = "default") -> dict:
-    """Return the full [TITLE] section as a list of lines (BUILDING).
-
-    Convenience wrapper that batches get_title_count + N x get_title_line.
-    """
-    _, target = await _get_builder(ctx, session_id)
-
-    def _read_all() -> list[str]:
-        n = target.get_title_count()
-        return [target.get_title_line(i) for i in range(n)]
-
-    lines = await asyncio.to_thread(_read_all)
-    return {
-        "session_id": session_id,
-        "count": len(lines),
-        "lines": lines,
-    }
-
-
-@model_mcp.tool()
-async def add_title_line(ctx: Context, session_id: str = "default", text: str = "") -> dict:
-    """Append a line to the [TITLE] section."""
-    if not text:
-        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] text must not be empty.")
-    _, target = await _get_builder(ctx, session_id)
-    await asyncio.to_thread(target.add_title_line, text)
-    return {"status": "ok", "session_id": session_id, "added": text}
-
-
-@model_mcp.tool()
-async def set_title(ctx: Context, session_id: str = "default", text: str = "") -> dict:
-    """Replace all [TITLE] lines with new text (newline-separated, BUILDING)."""
-    _, target = await _get_builder(ctx, session_id)
-    await asyncio.to_thread(target.set_title, text)
-    return {"status": "ok", "session_id": session_id}
-
-
-@model_mcp.tool()
-async def clear_title(ctx: Context, session_id: str = "default") -> dict:
-    """Remove every line from the [TITLE] section (BUILDING)."""
-    _, target = await _get_builder(ctx, session_id)
-    await asyncio.to_thread(target.clear_title)
-    return {"status": "ok", "session_id": session_id, "remaining": 0}
-
-
-# ===========================================================================
-# [OPTIONS] section
-# ===========================================================================
-
-
-def _options_mapping(target):
-    """Return the v1 ``options`` MutableMapping when present, else ``None``.
-
-    ``ModelBuilder`` keeps the v0 ``get_option`` / ``set_option`` method
-    pair (no ``options`` mapping attribute), while ``Solver`` (and the
-    legacy adapter shim) expose ``options`` as a mapping.  Tools that
-    need to work against both branch on this helper.
-    """
-    options = getattr(target, "options", None)
-    if options is not None and hasattr(options, "__getitem__"):
-        return options
-    return None
-
-
-@model_mcp.tool()
-async def get_option(ctx: Context, session_id: str = "default", key: str = "") -> dict:
-    """Return a SWMM option value as a string.
-
-    Example keys: ``FLOW_UNITS``, ``FLOW_ROUTING``, ``ROUTING_STEP``,
-    ``REPORT_STEP``, ``SURCHARGE_METHOD``. Consult the SWMM 5 reference
-    for the full key list.
-    """
-    if not key:
-        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] key must not be empty.")
-    _, target = await _get_target(ctx, session_id)
-
-    def _read() -> str:
-        options = _options_mapping(target)
-        if options is not None:
-            return options[key]
-        return target.get_option(key)
-
-    value = await asyncio.to_thread(_read)
-    return {"session_id": session_id, "key": key, "value": value}
-
-
-@model_mcp.tool()
-async def set_option(
-    ctx: Context,
-    session_id: str = "default",
-    key: str = "",
-    value: str = "",
-) -> dict:
-    """Set a SWMM option (string key, string value).
-
-    Accepts any key the engine's option API recognizes, including the
-    ``FV_*`` family that configures the explicit finite-volume solver
-    (``FLOW_ROUTING`` = ``FV``): ``FV_CELL_LENGTH``, ``FV_MIN_CELLS``,
-    ``FV_CFL``, ``FV_RIEMANN``, ``FV_ORDER``, ``FV_LIMITER``,
-    ``FV_SCALAR_SCHEME``, ``FV_TIME_INTEGRATION``, ``FV_SLOT_CELERITY``,
-    ``FV_DISPERSION``, ``FV_STRUCTURE_COUPLING``, ``FV_COMPACTION``,
-    ``FV_BACKEND`` and ``FV_MIN_PARALLEL_CELLS``.  These are inert under
-    the other routing models rather than rejected, so they can be set
-    before ``FLOW_ROUTING`` is switched.
-
-    Note that finite-volume routing needs a resolved mesh to reproduce
-    dynamic-wave peak flows -- set ``FV_CELL_LENGTH`` rather than leaving
-    it at the one-cell-per-conduit default when peaks matter.
-    """
-    if not key:
-        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] key must not be empty.")
-    _, target = await _get_target(ctx, session_id)
-
-    def _write() -> None:
-        options = _options_mapping(target)
-        if options is not None and hasattr(options, "__setitem__"):
-            options[key] = value
-            return
-        target.set_option(key, value)
-
-    await asyncio.to_thread(_write)
-    return {"status": "ok", "session_id": session_id, "key": key, "value": value}
-
-
-# US-customary vs SI partition of the FLOW_UNITS tokens. CFS/GPM/MGD are US
-# customary; CMS/LPS/MLD are SI. Kept local so the tool reports units even
-# when running against an engine build without the ``Solver.flow_units``
-# property (it derives the answer from the FLOW_UNITS option string).
-_US_FLOW_UNITS = frozenset({"CFS", "GPM", "MGD"})
-_SI_FLOW_UNITS = frozenset({"CMS", "LPS", "MLD"})
-
-
-@model_mcp.tool()
-async def get_unit_system(ctx: Context, session_id: str = "default") -> dict:
-    """Report the model's flow units and unit system.
-
-    Because the engine returns every quantity in the units declared in the
-    ``.inp`` file (project units), a client must know those units to
-    interpret returned magnitudes. This tool resolves ``[OPTIONS]
-    FLOW_UNITS`` and classifies it:
-
-    * ``flow_units`` — the raw token, e.g. ``"CFS"`` / ``"CMS"``.
-    * ``unit_system`` — ``"US"`` (CFS/GPM/MGD) or ``"SI"`` (CMS/LPS/MLD).
-
-    ``unit_system`` is the engine's OWN answer, read from the solver rather
-    than inferred from the flow-unit token, so it stays correct if the engine
-    ever grows a flow unit this tool has not heard of. On a BUILDING session
-    there is no solver to ask and the value is derived from ``flow_units``;
-    ``unit_system_source`` says which of the two happened.
-
-    Works in BUILDING (ModelBuilder) and OPENED/RUNNING/ENDED (Solver)
-    states.
-    """
-    # wraps: swmm_get_unit_system swmm_get_flow_units
-    _, target = await _get_target(ctx, session_id)
-
-    def _read() -> tuple[str, str | None]:
-        # Prefer the engine's typed accessor (swmm_get_flow_units) when the
-        # target is a Solver that exposes it; fall back to the option string.
-        flow_units = getattr(target, "flow_units", None)
-        if flow_units is not None:
-            name = getattr(flow_units, "name", None)
-            units = name if name is not None else str(flow_units)
-        else:
-            options = _options_mapping(target)
-            units = (
-                options["FLOW_UNITS"] if options is not None else target.get_option("FLOW_UNITS")
-            )
-        # swmm_get_unit_system: the engine's own US/SI classification. Absent
-        # on a ModelBuilder (BUILDING) target, where there is no solver.
-        system = getattr(target, "unit_system", None)
-        return units, (str(system) if system is not None else None)
-
-    raw, engine_system = await asyncio.to_thread(_read)
-    token = raw.strip().upper()
-    if engine_system is not None:
-        system = engine_system.strip().upper()
-        source = "engine"
-    elif token in _US_FLOW_UNITS:
-        system = "US"
-        source = "derived"
-    elif token in _SI_FLOW_UNITS:
-        system = "SI"
-        source = "derived"
+    if path is None:
+        inp = folder / "model.inp"
+        inp.write_text(_NEW_MODEL, encoding="utf-8")
     else:
-        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] Unrecognised FLOW_UNITS token {raw!r}.")
-    return {
-        "session_id": session_id,
-        "flow_units": token,
-        "unit_system": system,
-        "unit_system_source": source,
-    }
-
-
-async def _list_named_collection(ctx, session_id, attr, label):
-    """Return ``{count, ids}`` for a name-keyed Solver collection."""
-    _, target = await _get_target(ctx, session_id)
-    coll = getattr(target, attr, None)
-    if coll is None:
-        raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] {label} are not available in this session state."
-        )
-    ids = await asyncio.to_thread(lambda: list(coll))
-    return {"session_id": session_id, "count": len(ids), "ids": ids}
-
-
-@model_mcp.tool()
-async def list_aquifers(ctx: Context, session_id: str = "default") -> dict:
-    """List the model's ``[AQUIFERS]`` entries.
-
-    Returns ``count`` and the ordered list of aquifer ``ids``.
-    """
-    return await _list_named_collection(ctx, session_id, "aquifers", "Aquifers")
-
-
-@model_mcp.tool()
-async def list_snowpacks(ctx: Context, session_id: str = "default") -> dict:
-    """List the model's ``[SNOWPACKS]`` entries.
-
-    Returns ``count`` and the ordered list of snowpack ``ids``.
-    """
-    return await _list_named_collection(ctx, session_id, "snowpacks", "Snowpacks")
-
-
-@model_mcp.tool()
-async def get_pattern_factors(
-    ctx: Context, session_id: str = "default", pattern_id: str = ""
-) -> dict:
-    """Read a time pattern's type and multiplier factors.
-
-    Surfaces ``solver.patterns[...]`` — the multiplier list whose length
-    depends on the pattern type (12 monthly, 7 daily, 24 hourly/weekend).
-
-    Parameters
-    ----------
-    pattern_id:
-        The ``[PATTERNS]`` id to read (required).
-    """
-    if not pattern_id:
-        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] pattern_id must not be empty.")
-    _, target = await _get_target(ctx, session_id)
-    patterns = getattr(target, "patterns", None)
-    if patterns is None:
-        raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] Patterns are not available in this session state."
-        )
-
-    def _read():
-        pat = patterns[pattern_id]
-        return {"type": pat.type.name, "factors": list(pat.factors)}
-
-    try:
-        data = await asyncio.to_thread(_read)
-    except (KeyError, IndexError) as exc:
-        raise ToolError(
-            f"[{ErrorCode.ELEMENT_NOT_FOUND}] No pattern with id {pattern_id!r}."
-        ) from exc
-    return {"session_id": session_id, "pattern_id": pattern_id, **data}
-
-
-@model_mcp.tool()
-async def get_option_ext(ctx: Context, session_id: str = "default", key: str = "") -> dict:
-    """Return an extension option value (unknown to base SWMM)."""
-    if not key:
-        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] key must not be empty.")
-    _, target = await _get_target(ctx, session_id)
-
-    def _read() -> str:
-        options = _options_mapping(target)
-        if options is not None:
-            # v1 Solver: extension options live on options.ext.
-            ext = getattr(options, "ext", None)
-            if ext is not None:
-                return ext[key]
-        return target.get_option_ext(key)
-
-    value = await asyncio.to_thread(_read)
-    return {"session_id": session_id, "key": key, "value": value}
-
-
-@model_mcp.tool()
-async def set_option_ext(
-    ctx: Context,
-    session_id: str = "default",
-    key: str = "",
-    value: str = "",
-) -> dict:
-    """Set an extension option."""
-    if not key:
-        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] key must not be empty.")
-    _, target = await _get_target(ctx, session_id)
-
-    def _write() -> None:
-        options = _options_mapping(target)
-        if options is not None:
-            ext = getattr(options, "ext", None)
-            if ext is not None and hasattr(ext, "__setitem__"):
-                ext[key] = value
-                return
-        target.set_option_ext(key, value)
-
-    await asyncio.to_thread(_write)
-    return {"status": "ok", "session_id": session_id, "key": key, "value": value}
-
-
-@model_mcp.tool()
-async def get_crs(ctx: Context, session_id: str = "default") -> dict:
-    """Return the model's coordinate reference system string."""
-    _, target = await _get_target(ctx, session_id)
-
-    def _read() -> str:
-        # Solver: ``crs`` is a property; ModelBuilder: ``get_crs()`` method.
-        if not hasattr(target, "get_crs"):
-            return target.crs
-        crs_attr = getattr(target, "crs", None)
-        if crs_attr is not None and not callable(crs_attr):
-            return crs_attr
-        return target.get_crs()
-
-    crs = await asyncio.to_thread(_read)
-    return {"session_id": session_id, "crs": crs}
-
-
-# ===========================================================================
-# Report start date/time
-# ===========================================================================
-
-
-@model_mcp.tool()
-async def get_report_start(ctx: Context, session_id: str = "default") -> dict:
-    """Return the report start date/time as an ISO 8601 string.
-
-    Surfaces the ``report_start_datetime`` property (present on both
-    ModelBuilder and Solver). The report start is the instant from which
-    reported results begin; it may lag the simulation start.
-    """
-    _, target = await _get_target(ctx, session_id)
-    dt = await asyncio.to_thread(lambda: target.report_start_datetime)
-    return {"session_id": session_id, "report_start": dt.isoformat()}
-
-
-@model_mcp.tool()
-async def set_report_start(
-    ctx: Context,
-    session_id: str = "default",
-    report_start: str = "",
-) -> dict:
-    """Set the report start date/time from an ISO 8601 string.
-
-    ``report_start`` is parsed with :meth:`datetime.datetime.fromisoformat`
-    (e.g. ``"1998-01-01T00:00:00"`` or ``"1998-01-01 00:00:00"``).
-    """
-    if not report_start:
-        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] report_start must not be empty.")
-    try:
-        dt = datetime.fromisoformat(report_start)
-    except ValueError as exc:
-        raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] report_start {report_start!r} is not a "
-            f"valid ISO 8601 date/time."
-        ) from exc
-    _, target = await _get_target(ctx, session_id)
-
-    def _write() -> None:
-        target.report_start_datetime = dt
-
-    await asyncio.to_thread(_write)
-    return {"status": "ok", "session_id": session_id, "report_start": dt.isoformat()}
-
-
-# ===========================================================================
-# User flags
-# ===========================================================================
-
-
-async def _userflag_get(ctx, session_id, name, method, value_key) -> dict:
-    if not name:
-        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] name must not be empty.")
-    _, target = await _get_builder(ctx, session_id)
-    v = await asyncio.to_thread(getattr(target, method), name)
-    return {
-        "session_id": session_id,
-        "name": name,
-        value_key: v,
-    }
-
-
-async def _userflag_set(ctx, session_id, name, value, method, value_key) -> dict:
-    if not name:
-        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] name must not be empty.")
-    _, target = await _get_builder(ctx, session_id)
-    await asyncio.to_thread(getattr(target, method), name, value)
-    return {
-        "status": "ok",
-        "session_id": session_id,
-        "name": name,
-        value_key: value,
-    }
-
-
-@model_mcp.tool()
-async def get_userflag_bool(ctx: Context, session_id: str = "default", name: str = "") -> dict:
-    """Return a boolean user flag (application-defined metadata)."""
-    return await _userflag_get(ctx, session_id, name, "get_userflag_bool", "value")
-
-
-@model_mcp.tool()
-async def set_userflag_bool(
-    ctx: Context,
-    session_id: str = "default",
-    name: str = "",
-    value: bool = False,
-) -> dict:
-    """Set a boolean user flag."""
-    return await _userflag_set(ctx, session_id, name, bool(value), "set_userflag_bool", "value")
-
-
-@model_mcp.tool()
-async def get_userflag_int(ctx: Context, session_id: str = "default", name: str = "") -> dict:
-    """Return an integer user flag."""
-    return await _userflag_get(ctx, session_id, name, "get_userflag_int", "value")
-
-
-@model_mcp.tool()
-async def set_userflag_int(
-    ctx: Context,
-    session_id: str = "default",
-    name: str = "",
-    value: int = 0,
-) -> dict:
-    """Set an integer user flag."""
-    return await _userflag_set(ctx, session_id, name, int(value), "set_userflag_int", "value")
-
-
-@model_mcp.tool()
-async def get_userflag_real(ctx: Context, session_id: str = "default", name: str = "") -> dict:
-    """Return a real-valued user flag."""
-    return await _userflag_get(ctx, session_id, name, "get_userflag_real", "value")
-
-
-@model_mcp.tool()
-async def set_userflag_real(
-    ctx: Context,
-    session_id: str = "default",
-    name: str = "",
-    value: float = 0.0,
-) -> dict:
-    """Set a real-valued user flag."""
-    return await _userflag_set(ctx, session_id, name, float(value), "set_userflag_real", "value")
-
-
-# ===========================================================================
-# User-flag schema definitions ([USER_FLAGS]) + per-object values
-# ([USER_FLAG_VALUES])
-# ===========================================================================
-
-# Flag type tokens <-> openswmm.engine.UserFlagType codes.
-_USERFLAG_TYPES: dict[str, int] = {"BOOLEAN": 0, "INTEGER": 1, "REAL": 2, "STRING": 3}
-_USERFLAG_TYPE_NAMES: dict[int, str] = {v: k for k, v in _USERFLAG_TYPES.items()}
-
-
-class _UserFlagSchemaOps:
-    """Uniform schema/value operations over either engine surface.
-
-    ``ModelBuilder`` exposes ``define_userflag`` etc. directly; ``Solver``
-    exposes the same operations on the ``solver.userflags`` view.
-    """
-
-    def __init__(self, target):
-        if hasattr(target, "define_userflag"):  # ModelBuilder
-            self.define = target.define_userflag
-            self.undefine = target.undefine_userflag
-            self.def_count = target.userflag_def_count
-            self.def_get = target.get_userflag_def
-            self.value_get = target.get_userflag_value
-            self.value_set = target.set_userflag_value
-            self.value_clear = target.clear_userflag_value
-        else:  # Solver -> UserFlags view
-            flags = target.userflags
-            self.define = flags.define
-            self.undefine = flags.undefine
-            self.def_count = lambda: len(flags.definitions())
-            self.def_get = lambda i: tuple(flags.definitions()[i])
-            self.value_get = flags.get_value
-            self.value_set = flags.set_value
-            self.value_clear = flags.clear_value
-
-
-def _resolve_userflag_type(flag_type: str) -> int:
-    token = flag_type.strip().upper()
-    if token not in _USERFLAG_TYPES:
-        raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] Invalid flag type '{flag_type}'. "
-            f"Must be one of: {', '.join(_USERFLAG_TYPES)}"
-        )
-    return _USERFLAG_TYPES[token]
-
-
-@model_mcp.tool()
-async def userflag_define(
-    ctx: Context,
-    session_id: str = "default",
-    name: str = "",
-    flag_type: str = "",
-    description: str = "",
-) -> dict:
-    """Define (or redefine) a user-flag schema entry ([USER_FLAGS]).
-
-    ``flag_type`` is ``"BOOLEAN"``, ``"INTEGER"``, ``"REAL"``, or
-    ``"STRING"``. The name is stored uppercase. Redefining an existing
-    name overwrites its definition; previously assigned per-object values
-    are kept as-is.
-    """
-    if not name:
-        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] name must not be empty.")
-    type_code = _resolve_userflag_type(flag_type)
-    _, target = await _get_target(ctx, session_id)
-    ops = _UserFlagSchemaOps(target)
-    await asyncio.to_thread(ops.define, name, type_code, description)
-    return {
-        "status": "ok",
-        "session_id": session_id,
-        "name": name.upper(),
-        "flag_type": _USERFLAG_TYPE_NAMES[type_code],
-        "description": description,
-    }
-
-
-@model_mcp.tool()
-async def userflag_undefine(
-    ctx: Context,
-    session_id: str = "default",
-    name: str = "",
-) -> dict:
-    """Remove a user-flag definition and all per-object values assigned to it."""
-    if not name:
-        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] name must not be empty.")
-    _, target = await _get_target(ctx, session_id)
-    ops = _UserFlagSchemaOps(target)
-    await asyncio.to_thread(ops.undefine, name)
-    return {"status": "ok", "session_id": session_id, "removed": name.upper()}
-
-
-@model_mcp.tool()
-async def userflag_list_defs(ctx: Context, session_id: str = "default") -> dict:
-    """List every user-flag schema definition ([USER_FLAGS]), in insertion order.
-
-    Each entry reports ``name``, ``flag_type`` (BOOLEAN / INTEGER / REAL /
-    STRING), and ``description``.
-    """
-    _, target = await _get_target(ctx, session_id)
-    ops = _UserFlagSchemaOps(target)
-
-    def _read() -> list[dict]:
-        out = []
-        for i in range(ops.def_count()):
-            name, type_code, desc = ops.def_get(i)
-            out.append(
-                {
-                    "name": name,
-                    "flag_type": _USERFLAG_TYPE_NAMES.get(int(type_code), str(type_code)),
-                    "description": desc,
-                }
+        inp = resolve_path(path, str(sm.working_dir))
+        if not inp.is_file():
+            raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] Model file not found: {inp}")
+        if inp.suffix.lower() != ".inp":
+            raise ToolError(
+                f"[{ErrorCode.VALIDATION_ERROR}] open_model reads .inp files; "
+                "GeoPackage result databases are read with call(session, "
+                "'geopackage', ...)."
             )
+    session = SimSession(
+        session_id,
+        folder,
+        inp_path=str(inp),
+        rpt_path=str(folder / f"{inp.stem}.rpt"),
+        out_path=str(folder / f"{inp.stem}.out"),
+    )
+    await sm.add(session)
+    try:
+        return await session.call(_open_solver, session, lenient, context="open_model")
+    except Exception:
+        await sm.remove(session_id)
+        raise
+
+
+async def run(
+    ctx: Context, session_id: str = "default", until: str = "end", max_steps: int | None = None
+) -> dict:
+    """Advance the simulation, starting the engine if needed.
+
+    until: "end" (run to completion and write the report), an ISO datetime, or
+    "+<n>[s|m|h|d]" of simulated time. max_steps caps routing steps for step-wise
+    control. Returns current time, progress, state and, when finished, continuity errors.
+    """
+    session = await get_session(ctx, session_id)
+    solver = session.require_solver()
+    state = await session.call(lambda: int(solver.state))
+    if state == EngineState.ENDED:
+        raise ToolError(
+            f"[{ErrorCode.INVALID_STATE}] The simulation has finished; use "
+            "session(action='reset') to run it again."
+        )
+    if state == EngineState.OPENED and session.structure_edited:
+        await session.call(_reopen, session, context="rebuilding the edited model")
+        solver = session.require_solver()
+    if state in (EngineState.OPENED, EngineState.INITIALIZED):
+        await session.call(_start, solver, context="starting")
+    target = await session.call(_target_time, solver, until)
+    start, end = await session.call(lambda: (solver.start_datetime, solver.end_datetime))
+    total = max((end - start).total_seconds(), 1.0)
+    wall, steps = time.monotonic(), 0
+
+    def chunk() -> int:
+        n = 0
+        limit = 500 if max_steps is None else min(500, max_steps - steps)
+        while n < limit and int(solver.state) in _ACTIVE:
+            if target is not None and solver.current_datetime >= target:
+                break
+            solver.step()
+            n += 1
+        return n
+
+    while True:
+        done = await session.call(chunk, context="stepping")
+        steps += done
+        now_state = await session.call(lambda: int(solver.state))
+        if now_state not in _ACTIVE or done == 0 or (max_steps is not None and steps >= max_steps):
+            break
+        now = await session.call(lambda: solver.current_datetime)
+        await ctx.report_progress(min((now - start).total_seconds() / total, 0.99), 1.0)
+        if target is not None and now >= target:
+            break
+
+    finished = await session.call(lambda: int(solver.state)) not in _ACTIVE
+    out: dict[str, Any] = {
+        "session_id": session_id,
+        "steps": steps,
+        "wall_seconds": round(time.monotonic() - wall, 3),
+    }
+    if finished:
+        await session.call(lambda: (solver.end(), solver.report()), context="finishing")
+        await ctx.report_progress(1.0, 1.0)
+        out.update(
+            finished=True,
+            continuity_errors=await session.call(_continuity, solver),
+            continuity_note="fractions: 0.001 means 0.1 %",
+            report_file=session.rpt_path,
+            output_file=session.out_path,
+        )
+    else:
+        now = await session.call(lambda: solver.current_datetime)
+        out.update(
+            finished=False,
+            current_time=now.isoformat(),
+            progress=round(min((now - start).total_seconds() / total, 1.0), 4),
+        )
+    out["state"] = session.state
+    return out
+
+
+async def session(
+    ctx: Context,
+    action: Literal["list", "state", "close", "clone", "reset"],
+    session_id: str = "default",
+    new_session_id: str | None = None,
+) -> dict:
+    """Manage sessions: list all, report one session's state, close it, clone it into
+    new_session_id (its current model and, mid-run, its time and hydraulic state), or
+    reset it: reopen its current model, edits included, at the simulation start."""
+    sm = get_session_manager(ctx)
+    if action == "list":
+        return {
+            "sessions": [
+                {"session_id": s.session_id, "state": s.state, "inp": s.inp_path}
+                for s in await sm.sessions()
+            ]
+        }
+    if action == "close":
+        await sm.close(session_id)
+        return {"session_id": session_id, "closed": True}
+    source = await sm.get(session_id)
+    if action == "state":
+        return await source.call(summary, source)
+    if action == "reset":
+        return await source.call(_reopen, source, context="reset")
+    if not new_session_id:
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] clone needs new_session_id.")
+    if await sm.exists(new_session_id):  # checked before its folder is written to
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] Session '{new_session_id}' exists.")
+    folder = sm.session_dir(new_session_id)
+    stem = Path(source.inp_path).stem.removesuffix("_edited")
+    hotstart, model = folder / "clone.hsf", folder / f"{stem}.inp"
+
+    def _snapshot() -> datetime | None:
+        solver = source.require_solver()
+        _write_model(source, model)
+        if int(solver.state) not in _ACTIVE:
+            return None
+        HotStart.save_from(solver, str(hotstart))
+        return solver.current_datetime
+
+    now = await source.call(_snapshot, context="snapshotting the source")
+    clone = SimSession(
+        new_session_id,
+        folder,
+        inp_path=str(model),
+        rpt_path=str(folder / f"{stem}.rpt"),
+        out_path=str(folder / f"{stem}.out"),
+    )
+    await sm.add(clone)
+
+    def _apply() -> dict:
+        out = _open_solver(clone, lenient=False)
+        if now is not None:
+            # Continue from the source's current time and hydraulic state.
+            clone.solver.start_datetime = now
+            clone.solver.initialize()
+            with HotStart.open(str(hotstart)) as state:
+                state.apply(clone.solver)
+        out.update(state=clone.state, start=cat.to_json(clone.solver.start_datetime))
         return out
 
-    defs = await asyncio.to_thread(_read)
-    return {"session_id": session_id, "count": len(defs), "definitions": defs}
+    try:
+        return await clone.call(_apply, context="cloning")
+    except Exception:
+        await sm.remove(new_session_id)
+        clone.cleanup()
+        raise
 
 
-@model_mcp.tool()
-async def userflag_get_value(
+async def save(
     ctx: Context,
-    session_id: str = "default",
-    obj_type: str = "",
-    obj_name: str = "",
-    flag_name: str = "",
+    session_id: str,
+    path: str,
+    format: Literal["inp", "gpkg", "hdf5", "hotstart", "rpt"] | None = None,
+    profile: str | None = None,
 ) -> dict:
-    """Return the flag value assigned to a specific object ([USER_FLAG_VALUES]).
-
-    ``obj_type`` is an object type token (e.g. ``"NODE"``, ``"LINK"``,
-    ``"SUBCATCHMENT"``). The value is returned in its INP string form
-    (BOOLEAN as YES/NO, INTEGER/REAL as decimals, STRING verbatim);
-    ``value`` is ``None`` and ``assigned`` is ``False`` when unset.
-    """
-    if not obj_type or not obj_name or not flag_name:
+    """Write the session's model or state to path. format defaults from the extension;
+    hotstart saves current state; rpt copies the text report; profile selects an .inp
+    dialect for compatibility writers ("SWMM5" or "SWMM5_STOCK")."""
+    sm = get_session_manager(ctx)
+    session = await sm.get(session_id)
+    solver = session.require_solver()
+    dest = resolve_path(path, str(sm.working_dir))
+    fmt = format or {
+        ".inp": "inp",
+        ".gpkg": "gpkg",
+        ".h5": "hdf5",
+        ".hdf5": "hdf5",
+        ".hsf": "hotstart",
+        ".hot": "hotstart",
+        ".rpt": "rpt",
+    }.get(dest.suffix.lower())
+    if fmt is None:
         raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] obj_type, obj_name, and flag_name must not be empty."
+            f"[{ErrorCode.VALIDATION_ERROR}] Cannot infer the format of '{dest.name}'; pass format."
         )
-    _, target = await _get_target(ctx, session_id)
-    ops = _UserFlagSchemaOps(target)
-    value = await asyncio.to_thread(ops.value_get, obj_type, obj_name, flag_name)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+
+    def _write() -> None:
+        if fmt == "inp" and profile:
+            solver.write_compat(str(dest), cat.coerce(profile, "InpProfile"))
+        elif fmt == "inp":
+            solver.write(str(dest))
+        elif fmt == "gpkg":
+            solver.write_with_plugin(str(dest), GEOPACKAGE_PLUGIN_ID)
+        elif fmt == "hdf5":
+            solver.write_with_plugin(str(dest), HDF5_PLUGIN_ID)
+        elif fmt == "hotstart":
+            HotStart.save_from(solver, str(dest))
+        else:
+            dest.write_bytes(Path(session.rpt_path).read_bytes())
+
+    await session.call(_write, context=f"saving {fmt}")
     return {
         "session_id": session_id,
-        "obj_type": obj_type.upper(),
-        "obj_name": obj_name,
-        "flag_name": flag_name.upper(),
-        "assigned": value is not None,
-        "value": value,
+        "path": str(dest),
+        "format": fmt,
+        "profiles": [p.name for p in InpProfile] if fmt == "inp" else None,
     }
 
 
-@model_mcp.tool()
-async def userflag_set_value(
+async def edit(
     ctx: Context,
-    session_id: str = "default",
-    obj_type: str = "",
-    obj_name: str = "",
-    flag_name: str = "",
-    value: str = "",
+    session_id: str,
+    action: Literal["add", "delete", "preview_delete", "rename", "convert"],
+    kind: str,
+    ids: list[str],
+    type: str | None = None,
+    new_id: str | None = None,
+    properties: dict[str, Any] | None = None,
 ) -> dict:
-    """Assign a flag value to a specific object from a string.
+    """Change model structure: add objects (type = subtype, properties = initial field values;
+    links take from_node/to_node); delete them, cascading or nullifying references;
+    preview_delete reports impact without changing anything; rename an ID; convert a
+    node/link subtype in place."""
+    session = await get_session(ctx, session_id)
+    solver = session.require_solver()
+    entry = cat.require_kind(kind)
+    stem = _EDITOR_STEM.get(kind, kind)
 
-    The flag must already be defined (see ``model_userflag_define``); its
-    declared type drives parsing. BOOLEAN accepts YES/NO/TRUE/FALSE/1/0;
-    INTEGER a decimal integer; REAL a decimal number; STRING is stored
-    verbatim.
-    """
-    if not obj_type or not obj_name or not flag_name:
+    def _do() -> dict:
+        editor = solver.editor
+        collection = cat.resolve(solver, entry["collection"], None)
+        results: list[Any] = []
+        if action == "add":
+            add = cat.members(entry["collection"]).get("add")
+            if add is None:
+                raise ToolError(
+                    f"[{ErrorCode.NOT_SUPPORTED}] '{kind}' has no add(); see "
+                    f"describe('{entry['collection']}') for its methods."
+                )
+            _check_properties(kind, properties or {})
+            session.structure_edited = True  # before mutating: a later failure still rebuilds
+            for key in ids:
+                args = [key]
+                if len(add["params"]) > 1 and (type or add["params"][1]["required"]):
+                    args.append(cat.coerce(type, add["params"][1]["type"]))
+                collection.add(*args)
+                results.append(_apply_properties(solver, kind, key, properties or {}))
+        elif action in ("delete", "preview_delete"):
+            name = f"delete_{stem}" if action == "delete" else f"analyze_{stem}_impact"
+            if not hasattr(editor, name):
+                raise ToolError(f"[{ErrorCode.NOT_SUPPORTED}] Cannot {action} '{kind}' objects.")
+            if action == "delete":
+                session.structure_edited = True
+            for key in ids:
+                results.append({"id": key, "impact": cat.to_json(getattr(editor, name)(key))})
+        elif action == "rename":
+            if len(ids) != 1 or not new_id:
+                raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] rename takes one id and new_id.")
+            collection.rename(ids[0], new_id)
+            results.append({"id": ids[0], "new_id": new_id})
+        else:
+            convert = getattr(editor, f"convert_{kind}", None)
+            if convert is None or type is None:
+                raise ToolError(
+                    f"[{ErrorCode.VALIDATION_ERROR}] convert needs a node or link "
+                    "kind and the new type."
+                )
+            subtype = cat.coerce(type, "NodeType" if kind == "node" else "LinkType")
+            session.structure_edited = True
+            for key in ids:
+                results.append({"id": key, "result": cat.to_json(convert(key, int(subtype)))})
+        return {"session_id": session_id, "action": action, "kind": kind, "results": results}
+
+    return await session.call(_do, context=f"edit {action}")
+
+
+def _check_properties(kind: str, properties: dict[str, Any]) -> None:
+    """Refuse bad initial properties before anything is added."""
+    if kind == "link" and not {"from_node", "to_node"} <= set(properties):
         raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] obj_type, obj_name, and flag_name must not be empty."
+            f"[{ErrorCode.VALIDATION_ERROR}] A new link needs properties 'from_node' and 'to_node'."
         )
-    _, target = await _get_target(ctx, session_id)
-    ops = _UserFlagSchemaOps(target)
-    await asyncio.to_thread(ops.value_set, obj_type, obj_name, flag_name, value)
-    return {
-        "status": "ok",
-        "session_id": session_id,
-        "obj_type": obj_type.upper(),
-        "obj_name": obj_name,
-        "flag_name": flag_name.upper(),
-        "value": value,
-    }
+    for name in set(properties) - {"from_node", "to_node"}:
+        if cat.field(kind, name)["access"] != "rw":
+            raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] '{kind}.{name}' is read-only.")
 
 
-@model_mcp.tool()
-async def userflag_clear_value(
-    ctx: Context,
-    session_id: str = "default",
-    obj_type: str = "",
-    obj_name: str = "",
-    flag_name: str = "",
-) -> dict:
-    """Remove the flag value assigned to a specific object (idempotent)."""
-    if not obj_type or not obj_name or not flag_name:
-        raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] obj_type, obj_name, and flag_name must not be empty."
-        )
-    _, target = await _get_target(ctx, session_id)
-    ops = _UserFlagSchemaOps(target)
-    await asyncio.to_thread(ops.value_clear, obj_type, obj_name, flag_name)
-    return {
-        "status": "ok",
-        "session_id": session_id,
-        "obj_type": obj_type.upper(),
-        "obj_name": obj_name,
-        "flag_name": flag_name.upper(),
-    }
-
-
-# ===========================================================================
-# External-file path slots (typed; reaches every slot, not just [FILES])
-# ===========================================================================
-
-# Role tokens <-> openswmm.engine.FilePathRole codes (SWMM_FilePathRole).
-_FILE_PATH_ROLES: dict[str, int] = {
-    "RAINFALL": 1,
-    "RUNOFF": 2,
-    "RDII": 3,
-    "INFLOWS": 4,
-    "OUTFLOWS": 5,
-    "HOTSTART_USE": 6,
-    "CLIMATE_TEMP": 7,
-    "HOTSTART_SAVE": 8,
-    "RAINGAGE_DATA": 9,
-    "TIMESERIES_DATA": 10,
-}
-_VECTOR_FILE_PATH_ROLES = frozenset({"HOTSTART_SAVE", "RAINGAGE_DATA", "TIMESERIES_DATA"})
-
-
-def _resolve_file_path_role(role: str) -> tuple[str, int]:
-    token = role.strip().upper()
-    if token not in _FILE_PATH_ROLES:
-        raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] Invalid file-path role '{role}'. "
-            f"Must be one of: {', '.join(_FILE_PATH_ROLES)}"
-        )
-    return token, _FILE_PATH_ROLES[token]
-
-
-@model_mcp.tool()
-async def file_path_get(
-    ctx: Context,
-    session_id: str = "default",
-    role: str = "",
-    owner: str = "",
-) -> dict:
-    """Read an external-file slot's resolved and original paths.
-
-    ``role`` selects the slot: scalar roles ``RAINFALL``, ``RUNOFF``,
-    ``RDII``, ``INFLOWS``, ``OUTFLOWS``, ``HOTSTART_USE``, ``CLIMATE_TEMP``
-    (``owner`` ignored), or vector roles ``HOTSTART_SAVE`` (owner = decimal
-    index), ``RAINGAGE_DATA`` (owner = gage id), ``TIMESERIES_DATA``
-    (owner = series id). Returns both the engine-resolved absolute path and
-    the original token as authored in the ``.inp``; either may be empty.
-    """
-    token, code = _resolve_file_path_role(role)
-    if token in _VECTOR_FILE_PATH_ROLES and not owner:
-        raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] Role '{token}' is a vector slot "
-            f"and requires an owner key."
-        )
-    _, target = await _get_builder(ctx, session_id)
-    absolute, original = await asyncio.to_thread(target.get_file_path, code, owner)
-    return {
-        "session_id": session_id,
-        "role": token,
-        "owner": owner,
-        "absolute": absolute,
-        "original": original,
-    }
-
-
-@model_mcp.tool()
-async def file_path_set(
-    ctx: Context,
-    session_id: str = "default",
-    role: str = "",
-    new_path: str = "",
-    owner: str = "",
-) -> dict:
-    """Set the original token for an external-file slot.
-
-    Clears the cached absolute resolution (the engine re-resolves on next
-    use). For vector roles the ``owner`` must already exist in the model.
-    Pass an empty ``new_path`` to clear the slot. See ``model_file_path_get``
-    for the role list.
-    """
-    token, code = _resolve_file_path_role(role)
-    if token in _VECTOR_FILE_PATH_ROLES and not owner:
-        raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] Role '{token}' is a vector slot "
-            f"and requires an owner key."
-        )
-    _, target = await _get_builder(ctx, session_id)
-    await asyncio.to_thread(target.set_file_path, code, new_path, owner)
-    return {
-        "status": "ok",
-        "session_id": session_id,
-        "role": token,
-        "owner": owner,
-        "new_path": new_path,
-    }
-
-
-# ===========================================================================
-# [PLUGINS] + [FILES] section editors
-# ===========================================================================
-
-
-@model_mcp.tool()
-async def plugins_count(ctx: Context, session_id: str = "default") -> dict:
-    """Return the number of [PLUGINS] entries on the engine."""
-    _, target = await _get_builder(ctx, session_id)
-    n = await asyncio.to_thread(target.plugins_count)
-    return {"session_id": session_id, "count": n}
-
-
-@model_mcp.tool()
-async def plugin_get(ctx: Context, session_id: str = "default", index: int = 0) -> dict:
-    """Return the (path, args) of the I{index}-th plugin entry."""
-    _, target = await _get_builder(ctx, session_id)
-    path, args = await asyncio.to_thread(target.plugin_get, index)
-    return {
-        "session_id": session_id,
-        "index": index,
-        "path": path,
-        "args": args,
-    }
-
-
-@model_mcp.tool()
-async def plugin_set(
-    ctx: Context,
-    session_id: str = "default",
-    path_or_id: str = "",
-    args: str = "",
-) -> dict:
-    """Add or update a plugin entry.
-
-    ``path_or_id`` is the library path, plugin id, or ``id:version`` string.
-    """
-    if not path_or_id:
-        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] path_or_id must not be empty.")
-    _, target = await _get_builder(ctx, session_id)
-    await asyncio.to_thread(target.plugin_set, path_or_id, args)
-    return {
-        "status": "ok",
-        "session_id": session_id,
-        "path_or_id": path_or_id,
-        "args": args,
-    }
-
-
-@model_mcp.tool()
-async def plugin_remove(ctx: Context, session_id: str = "default", path_or_id: str = "") -> dict:
-    """Remove the plugin entry matching ``path_or_id``."""
-    if not path_or_id:
-        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] path_or_id must not be empty.")
-    _, target = await _get_builder(ctx, session_id)
-    await asyncio.to_thread(target.plugin_remove, path_or_id)
-    return {
-        "status": "ok",
-        "session_id": session_id,
-        "removed": path_or_id,
-    }
-
-
-@model_mcp.tool()
-async def files_get(ctx: Context, session_id: str = "default", key: str = "") -> dict:
-    """Return the path / value for a [FILES] section field.
-
-    Common keys: ``RAINFALL_PATH``, ``RUNOFF_PATH``, ``RDII_PATH``,
-    ``HOTSTART_USE_PATH``, ``HOTSTART_SAVE_PATH``.
-    """
-    if not key:
-        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] key must not be empty.")
-    _, target = await _get_builder(ctx, session_id)
-    value = await asyncio.to_thread(target.files_get, key)
-    return {"session_id": session_id, "key": key, "value": value}
-
-
-@model_mcp.tool()
-async def files_set(
-    ctx: Context,
-    session_id: str = "default",
-    key: str = "",
-    value: str = "",
-) -> dict:
-    """Set a [FILES] section field. Empty value clears the field."""
-    if not key:
-        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] key must not be empty.")
-    _, target = await _get_builder(ctx, session_id)
-    await asyncio.to_thread(target.files_set, key, value)
-    return {"status": "ok", "session_id": session_id, "key": key, "value": value}
-
-
-@model_mcp.tool()
-async def write_with_plugin(
-    ctx: Context,
-    session_id: str = "default",
-    path: str = "",
-    output_plugin_id: str = "",
-) -> dict:
-    """Write the model to disk via an output plugin (or built-in writer).
-
-    Pass an empty ``output_plugin_id`` (the default) to use the built-in
-    `.inp` writer. Non-empty values select a registered output plugin
-    (e.g. GeoPackage / HDF5).
-    """
-    if not path:
-        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] path must not be empty.")
-    _, target = await _get_builder(ctx, session_id)
-    await asyncio.to_thread(target.write_with_plugin, path, output_plugin_id)
-    return {
-        "status": "ok",
-        "session_id": session_id,
-        "path": path,
-        "output_plugin_id": output_plugin_id,
-    }
+def _apply_properties(solver: Solver, kind: str, key: str, properties: dict[str, Any]) -> dict:
+    element = cat.resolve(solver, kind, key)
+    props = dict(properties)
+    if "from_node" in props or "to_node" in props:
+        element.set_nodes(props.pop("from_node"), props.pop("to_node"))
+    applied = {}
+    for name, value in props.items():
+        member = cat.field(kind, name)
+        owner = cat.resolve(solver, member["target"], key)
+        setattr(owner, member["name"], cat.coerce(value, member["type"]))
+        applied[name] = value
+    return {"id": key, "set": applied}
