@@ -19,12 +19,10 @@ import pytest
 pytest.importorskip("fastmcp")
 pytest.importorskip("gymnasium")
 
-import numpy as np
-from gymnasium import spaces as gym_spaces
+from openswmm_gymnasium.spec.envs import EnvManager
 
 from openswmm_mcp.config import ServerSettings
 from openswmm_mcp.errors import ToolError
-from openswmm_mcp.gym_support.envs import EnvManager, _Policy, build_action, json_safe
 
 _REFERENCE_INP = (Path(__file__).parents[1] / "data" / "site_drainage_example.inp").resolve()
 _OUTPUT_ROOT = Path(__file__).parents[1] / "_output" / "gym_runs"
@@ -56,17 +54,6 @@ def ctx(output_dir: Path) -> _Ctx:
     return _Ctx(working_dir=str(output_dir))
 
 
-def _dict_space():
-    return gym_spaces.Dict(
-        {
-            "design": gym_spaces.Dict({}),
-            "runtime": gym_spaces.Dict(
-                {"orifice_setting": gym_spaces.Box(0.0, 1.0, shape=(2,), dtype=np.float32)}
-            ),
-        }
-    )
-
-
 def _rtc_config(inp: str, **overrides) -> dict:
     cfg = {
         "env_type": "rtc",
@@ -78,77 +65,6 @@ def _rtc_config(inp: str, **overrides) -> dict:
     }
     cfg.update(overrides)
     return cfg
-
-
-# ---------------------------------------------------------------------------
-# Action / JSON plumbing (real gymnasium spaces, no engine)
-# ---------------------------------------------------------------------------
-
-
-def test_build_action_defaults_to_midpoint():
-    action = build_action(_dict_space(), None)
-    np.testing.assert_allclose(action["runtime"]["orifice_setting"], [0.5, 0.5])
-    assert action["design"] == {}
-
-
-def test_build_action_fills_clips_and_validates():
-    space = _dict_space()
-    action = build_action(space, {"runtime": {"orifice_setting": [0.2, 7.0]}})
-    np.testing.assert_allclose(action["runtime"]["orifice_setting"], [0.2, 1.0])
-
-    with pytest.raises(ToolError, match="Unknown action keys"):
-        build_action(space, {"bogus": {}})
-    with pytest.raises(ToolError, match="Unknown action keys"):
-        build_action(space, {"runtime": {"not_a_factory": [0.1]}})
-    with pytest.raises(ToolError, match="shape"):
-        build_action(space, {"runtime": {"orifice_setting": [0.1, 0.2, 0.3]}})
-
-
-def test_policy_kinds_and_validation():
-    space = _dict_space()
-    constant = _Policy(
-        space, {"kind": "constant", "action": {"runtime": {"orifice_setting": [0.1, 0.9]}}}
-    )
-    a1 = constant.next_action()
-    np.testing.assert_allclose(
-        a1["runtime"]["orifice_setting"], np.array([0.1, 0.9], dtype=np.float32)
-    )
-
-    random = _Policy(space, {"kind": "random", "seed": 42})
-    r1 = random.next_action()
-    assert r1["runtime"]["orifice_setting"].shape == (2,)
-
-    replay = _Policy(
-        space, {"kind": "replay", "actions": [{"runtime": {"orifice_setting": [0.0, 0.0]}}]}
-    )
-    assert replay.next_action() is not None
-    assert replay.next_action() is None
-    assert replay.exhausted
-
-    with pytest.raises(ToolError, match="Unknown policy kind"):
-        _Policy(space, {"kind": "greedy"})
-    with pytest.raises(ToolError, match="non-empty 'actions'"):
-        _Policy(space, {"kind": "replay"})
-
-
-def test_json_safe_handles_numpy():
-    assert json_safe(np.float32(1.5)) == 1.5
-    assert json_safe(np.array([1.0, 2.0])) == [1.0, 2.0]
-    assert json_safe({"a": np.bool_(True), "b": (np.int64(3),)}) == {"a": True, "b": [3]}
-
-
-# ---------------------------------------------------------------------------
-# EnvManager bookkeeping errors (no engine needed for the failure paths)
-# ---------------------------------------------------------------------------
-
-
-def test_env_manager_get_and_close_unknown():
-    manager = EnvManager()
-    with pytest.raises(ToolError, match="SESSION_NOT_FOUND"):
-        manager.get("nope")
-    with pytest.raises(ToolError, match="SESSION_NOT_FOUND"):
-        manager.close("nope")
-    assert manager.list() == []
 
 
 # ---------------------------------------------------------------------------
@@ -224,7 +140,8 @@ async def test_run_episode_default_run_dir_beside_model(ctx, output_dir):
 @pytest.mark.integration
 async def test_interactive_loop_matches_direct_env(ctx, output_dir):
     pytest.importorskip("openswmm_gymnasium")
-    from openswmm_mcp.gym_support.config import EnvConfig, build_env
+    from openswmm_gymnasium.spec.config import EnvConfig, build_env
+
     from openswmm_mcp.gym_support.run_tools import (
         env_close,
         env_open,

@@ -65,3 +65,39 @@ async def test_run_python_is_opt_in_and_stdio_only():
     assert "run_python" not in await names()
     assert "run_python" in await names(enable_python=True)
     assert "run_python" not in await names(enable_python=True, transport="http")
+
+
+@pytest.mark.parametrize("toolsets", ["core", "core,gym"])
+async def test_stdio_handshake_as_a_desktop_client(toolsets, inp_path, output_dir):
+    """Launch the server the way Claude Desktop does and use it over stdio."""
+    import os
+    import sys
+
+    from fastmcp import Client
+    from fastmcp.client.transports import StdioTransport
+
+    env = dict(
+        os.environ,
+        OPENSWMM_MCP_TOOLSETS=toolsets,
+        OPENSWMM_MCP_WORKING_DIR=str(output_dir),
+        OPENSWMM_MCP_LOG_LEVEL="WARNING",
+    )
+    transport = StdioTransport(
+        sys.executable,
+        ["-m", "openswmm_mcp"],
+        env=env,
+        cwd=str(output_dir),
+        log_file=output_dir / "server_stderr.log",
+    )
+    async with Client(transport) as client:
+        assert client.initialize_result.serverInfo.name
+        tools = await client.list_tools()
+        expected = CORE | GYM if "gym" in toolsets else CORE
+        assert {t.name for t in tools} == expected
+        size = len(json.dumps([t.model_dump(exclude_none=True) for t in tools]))
+        assert size <= MAX_CHARS
+        await client.call_tool("open_model", {"path": inp_path, "session_id": "d"})
+        result = await client.call_tool("run", {"session_id": "d"})
+        assert result.structured_content["finished"]
+        report = await client.call_tool("report", {"session_id": "d", "name": "mass_balance"})
+        assert report.structured_content

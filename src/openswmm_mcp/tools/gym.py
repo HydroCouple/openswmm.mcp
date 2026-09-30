@@ -10,15 +10,15 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from fastmcp import Context
-
-from openswmm_mcp.errors import ErrorCode, ToolError
-from openswmm_mcp.gym_support import config_tools, run_tools, score_tools
-from openswmm_mcp.gym_support.config import (
+from openswmm_gymnasium.spec.config import (
     JsonFloatMatrix,
     JsonFloatVector,
     JsonObject,
     JsonStrList,
 )
+
+from openswmm_mcp.errors import ErrorCode, ToolError
+from openswmm_mcp.gym_support import config_tools, run_tools, score_tools
 
 
 def _need(value: Any, name: str, action: str) -> Any:
@@ -28,8 +28,8 @@ def _need(value: Any, name: str, action: str) -> Any:
 
 
 async def gym_describe(ctx: Context, topic: str = "") -> dict:
-    """List gym building blocks: env types, observation features (including any engine
-    field via observations.fields), reward terms, design factories, runtime actuators,
+    """List gym building blocks: env types, observation features (any engine field via
+    observations.fields, 2D cells via cell_fields), reward terms, design factories, actuators,
     policy spaces and worked config examples. "benchmark" lists benchmark scenarios;
     "benchmark:<id>" describes one."""
     if topic.startswith("benchmark"):

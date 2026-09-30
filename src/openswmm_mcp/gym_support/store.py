@@ -16,7 +16,7 @@
 
 """JSON-on-disk persistence for named environment configs (plan §7.1).
 
-Each named L{EnvConfig<openswmm_mcp.gym_support.config.EnvConfig>} is
+Each named L{EnvConfig<openswmm_gymnasium.spec.config.EnvConfig>} is
 persisted as C{<config_dir>/<name>.json} in a user-visible directory
 (CLAUDE.md §4.1) and reloaded on demand — the disk *is* the store, so
 configs survive server restarts and users can review, edit, and
@@ -34,10 +34,10 @@ import os
 import re
 from pathlib import Path
 
+from openswmm_gymnasium.spec.config import EnvConfig
 from pydantic import ValidationError
 
 from openswmm_mcp.errors import ErrorCode, ToolError
-from openswmm_mcp.gym_support.config import EnvConfig
 
 #: Allowed config names: filesystem-safe, no path separators or dots-only.
 _NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")

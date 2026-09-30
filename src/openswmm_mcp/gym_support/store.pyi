@@ -6,7 +6,7 @@
 import os
 from pathlib import Path
 
-from openswmm_mcp.gym_support.config import EnvConfig
+from openswmm_gymnasium.spec.config import EnvConfig
 
 class GymStore:
     """Named-config store persisted as one JSON file per config.

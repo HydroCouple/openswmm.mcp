@@ -150,3 +150,29 @@ async def test_export_a_service(tools, inp_path):
     )
     assert exported["rows"] == 1 and exported["columns"] == ["routing_step"]
     assert fields["values"]["routing_step"] is not None
+
+
+def test_refusals_are_logged_as_one_line():
+    """FastMCP logs every ToolError with a traceback; a refusal needs one line."""
+    import logging
+    import sys
+
+    from openswmm_mcp.dependencies import _RefusalsAsOneLine
+
+    try:
+        raise ToolError("[VALIDATION_ERROR] Missing argument 'node'")
+    except ToolError:
+        record = logging.LogRecord(
+            "fastmcp.server.server",
+            logging.ERROR,
+            __file__,
+            1,
+            "Error calling tool %r",
+            ("call",),
+            sys.exc_info(),
+        )
+    assert _RefusalsAsOneLine().filter(record)
+    assert record.exc_info is None and record.levelno == logging.INFO
+    assert record.getMessage() == (
+        "Error calling tool 'call': [VALIDATION_ERROR] Missing argument 'node'"
+    )

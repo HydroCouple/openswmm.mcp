@@ -185,37 +185,9 @@ def lookup_bulk(solver: Any, path: str) -> Any:
 # ---------------------------------------------------------------------------
 # Units
 # ---------------------------------------------------------------------------
-_US = {
-    "length": "ft",
-    "volume": "ft3",
-    "velocity": "ft/s",
-    "area": "ft2 (subcatchment: ac)",
-    "rain_rate": "in/hr",
-    "evap_rate": "in/day",
-    "rain_depth": "in",
-    "user_temperature": "degF",
-    "wind_speed": "mph",
-}
-_SI = {
-    "length": "m",
-    "volume": "m3",
-    "velocity": "m/s",
-    "area": "m2 (subcatchment: ha)",
-    "rain_rate": "mm/hr",
-    "evap_rate": "mm/day",
-    "rain_depth": "mm",
-    "user_temperature": "degC",
-    "wind_speed": "km/hr",
-}
-
-
 def unit_label(kind: str | None, unit_system: str | None, flow_units: str | None) -> str | None:
-    if kind is None or unit_system is None:
-        return kind
-    if kind == "flow":
-        return flow_units or kind
-    table = _SI if unit_system == "SI" else _US
-    return table.get(kind, kind)
+    """The catalog unit kind as the model's units (``"ft"``, ``"CMS"``, ...)."""
+    return _engine_catalog.unit_label(kind, unit_system, flow_units)
 
 
 # ---------------------------------------------------------------------------

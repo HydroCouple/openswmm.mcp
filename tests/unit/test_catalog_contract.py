@@ -129,6 +129,9 @@ async def test_twod_surface(tools, output_dir):
     assert values["values"]["n_cells"] > 0
     for field, message in values.get("errors", {}).items():
         assert ALLOWED.match(message), f"surface2d.{field}: {message}"
+    # The fixture has no subcatchments: an empty kind reads as no rows.
+    assert (await tools("get", session_id="s2", kind="subcatchment", fields=["area"]))["ids"] == []
+    assert (await tools("find", session_id="s2", kind="subcatchment"))["ids"] == []
 
 
 async def test_unknown_names_suggest_alternatives(tools, inp_path):

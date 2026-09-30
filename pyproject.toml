@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "openswmm.mcp"
-version = "0.1.0.dev0"
+version = "0.2.0.dev0"
 description = "MCP server for the OpenSWMM stormwater engine"
 readme = "README.md"
 license = "Apache-2.0"
@@ -34,7 +34,7 @@ dependencies = [
 
 [project.optional-dependencies]
 gym = [
-    "openswmm.gymnasium",
+    "openswmm.gymnasium[spec]",
 ]
 dev = [
     "pytest>=7.0",

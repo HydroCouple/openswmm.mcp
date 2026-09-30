@@ -11,9 +11,9 @@ import shutil
 from pathlib import Path
 
 import pytest
+from openswmm_gymnasium.spec.config import EnvConfig, ObservationSpec
 
 from openswmm_mcp.errors import ToolError
-from openswmm_mcp.gym_support.config import EnvConfig, ObservationSpec
 from openswmm_mcp.gym_support.store import GymStore
 
 _OUTPUT_ROOT = Path(__file__).parents[1] / "_output" / "gym_store"

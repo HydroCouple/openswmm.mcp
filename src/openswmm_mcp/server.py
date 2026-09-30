@@ -58,7 +58,13 @@ def build_server(settings: ServerSettings | None = None) -> FastMCP:
     for fn in CORE_TOOLS:
         server.tool(fn, name="set" if fn is access.set_fields else fn.__name__)
     if "gym" in toolsets(settings):
-        from openswmm_mcp.tools import gym
+        try:
+            from openswmm_mcp.tools import gym
+        except ImportError as exc:
+            raise ImportError(
+                "OPENSWMM_MCP_TOOLSETS includes 'gym', which needs openswmm.gymnasium "
+                "with its spec extra: pip install 'openswmm.mcp[gym]'"
+            ) from exc
 
         for fn in gym.TOOLS:
             server.tool(fn)

@@ -227,7 +227,8 @@ async def test_validate_inline_config_reports_spaces(ctx, output_dir):
     assert result["valid"] is True
     assert result["observation_size"] == 3
     assert result["action_space"]["type"] == "Dict"
-    assert set(result["action_space"]["spaces"]) == {"design", "runtime"}
+    # Gymnasium forbids empty Dict spaces, so an RTC env has no "design" half.
+    assert set(result["action_space"]["spaces"]) == {"runtime"}
 
 
 @pytest.mark.integration

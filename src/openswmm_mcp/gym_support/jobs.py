@@ -54,11 +54,11 @@ from pathlib import Path
 from typing import Any, Literal
 
 import numpy as np
+from openswmm_gymnasium.spec.config import EnvConfig, build_env
+from openswmm_gymnasium.spec.envs import build_action, json_safe
 from pydantic import BaseModel, ConfigDict, Field
 
 from openswmm_mcp.errors import ErrorCode, ToolError
-from openswmm_mcp.gym_support.config import EnvConfig, build_env
-from openswmm_mcp.gym_support.envs import build_action, json_safe
 
 # ---------------------------------------------------------------------------
 # Config

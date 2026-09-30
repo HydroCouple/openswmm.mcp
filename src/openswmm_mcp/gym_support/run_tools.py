@@ -43,14 +43,15 @@ import time
 from pathlib import Path
 
 from fastmcp import Context
+from openswmm_gymnasium.spec.config import EnvConfig, JsonObject, coerce_json_param
+from openswmm_gymnasium.spec.envs import build_action, json_safe
+from openswmm_gymnasium.spec.envs import run_episode as _run_episode_sync
 from pydantic import ValidationError
 
 from openswmm_mcp.dependencies import get_env_manager, get_job_manager, require_gymnasium
 from openswmm_mcp.errors import ErrorCode, ToolError
-from openswmm_mcp.gym_support.config import EnvConfig, JsonObject, coerce_json_param
+from openswmm_mcp.gym_support import tool_errors
 from openswmm_mcp.gym_support.config_tools import _get_store, _parse_config, _summarize
-from openswmm_mcp.gym_support.envs import build_action, json_safe
-from openswmm_mcp.gym_support.envs import run_episode as _run_episode_sync
 from openswmm_mcp.gym_support.jobs import OptimizationConfig
 
 # ---------------------------------------------------------------------------
@@ -98,6 +99,7 @@ def _default_run_dir(env_config: EnvConfig, run_id: str) -> Path:
 # ---------------------------------------------------------------------------
 
 
+@tool_errors
 async def run_episode(
     ctx: Context,
     name: str | None = None,
@@ -153,6 +155,7 @@ async def run_episode(
 # ---------------------------------------------------------------------------
 
 
+@tool_errors
 async def env_open(
     ctx: Context,
     env_id: str = "default",
@@ -184,6 +187,7 @@ async def env_open(
     }
 
 
+@tool_errors
 async def env_reset(ctx: Context, env_id: str = "default", seed: int | None = None) -> dict:
     """Reset the interactive env and return the initial observation."""
     manager = get_env_manager(ctx)
@@ -203,6 +207,7 @@ async def env_reset(ctx: Context, env_id: str = "default", seed: int | None = No
     return await asyncio.to_thread(_reset)
 
 
+@tool_errors
 async def env_step(
     ctx: Context,
     env_id: str = "default",
@@ -239,6 +244,7 @@ async def env_step(
     return await asyncio.to_thread(_step)
 
 
+@tool_errors
 async def env_close(ctx: Context, env_id: str = "default") -> dict:
     """Close the interactive env and release its engine handle."""
     manager = get_env_manager(ctx)
@@ -246,6 +252,7 @@ async def env_close(ctx: Context, env_id: str = "default") -> dict:
     return {"env_id": env_id, "closed": True}
 
 
+@tool_errors
 async def list_envs(ctx: Context) -> dict:
     """List open interactive envs with their idle times and step counts."""
     manager = get_env_manager(ctx)
@@ -258,6 +265,7 @@ async def list_envs(ctx: Context) -> dict:
 # ---------------------------------------------------------------------------
 
 
+@tool_errors
 async def start_optimization(
     ctx: Context,
     name: str | None = None,
@@ -306,22 +314,26 @@ async def start_optimization(
     return snapshot
 
 
+@tool_errors
 async def get_job(ctx: Context, job_id: str) -> dict:
     """Return the progress snapshot of an optimization job."""
     return get_job_manager(ctx).get(job_id)
 
 
+@tool_errors
 async def list_jobs(ctx: Context) -> dict:
     """List all optimization jobs (newest first) with their states."""
     jobs = get_job_manager(ctx).list()
     return {"count": len(jobs), "jobs": jobs}
 
 
+@tool_errors
 async def cancel_job(ctx: Context, job_id: str) -> dict:
     """Request cooperative cancellation; takes effect between evaluations."""
     return get_job_manager(ctx).cancel(job_id)
 
 
+@tool_errors
 async def get_job_results(ctx: Context, job_id: str) -> dict:
     """Return the results of a finished job.
 
@@ -352,6 +364,7 @@ def _decisions_to_vector(decisions: dict, labels: list[str]) -> list[float]:
     return vector
 
 
+@tool_errors
 async def decode_policy(ctx: Context, job_id: str, index: str = "best") -> dict:
     """Decode a control-curve result vector into per-asset PWL curves.
 

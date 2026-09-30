@@ -18,6 +18,23 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class _RefusalsAsOneLine(logging.Filter):
+    """Log a tool refusal (a ToolError) as one line instead of a traceback.
+
+    A refusal, such as a missing argument or a lifecycle phase, is an answer the
+    client already receives. FastMCP logs it with ``logger.exception``, which
+    renders a full traceback for every refused call.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        exc = record.exc_info[1] if record.exc_info else None
+        if isinstance(exc, ToolError):
+            record.msg, record.args = f"{record.getMessage()}: {exc}", ()
+            record.exc_info, record.exc_text = None, None
+            record.levelno, record.levelname = logging.INFO, "INFO"
+        return True
+
+
 @lifespan
 async def server_lifespan(server) -> AsyncIterator[dict]:
     """Create the shared session manager (and gym managers when that toolset is on)."""
@@ -27,12 +44,16 @@ async def server_lifespan(server) -> AsyncIterator[dict]:
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         force=True,
     )
+    tool_log = logging.getLogger("fastmcp.server.server")
+    if not any(isinstance(f, _RefusalsAsOneLine) for f in tool_log.filters):
+        tool_log.addFilter(_RefusalsAsOneLine())
     context: dict[str, Any] = {
         "settings": settings,
         "session_manager": SessionManager(settings.max_sessions, settings.working_dir),
     }
     if "gym" in toolsets(settings):
-        from openswmm_mcp.gym_support.envs import EnvManager
+        from openswmm_gymnasium.spec.envs import EnvManager
+
         from openswmm_mcp.gym_support.jobs import JobManager
 
         context["env_manager"] = EnvManager()
@@ -84,7 +105,7 @@ async def get_session(ctx: Context, session_id: str) -> SimSession:
 def require_gymnasium(feature: str = "This tool") -> None:
     """Raise an actionable error when the optional gymnasium package is missing."""
     try:
-        import openswmm_gymnasium  # noqa: F401
+        import openswmm_gymnasium.spec  # noqa: F401
     except ImportError as exc:
         raise ToolError(
             f"[{ErrorCode.DEPENDENCY_MISSING}] {feature} requires the optional "

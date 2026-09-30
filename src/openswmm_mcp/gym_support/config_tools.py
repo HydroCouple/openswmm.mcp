@@ -19,7 +19,7 @@
 Phase 2 of C{docs/developer/GYMNASIUM_INTEGRATION_PLAN.md}: the tools an
 LLM uses to discover the C{openswmm.gymnasium} vocabulary
 (L{list_capabilities}), compose and persist declarative
-L{EnvConfig<openswmm_mcp.gym_support.config.EnvConfig>}s (CRUD tools),
+L{EnvConfig<openswmm_gymnasium.spec.config.EnvConfig>}s (CRUD tools),
 sanity-check them against the real engine (L{validate_env_config}),
 and browse the registered benchmark scenarios (L{describe_benchmark}).
 
@@ -43,12 +43,8 @@ from pathlib import Path
 from typing import Any
 
 from fastmcp import Context
-from pydantic import ValidationError
-
-from openswmm_mcp.dependencies import get_settings, require_gymnasium
-from openswmm_mcp.errors import ErrorCode, ToolError
-from openswmm_mcp.gym_support import registry
-from openswmm_mcp.gym_support.config import (
+from openswmm_gymnasium.spec import SpecError, registry
+from openswmm_gymnasium.spec.config import (
     OBSERVATION_FEATURES,
     EnvConfig,
     JsonObject,
@@ -57,6 +53,11 @@ from openswmm_mcp.gym_support.config import (
     build_env,
     coerce_json_param,
 )
+from pydantic import ValidationError
+
+from openswmm_mcp.dependencies import get_settings, require_gymnasium
+from openswmm_mcp.errors import ErrorCode, ToolError
+from openswmm_mcp.gym_support import tool_errors
 from openswmm_mcp.gym_support.store import GymStore
 
 #: Default sub-directory (under the server working dir) for config JSON.
@@ -153,8 +154,8 @@ def _parse_config(config: dict[str, Any]) -> EnvConfig:
     config = coerce_json_param(config, "config")
     try:
         return EnvConfig(**config)
-    except ToolError:
-        raise
+    except SpecError:
+        raise  # registry errors carry their own code
     except (ValidationError, TypeError) as exc:
         hint = (
             "Call gym_describe() for valid kinds, param schemas, the "
@@ -223,6 +224,7 @@ def _summarize(config: EnvConfig) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+@tool_errors
 async def list_capabilities(ctx: Context) -> dict:
     """List the full declarative vocabulary for environment configs.
 
@@ -278,6 +280,12 @@ async def list_capabilities(ctx: Context) -> dict:
             "typed object whose keys are the fixed feature names in "
             "'observation_features' (e.g. node_depths, link_flows), each mapping "
             "to a list of element IDs — not the IDs directly.",
+            "Besides the named features, 'observations.fields' maps any numeric "
+            "catalog field path (e.g. 'link.stats.max_flow') to element IDs, and "
+            "'observations.cell_fields' lists per-cell 2D quantities as "
+            "{path, cells, args} (e.g. {'path': 'surface2d.get_depths', "
+            "'cells': [0, 5]}). describe(target) lists the paths; the env's reset "
+            "info reports each feature's units under 'observation_units'.",
             "reward_terms left empty means the env default: a single "
             "all-nodes flooding_volume term.",
             "reward-term CSO semantics differ: 'cso_volume' sums NODE overflow at "
@@ -298,6 +306,7 @@ async def list_capabilities(ctx: Context) -> dict:
     }
 
 
+@tool_errors
 async def describe_benchmark(ctx: Context, benchmark_id: str | None = None) -> dict:
     """List or describe the registered C{OpenSWMM/*} benchmark env IDs.
 
@@ -339,6 +348,7 @@ async def describe_benchmark(ctx: Context, benchmark_id: str | None = None) -> d
 # ---------------------------------------------------------------------------
 
 
+@tool_errors
 async def create_env_config(
     ctx: Context,
     name: str,
@@ -359,6 +369,7 @@ async def create_env_config(
     return {"name": name, "path": str(path), "summary": _summarize(env_config)}
 
 
+@tool_errors
 async def get_env_config(ctx: Context, name: str, config_dir: str | None = None) -> dict:
     """Return the full stored config JSON for I{name}."""
     store = _get_store(ctx, config_dir)
@@ -370,6 +381,7 @@ async def get_env_config(ctx: Context, name: str, config_dir: str | None = None)
     }
 
 
+@tool_errors
 async def list_env_configs(ctx: Context, config_dir: str | None = None) -> dict:
     """List stored config names in the config directory."""
     store = _get_store(ctx, config_dir)
@@ -377,6 +389,7 @@ async def list_env_configs(ctx: Context, config_dir: str | None = None) -> dict:
     return {"config_dir": str(store.config_dir), "count": len(names), "names": names}
 
 
+@tool_errors
 async def delete_env_config(ctx: Context, name: str, config_dir: str | None = None) -> dict:
     """Delete the named stored config."""
     store = _get_store(ctx, config_dir)
@@ -389,6 +402,7 @@ async def delete_env_config(ctx: Context, name: str, config_dir: str | None = No
 # ---------------------------------------------------------------------------
 
 
+@tool_errors
 async def validate_env_config(
     ctx: Context,
     name: str | None = None,

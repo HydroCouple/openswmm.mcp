@@ -44,16 +44,17 @@ from typing import Any
 
 import numpy as np
 from fastmcp import Context
-
-from openswmm_mcp.dependencies import get_job_manager, get_session_manager, require_gymnasium
-from openswmm_mcp.errors import ErrorCode, ToolError
-from openswmm_mcp.gym_support.config import (
+from openswmm_gymnasium.spec.config import (
     JsonFloatMatrix,
     JsonFloatVector,
     JsonStrListRequired,
     coerce_json_param,
 )
-from openswmm_mcp.gym_support.envs import json_safe
+from openswmm_gymnasium.spec.envs import json_safe
+
+from openswmm_mcp.dependencies import get_job_manager, get_session_manager, require_gymnasium
+from openswmm_mcp.errors import ErrorCode, ToolError
+from openswmm_mcp.gym_support import tool_errors
 from openswmm_mcp.gym_support.jobs import design_dimensions
 from openswmm_mcp.tools.model import _reopen
 
@@ -197,6 +198,7 @@ def _compute_indicator(
 # ---------------------------------------------------------------------------
 
 
+@tool_errors
 async def pareto_filter(
     ctx: Context,
     front: JsonFloatMatrix = None,
@@ -227,6 +229,7 @@ async def pareto_filter(
     return result
 
 
+@tool_errors
 async def score_front(
     ctx: Context,
     indicators: JsonStrListRequired,
@@ -295,6 +298,7 @@ async def score_front(
     return result
 
 
+@tool_errors
 async def compare_runs(
     ctx: Context,
     job_ids: JsonStrListRequired,
@@ -464,6 +468,7 @@ def _apply_schedule_policy(
     }
 
 
+@tool_errors
 async def apply_design(
     ctx: Context,
     job_id: str,

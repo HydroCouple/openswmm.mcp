@@ -3,8 +3,8 @@
 project = "OpenSWMM MCP Server"
 copyright = "2026, Caleb Buahin"
 author = "Caleb Buahin"
-version = "0.1.0"
-release = "0.1.0"
+version = "0.2.0"
+release = "0.2.0.dev0"
 
 extensions = [
     "sphinx.ext.autodoc",

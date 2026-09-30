@@ -18,11 +18,11 @@ import pytest
 
 pytest.importorskip("fastmcp")
 
+from openswmm_gymnasium.spec.config import EnvConfig, ObservationSpec
 from pydantic import ValidationError
 
 from openswmm_mcp.config import ServerSettings
 from openswmm_mcp.errors import ToolError
-from openswmm_mcp.gym_support.config import EnvConfig, ObservationSpec
 from openswmm_mcp.gym_support.jobs import (
     JobManager,
     OptimizationConfig,
@@ -121,7 +121,9 @@ def test_design_dimensions_labels_and_bounds():
     assert [d.key for d in dims] == ["link_roughness", "node_max_depth"]
     assert dims[0].labels == ("link_roughness:C1", "link_roughness:C2")
     assert dims[0].size == 2 and dims[1].size == 1
-    assert (dims[0].low, dims[0].high) == (0.011, 0.025)
+    # Bounds are per component, read from the factory's float32 Box.
+    assert dims[0].low == pytest.approx((0.011, 0.011), rel=1e-6)
+    assert dims[0].high == pytest.approx((0.025, 0.025), rel=1e-6)
     assert dims[1].labels == ("node_max_depth:J1",)
 
 

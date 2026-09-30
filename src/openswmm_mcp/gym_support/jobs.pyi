@@ -8,9 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
+from openswmm_gymnasium.spec.config import EnvConfig
 from pydantic import BaseModel
-
-from openswmm_mcp.gym_support.config import EnvConfig
 
 JobState = Literal["pending", "running", "done", "failed", "cancelled"]
 

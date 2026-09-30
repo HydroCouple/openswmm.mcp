@@ -16,41 +16,55 @@
 
 """Support package for the C{gym} MCP tool domain.
 
-Bridges declarative JSON configs (composed by an LLM through the
-C{gym_*} tools) to live C{openswmm.gymnasium} objects. Submodules:
+The environment spec (config models, kind registry, env manager) lives in
+L{openswmm_gymnasium.spec}; this package adds what only the server needs:
 
-  - L{registry<openswmm_mcp.gym_support.registry>} — kind-name registry
-    mapping config strings to gym classes, with per-kind param schemas.
-  - L{config<openswmm_mcp.gym_support.config>} — Pydantic config models
-    (L{EnvConfig<openswmm_mcp.gym_support.config.EnvConfig>}) and
-    L{build_env<openswmm_mcp.gym_support.config.build_env>}.
-  - L{store<openswmm_mcp.gym_support.store>} — JSON-on-disk persistence
+  - L{store<openswmm_mcp.gym_support.store>} -- JSON-on-disk persistence
     of named configs.
+  - L{jobs<openswmm_mcp.gym_support.jobs>} -- background optimisation jobs.
+  - C{config_tools}, C{run_tools}, C{score_tools} -- the bodies of the
+    C{gym_*} tools.
 
-C{openswmm_gymnasium} is imported lazily inside functions only, so this
-package (and the server) imports cleanly without the C{gym} extra.
-See C{docs/developer/GYMNASIUM_INTEGRATION_PLAN.md}.
+Imported only when the gym tool set is enabled, which needs
+C{openswmm.gymnasium[spec]}.
 
 @author: Caleb Buahin
 @copyright: Copyright (c) 2026 Caleb Buahin
 @license: Apache-2.0
 """
 
-from openswmm_mcp.gym_support.config import (
+import functools
+
+from openswmm_gymnasium.spec import (
     ActionFactorySpec,
     EnvConfig,
+    KindSpec,
     ObservationSpec,
     RewardTermSpec,
+    SpecError,
     WrapperSpec,
     build_env,
-)
-from openswmm_mcp.gym_support.registry import (
-    KindSpec,
     get_kind,
     list_kinds,
     resolve_kind,
 )
+
+from openswmm_mcp.errors import ToolError
 from openswmm_mcp.gym_support.store import GymStore
+
+
+def tool_errors(fn):
+    """Surface spec errors as MCP tool errors; their messages already carry the code."""
+
+    @functools.wraps(fn)
+    async def wrapper(*args, **kwargs):
+        try:
+            return await fn(*args, **kwargs)
+        except SpecError as exc:
+            raise ToolError(str(exc)) from exc
+
+    return wrapper
+
 
 __all__ = [
     "ActionFactorySpec",
@@ -64,4 +78,5 @@ __all__ = [
     "get_kind",
     "list_kinds",
     "resolve_kind",
+    "tool_errors",
 ]

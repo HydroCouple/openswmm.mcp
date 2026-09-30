@@ -11,7 +11,14 @@ from pathlib import Path
 from typing import Any
 
 from fastmcp import Context
-from openswmm.engine import GeoPackage, HotStart, OutputReader, XSectionGeometry, _enums
+from openswmm.engine import (
+    GeoPackage,
+    HotStart,
+    ModelBuilder,
+    OutputReader,
+    XSectionGeometry,
+    _enums,
+)
 from openswmm.engine import _dates as dates_functions
 from openswmm.engine import _datetime as datetime_functions
 
@@ -197,14 +204,30 @@ async def describe(ctx: Context, topic: str = "", session_id: str | None = None)
 # ---------------------------------------------------------------------------
 def _ids(solver: Any, kind: str) -> list[str]:
     collection = cat.resolve(solver, cat.require_kind(kind)["collection"], None)
+    if len(collection) == 0:
+        return []  # the bulk ID getters refuse a zero count
     ids = getattr(collection, "ids", None)
     if ids is not None and not callable(ids):
         return [str(i) for i in ids]
     return [str(e.id) for e in collection]
 
 
-def _read(solver: Any, member: dict, key: str | None) -> Any:
-    owner = cat.resolve(solver, member["target"], key)
+def _builder(session: SimSession) -> ModelBuilder:
+    """The session's model builder, created on first use."""
+    if "builder" not in session.readers:
+        session.readers["builder"] = ModelBuilder()
+    return session.readers["builder"]
+
+
+def _owner(session: SimSession, target: str, key: str | None) -> Any:
+    """The live object behind a catalog target (the session's builder for ``builder``)."""
+    if target == "builder":
+        return _builder(session)
+    return cat.resolve(session.require_solver(), target, key)
+
+
+def _read(session: SimSession, member: dict, key: str | None) -> Any:
+    owner = _owner(session, member["target"], key)
     value = getattr(owner, member["name"])
     if member.get("type", "").startswith("ref:"):
         return getattr(value, "id", value)
@@ -256,13 +279,13 @@ async def find(
         for key in _ids(solver, kind):
             if regex and not regex.search(key):
                 continue
-            subtype = cat.to_json(_read(solver, subtype_member, key)) if subtype_member else None
+            subtype = cat.to_json(_read(session, subtype_member, key)) if subtype_member else None
             if type and (subtype or "").upper() != type.upper():
                 continue
             if predicate:
                 member, op, value = predicate
                 try:
-                    current = cat.to_json(_read(solver, member, key))
+                    current = cat.to_json(_read(session, member, key))
                     if current is None or not op(current, value):
                         continue
                 except (TypeError, AttributeError):
@@ -311,7 +334,7 @@ async def get(
             values, errors = {}, {}
             for f, m in members.items():
                 try:
-                    values[f] = cat.to_json(_read(solver, m, None))
+                    values[f] = cat.to_json(_read(session, m, None))
                 except Exception as exc:
                     errors[f] = f"{type(exc).__name__}: {exc}"
             out = {"target": kind, "values": values, "units": units}
@@ -333,7 +356,7 @@ async def get(
             values = []
             for key in page:
                 try:
-                    values.append(cat.to_json(_read(solver, m, key)))
+                    values.append(cat.to_json(_read(session, m, key)))
                 except Exception as exc:
                     values.append(None)
                     errors.setdefault(f, f"{type(exc).__name__}: {exc}")
@@ -364,7 +387,6 @@ async def set_fields(
     apply even when others fail.
     """
     session = await get_session(ctx, session_id)
-    solver = session.require_solver()
     base = get_session_manager(ctx).working_dir
     cat.require_target(kind)
 
@@ -377,11 +399,11 @@ async def set_fields(
                 member = cat.field(kind, name)
                 if member["access"] != "rw":
                     raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] '{kind}.{name}' is read-only.")
-                owner = cat.resolve(solver, member["target"], key)
+                owner = _owner(session, member["target"], key)
                 value = cat.coerce(change.get("value"), member["type"], member["name"], base)
                 setattr(owner, member["name"], value)
                 result["ok"] = True
-                result["value"] = cat.to_json(_read(solver, member, key))
+                result["value"] = cat.to_json(_read(session, member, key))
             except Exception as exc:
                 result["ok"] = False
                 result["error"] = (
@@ -428,7 +450,14 @@ def _bind(member: dict, args: dict[str, Any], session: SimSession, base: Path) -
 
 
 def _item(obj: Any, name: str, member: dict, args: dict[str, Any]) -> Any:
-    key_type = member["params"][0]["type"] if member["params"] else ""
+    params = member.get("params", [])
+    for p in params:
+        if p["required"] and p["name"] not in args:
+            raise ToolError(
+                f"[{ErrorCode.VALIDATION_ERROR}] Missing argument '{p['name']}' "
+                f"for {member['path']}{_signature(member)}."
+            )
+    key_type = params[0]["type"] if params else ""
     if name == "items":
         return list(obj.items()) if hasattr(obj, "items") else list(enumerate(obj))
     key = cat.coerce(args.get("key"), key_type)
@@ -446,9 +475,10 @@ _ROOT_CLASSES = {
     "geopackage": GeoPackage,
     "hotstart": HotStart,
     "xsect": XSectionGeometry,
+    "builder": ModelBuilder,
 }
-# Readers the session caches and closes itself.
-_CACHED = {"output", "geopackage"}
+# Objects the session caches and closes itself.
+_CACHED = {"output", "geopackage", "builder"}
 
 
 def _xsect(session: SimSession, args: dict[str, Any], base: Path) -> XSectionGeometry:
@@ -492,6 +522,13 @@ def _standalone(
         )
     if target == "xsect":
         return _xsect(session, args, base)
+    if target == "builder":
+        if member["name"] == "to_solver":
+            raise ToolError(
+                f"[{ErrorCode.NOT_SUPPORTED}] A built model cannot run in place: write it with "
+                "call(target='builder', method='write', args={'path': ...}) and open_model it."
+            )
+        return _builder(session)
     path = args.pop("path", None)
     if target == "output":
         return session.output_reader(
@@ -507,10 +544,7 @@ def _standalone(
         return session.readers[key]
     if target == "hotstart":
         return HotStart.open(path)
-    raise ToolError(
-        f"[{ErrorCode.NOT_SUPPORTED}] '{target}' is not callable over MCP; start a new "
-        "model with open_model() and build it with edit/set/call instead."
-    )
+    raise ToolError(f"[{ErrorCode.NOT_SUPPORTED}] '{target}' has no MCP handler.")
 
 
 async def call(
@@ -520,8 +554,9 @@ async def call(
 
     target is a service ("forcing", "tables", "controls", "surface2d", "reactions", ...),
     an element "<kind>:<id>[.<subview>]" such as "node:OUT1.outfall", a standalone target
-    ("output", "xsect", "geopackage", "hotstart"; pass their constructor args too) or a
-    function module ("datetime"). args are keyword arguments matching the catalog signature,
+    ("output", "xsect", "geopackage", "hotstart" with their constructor args; "builder" for a
+    model authored from scratch, then write it and open_model it) or a function module
+    ("datetime"). args are keyword arguments matching the catalog signature,
     e.g. call("s", "forcing", "node_lat_inflow", {"node": "J1", "value": 2.5, "persist": true}).
     """
     session = await get_session(ctx, session_id)
