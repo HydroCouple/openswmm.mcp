@@ -87,7 +87,7 @@ class Job:
         """
 
 class JobManager:
-    """Background thread pool plus job records (plan §7.3: 2 workers).
+    """Background thread pool plus job records (2 workers).
 
     @ivar max_workers: Concurrent job cap.
     """

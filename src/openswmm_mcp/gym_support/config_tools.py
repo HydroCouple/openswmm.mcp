@@ -16,7 +16,7 @@
 
 """Gym tools: capability discovery and environment-config management.
 
-Phase 2 of C{docs/developer/GYMNASIUM_INTEGRATION_PLAN.md}: the tools an
+The tools an
 LLM uses to discover the C{openswmm.gymnasium} vocabulary
 (L{list_capabilities}), compose and persist declarative
 L{EnvConfig<openswmm_gymnasium.spec.config.EnvConfig>}s (CRUD tools),
@@ -26,7 +26,7 @@ and browse the registered benchmark scenarios (L{describe_benchmark}).
 Configs are persisted as JSON by
 L{GymStore<openswmm_mcp.gym_support.store.GymStore>} under
 C{<working_dir>/gym_configs} by default; every tool accepts a
-C{config_dir} override (plan §7.1).
+C{config_dir} override.
 
 C{openswmm_gymnasium} is imported lazily — only
 L{validate_env_config} and L{describe_benchmark} need it installed.

@@ -9,7 +9,20 @@ pip install openswmm.mcp
 ```
 
 This installs the server and all required runtime dependencies (`fastmcp`,
-`openswmm`, `pydantic`, `pydantic-settings`, `numpy`).
+`openswmm`, `pydantic`, `pydantic-settings`, `numpy`). The engine must be a
+build that ships `openswmm.engine.catalog`, which every catalog-driven tool
+reads.
+
+## Optional extras
+
+```bash
+pip install "openswmm.mcp[gym]"    # gym tools: openswmm.gymnasium with its spec extra
+pip install "openswmm.mcp[dev]"    # tests and linting
+pip install "openswmm.mcp[docs]"   # Sphinx documentation
+```
+
+The gym tools are registered only with `OPENSWMM_MCP_TOOLSETS=core,gym`; see
+{doc}`configuration`, which also covers Claude Desktop.
 
 ## From Source
 

@@ -14,10 +14,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Background optimization jobs over design spaces (plan Phase 4).
+"""Background optimization jobs over design spaces.
 
-A L{JobManager} owns a small thread pool (default C{max_workers=2},
-plan §7.3 — each job holds one Solver and is CPU-heavy) running design
+A L{JobManager} owns a small thread pool (default C{max_workers=2};
+each job holds one Solver and is CPU-heavy) running design
 searches over C{cip}/C{joint} env configs:
 
   - C{random_search} — uniform sampling baseline.
@@ -33,8 +33,7 @@ half runs a neutral midpoint action each step.
 
 Cancellation is cooperative — checked between evaluations. Every job
 writes reviewable artifacts (C{job.json}, C{evaluations.jsonl},
-C{result.json}) under a user-visible output directory (CLAUDE.md §4.1,
-plan §3.4).
+C{result.json}) under a user-visible output directory (CLAUDE.md §4.1).
 
 @author: Caleb Buahin
 @copyright: Copyright (c) 2026 Caleb Buahin
@@ -616,7 +615,7 @@ def _assemble_result(evaluator: _Evaluator) -> dict[str, Any]:
 class JobManager:
     """Owns the background thread pool and all job records.
 
-    @ivar max_workers: Pool size (plan §7.3 default: 2).
+    @ivar max_workers: Pool size (default: 2).
     """
 
     def __init__(self, max_workers: int = 2) -> None:
@@ -645,7 +644,7 @@ class JobManager:
         @param opt_config: Optimization settings.
         @type opt_config: L{OptimizationConfig}
         @param output_dir: Artifact directory; defaults to
-            C{<inp_dir>/gym_runs/<job_id>} (plan §3.4).
+            C{<inp_dir>/gym_runs/<job_id>}.
         @type output_dir: str, L{Path}, or C{None}
         @return: Initial snapshot (C{state == "pending"}).
         @rtype: dict
@@ -670,7 +669,7 @@ class JobManager:
         resolved.mkdir(parents=True, exist_ok=True)
         job = Job(job_id=job_id, env_config=env_config, opt_config=opt_config, output_dir=resolved)
 
-        # Persist the full job definition for review (plan §7.1 / §4.1).
+        # Persist the full job definition for review.
         (resolved / "job.json").write_text(
             json.dumps(
                 {

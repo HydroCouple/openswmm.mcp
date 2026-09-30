@@ -22,7 +22,7 @@ without new tool code.
 | `find(session_id, kind, pattern, type, where)` | List element IDs filtered by regex, subtype (`"STORAGE"`) and a field predicate (`"stats.max_depth > 2"`). |
 | `get(session_id, kind, fields, ids)` | Read fields as a table. All elements use the engine's bulk arrays where they exist. Works for services too (`kind="mass_balance"`). |
 | `set(session_id, kind, changes)` | Write fields: `[{"id": "C1", "field": "roughness", "value": 0.015}]`. Each change is validated and reported individually. |
-| `call(session_id, target, method, args)` | Run any catalogued method on a service (`"forcing"`), an element (`"node:OUT1.outfall"`), a standalone target (`"xsect"`, `"output"`, `"geopackage"`, `"hotstart"`) or a function module (`"datetime"`). |
+| `call(session_id, target, method, args)` | Run any catalogued method on a service (`"forcing"`), an element (`"node:OUT1.outfall"`), a standalone target (`"xsect"`, `"output"`, `"geopackage"`, `"hotstart"`, `"builder"`) or a function module (`"datetime"`). |
 | `edit(session_id, action, kind, ids, ...)` | Structural edits: `add`, `delete`, `preview_delete`, `rename`, `convert`. |
 | `timeseries(source, kind, ids, variable)` | Result series from a finished session or an `.out` file, peak-preserving downsampling; `variable="quality:TSS"` for pollutants. |
 | `report(session_id, name)` | `summary`, `mass_balance`, `flooding`, `capacity`, `storage`, `pumps`, `subcatchments`, `statistics`, `quality`, `2d`, `groundwater`. |
@@ -40,10 +40,41 @@ without new tool code.
   `surface2d.groundwater.transport`, and so on. `describe()` lists them.
 - **Elements** in `call` are `<kind>:<id>[.<subview>]`; IDs may contain dots
   (`node:MH.1.outfall`).
+- **Standalone targets** take their constructor arguments in `args`: `xsect`
+  takes `shape`, `geom1`..`geom4` and `units` (or a `from` spec such as
+  `{"method": "from_street", ...}`); `geopackage` and `hotstart` take `path`;
+  `output` reads the session's results unless given a `path`. The session
+  opens and closes these readers itself.
 - **Enums** are passed and returned by name (`"JUNCTION"`, `"PERSIST"`).
 - **Units** are the model's own; `describe(..., session_id=...)` and every
   `get` response name them (`ft`, `CFS`, `ft3`, ...).
 - **Files** in arguments resolve against `OPENSWMM_MCP_WORKING_DIR`.
+
+### Authoring a model with `builder`
+
+`builder` is a `ModelBuilder` kept by the session, for writing a model from
+scratch without running it. Its methods take positional indices: elements are
+numbered in the order they are added, and `add_node` / `add_link` return an
+error code (`0` on success), not the index. Type and shape arguments are the
+integer codes of `NodeType`, `LinkType` and `XSectShape` (`describe("enum:NodeType")`).
+
+```text
+open_model(session_id="b")                                   # a session to hold the builder
+call("b", "builder", "add_node", {"node_id": "J1", "node_type": 0})   # JUNCTION, index 0
+call("b", "builder", "add_node", {"node_id": "O1", "node_type": 1})   # OUTFALL, index 1
+call("b", "builder", "add_link", {"link_id": "C1", "link_type": 0})   # CONDUIT, index 0
+call("b", "builder", "set_node_invert", {"idx": 0, "elev": 10.0})
+call("b", "builder", "set_node_invert", {"idx": 1, "elev": 9.0})
+call("b", "builder", "set_link_nodes", {"idx": 0, "from_node": 0, "to_node": 1})
+call("b", "builder", "set_link_xsect", {"idx": 0, "shape": 0, "g1": 1.0})   # CIRCULAR
+call("b", "builder", "set_option", {"key": "START_DATE", "value": "01/01/2026"})
+call("b", "builder", "write", {"path": "built.inp"})
+open_model(path="built.inp", session_id="run")
+```
+
+Set `START_DATE` and `END_DATE`: the builder's defaults are not a runnable
+simulation window. `to_solver` is refused, because a built model runs only
+after it is written and opened.
 
 ### A model's structure changes
 
@@ -81,7 +112,7 @@ v1 registered 663 tools. Each maps to one of the tools above:
 | `lifecycle_*` | `open_model`, `run` (step, stride, until), `session`, `save(format="rpt")`; events and runoff-interface files via `call(target="events" \| "solver", ...)` |
 | `query_*` | `get`, `find`, `report(name="summary")` |
 | `nodes_*`, `links_*`, `subcatchments_*`, `pollutants_*`, `model_*` | `get` / `set` on the element fields; methods via `call(target="<kind>:<id>", ...)` or `call(target="options", ...)` |
-| `building_*` | `open_model()` without a path, then `edit(action="add")`, `set`, `save` |
+| `building_*` | `open_model()` without a path, then `edit(action="add")`, `set`, `save`; or author with `call(target="builder", ...)` (see below) |
 | `editing_*` | `edit`; inlet and virtual-junction operations via `call(target="editor", ...)` |
 | `forcing_*`, `controls_*`, `inflows_*`, `tables_*`, `climate_*`, `infrastructure_*`, `heat_*`, `reactions_*`, `water_age_*`, `initial_quality_*`, `process_components_*` | `call(target="<service>", ...)`; fields via `get`/`set` |
 | `twod_*`, `infil2d_*` | `get(kind="surface2d", ...)`, `call(target="surface2d" \| "surface2d.infiltration", ...)`, `report(name="2d")` |

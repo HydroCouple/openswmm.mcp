@@ -6,16 +6,18 @@ LLM can compose, run, score, and apply stormwater optimization studies — real-
 control (RTC), capital-improvement design (CIP), joint design+control, and
 multi-objective variants — entirely through conversation.
 
-Install the optional extra alongside the engine:
+Install the `gym` extra, which brings `openswmm.gymnasium` with its `spec`
+extra, and register the tools with `OPENSWMM_MCP_TOOLSETS=core,gym`:
 
 ```bash
-pip install 'openswmm.mcp[engine,gym]'
+pip install 'openswmm.mcp[gym]'
 # MOEAs (NSGA-II etc.) additionally need:
 pip install 'openswmm.gymnasium[platypus]'
 ```
 
-Without the extra the server still starts; `gym_*` tools fail with an
-actionable `DEPENDENCY_MISSING` error.
+With `core,gym` set and the extra missing, the server refuses to start and
+names the extra to install. Without `gym` in the tool sets the gym tools are
+not registered at all.
 
 ## Concepts
 
@@ -221,5 +223,6 @@ position): it returns each link's fixed `x_knots` and the applied
 | `gym_score(action='pareto')` / `gym_score(action='score')` / `gym_score(action='compare')` | Pareto filtering and quality indicators. |
 | `gym_score(action='apply_design')` | Apply an optimized design vector to an open model session. |
 
-Design details and phase history: see
-`docs/developer/GYMNASIUM_INTEGRATION_PLAN.md`.
+The environment specs these tools accept are defined in
+`openswmm_gymnasium.spec`; `gym_describe()` returns their JSON schemas and
+worked examples.

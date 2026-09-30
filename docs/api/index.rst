@@ -137,34 +137,14 @@ openswmm_mcp.tools.code
 Gym support
 -----------
 
-openswmm_mcp.gym_support.config
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. automodule:: openswmm_mcp.gym_support.config
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-openswmm_mcp.gym_support.registry
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. automodule:: openswmm_mcp.gym_support.registry
-   :members:
-   :undoc-members:
-   :show-inheritance:
+The environment spec layer (``EnvConfig``, the kind registry and the env
+manager) lives in ``openswmm_gymnasium.spec``; these modules add storage,
+background jobs and the tool implementations.
 
 openswmm_mcp.gym_support.store
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. automodule:: openswmm_mcp.gym_support.store
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-openswmm_mcp.gym_support.envs
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. automodule:: openswmm_mcp.gym_support.envs
    :members:
    :undoc-members:
    :show-inheritance:

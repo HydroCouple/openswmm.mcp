@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""JSON-on-disk persistence for named environment configs (plan §7.1).
+"""JSON-on-disk persistence for named environment configs.
 
 Each named L{EnvConfig<openswmm_gymnasium.spec.config.EnvConfig>} is
 persisted as C{<config_dir>/<name>.json} in a user-visible directory

@@ -249,3 +249,36 @@ async def test_structural_edits(tools, inp_path):
     summary = await tools("report", session_id="default", name="summary")
     assert summary["counts"]["subcatchment"] == 6
     assert summary["files"]["inp"].endswith("_edited.inp")
+
+
+async def test_author_with_the_builder(tools, output_dir):
+    """The docs' `builder` walkthrough: author, write, open and run."""
+    await tools("open_model", session_id="b")
+    kinds = await tools("describe", topic="enum:NodeType")
+    assert "JUNCTION" in json.dumps(kinds)
+
+    async def build(method, **args):
+        return await tools("call", session_id="b", target="builder", method=method, args=args)
+
+    assert (await build("add_node", node_id="J1", node_type=0))["result"] == 0
+    await build("add_node", node_id="O1", node_type=1)
+    await build("add_link", link_id="C1", link_type=0)
+    await build("set_node_invert", idx=0, elev=10.0)
+    await build("set_node_max_depth", idx=0, depth=5.0)
+    await build("set_node_invert", idx=1, elev=9.0)
+    await build("set_link_nodes", idx=0, from_node=0, to_node=1)
+    await build("set_link_length", idx=0, length=100.0)
+    await build("set_link_xsect", idx=0, shape=0, g1=1.0)
+    for key, value in (
+        ("START_DATE", "01/01/2026"),
+        ("END_DATE", "01/01/2026"),
+        ("END_TIME", "06:00:00"),
+    ):
+        await build("set_option", key=key, value=value)
+    await build("write", path="built.inp")
+    with pytest.raises(ToolError, match="cannot run in place"):
+        await build("to_solver")
+
+    opened = await tools("open_model", path=str(output_dir / "built.inp"), session_id="run")
+    assert opened["counts"] == {"link": 1, "node": 2}
+    assert (await tools("run", session_id="run"))["finished"]

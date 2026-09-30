@@ -64,6 +64,9 @@ Authentication support is included by default through the `fastmcp[auth]` depend
 pip install "openswmm-mcp[dev,docs]"
 ```
 
+The gym tools need the `gym` extra (`pip install "openswmm-mcp[gym]"`) and
+`OPENSWMM_MCP_TOOLSETS=core,gym`.
+
 ### Requirements
 
 - Python 3.10+
@@ -92,6 +95,26 @@ Add the following to your MCP configuration (e.g. `~/.claude/settings.json` or `
 }
 ```
 
+### With Claude Desktop
+
+Add the server to `claude_desktop_config.json` (macOS:
+`~/Library/Application Support/Claude/`, Windows: `%APPDATA%\Claude\`),
+using the full path of the Python environment where the server is installed:
+
+```json
+{
+  "mcpServers": {
+    "openswmm": {
+      "command": "/path/to/venv/bin/python",
+      "args": ["-m", "openswmm_mcp"],
+      "env": {
+        "OPENSWMM_MCP_WORKING_DIR": "/path/to/models"
+      }
+    }
+  }
+}
+```
+
 ### With uv
 
 ```json
@@ -99,7 +122,7 @@ Add the following to your MCP configuration (e.g. `~/.claude/settings.json` or `
   "mcpServers": {
     "openswmm": {
       "command": "uv",
-      "args": ["run", "--with", "openswmm-mcp", "openswmm-mcp"]
+      "args": ["run", "--with", "openswmm.mcp", "openswmm.mcp"]
     }
   }
 }

@@ -82,7 +82,7 @@ async def _resolve_config(
 
 
 def _default_run_dir(env_config: EnvConfig, run_id: str) -> Path:
-    """Return the default run directory beside the model (plan §3.4).
+    """Return the default run directory beside the model.
 
     @param env_config: Config whose C{inp_path} anchors the directory.
     @type env_config: L{EnvConfig}
@@ -261,7 +261,7 @@ async def list_envs(ctx: Context) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Background optimization jobs (plan Phase 4)
+# Background optimization jobs
 # ---------------------------------------------------------------------------
 
 
