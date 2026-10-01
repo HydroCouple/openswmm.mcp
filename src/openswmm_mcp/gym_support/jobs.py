@@ -67,8 +67,7 @@ from openswmm_mcp.errors import ErrorCode, ToolError
 class OptimizationConfig(BaseModel):
     """Declarative optimization-run settings.
 
-    @ivar algorithm: C{"random_search"}, C{"grid_search"}, or a Platypus
-        MOEA class name in lowercase (e.g. C{"nsga2"}).
+    @ivar algorithm: C{"random_search"}, C{"grid_search"}, or a lowercase Platypus MOEA name (e.g. C{"nsga2"}).
     @ivar budget: Maximum design evaluations for the job.
     @ivar population_size: MOEA population size (Platypus only).
     @ivar grid_levels: Per-dimension levels for C{grid_search}.
@@ -132,10 +131,12 @@ class DesignDimension:
 
     @ivar key: Action-space key (the factory's C{name} param).
     @ivar labels: Per-component labels, C{"<kind>:<element_id>"}.
-    @ivar low: Lower bound — a scalar broadcast across all components, or a
-        per-component tuple (for factories whose components carry different
-        physical ranges, e.g. storage C{(a,b,c)} or RDII C{(R,dmax,drecov,dinit)}).
+    @ivar low: Lower bound: a scalar broadcast across components, or a per-component tuple.
     @ivar high: Upper bound, scalar or per-component like C{low}.
+
+    Tuple bounds allow different physical ranges for each component, such as
+    storage C{(a,b,c)} or RDII C{(R,dmax,drecov,dinit)}.
+
     """
 
     key: str

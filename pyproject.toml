@@ -47,6 +47,7 @@ docs = [
     "pydata-sphinx-theme>=0.15",
     "myst-parser>=3.0",
     "sphinx-autodoc-typehints",
+    "sphinx-epytext>=0.0.4",
 ]
 
 [project.scripts]

@@ -7,11 +7,10 @@ allowing large-language models and AI assistants to open, run, query, and
 modify EPA-SWMM hydraulic and hydrologic models.
 
 Built on `FastMCP 3.x <https://gofastmcp.com/>`_, the server provides 14 core
-tools (plus five optional gym tools) that reach every property and method of
-the engine through its machine-readable catalog, ``swmm://`` resources for the
+tools (plus five optional gym tools) for catalog-driven engine access, with
+explicit lifecycle and JSON-argument boundaries, ``swmm://`` resources for the
 catalog and sessions, seven guided-workflow prompts and three bundled skills.
-The whole tool set costs under 5k tokens of context, so it loads in any MCP
-client.
+Tool-definition size is covered by the server budget tests.
 
 .. toctree::
    :maxdepth: 2

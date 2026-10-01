@@ -6,9 +6,10 @@ The server registers **14 core tools**, **5 optional gym tools** and one opt-in
 
 The engine exposes over a thousand functions. Instead of one tool per function,
 five generic tools (`describe`, `find`, `get`, `set`, `call`) read the engine's
-machine-readable catalog (`openswmm.engine.catalog`) and reach every property
-and method it lists. When the engine gains a capability, the server reaches it
-without new tool code.
+machine-readable catalog (`openswmm.engine.catalog`) and dispatch supported fields and methods by their catalog paths. New scalar
+fields and JSON-compatible method arguments often need no new tool code;
+lifecycle operations, callbacks, standalone construction and optional native
+features still have explicit boundaries (see below).
 
 ## Core tools
 
@@ -46,7 +47,7 @@ without new tool code.
   `output` reads the session's results unless given a `path`. The session
   opens and closes these readers itself.
 - **Enums** are passed and returned by name (`"JUNCTION"`, `"PERSIST"`).
-- **Units** are the model's own; `describe(..., session_id=...)` and every
+- **Units** follow each catalog member, including fixed SI/temperature units; `describe(..., session_id=...)` and every
   `get` response name them (`ft`, `CFS`, `ft3`, ...).
 - **Files** in arguments resolve against `OPENSWMM_MCP_WORKING_DIR`.
 
@@ -126,3 +127,39 @@ v1 registered 663 tools. Each maps to one of the tools above:
 
 The SWMM 5 (legacy) backend is gone: every session uses the handle-based
 OpenSWMM 6 engine.
+
+
+## Catalog coverage and current limits
+
+The server needs a compiled engine build with `openswmm.engine.catalog`, not
+just a matching version string. Rebuild/reinstall the wheel after adding Cython
+extensions; copying Python files into an older install can produce missing
+extension errors. Restart the server after updating the package so its cached
+catalog and native modules refer to the same build.
+
+- **Discovery is not universal dispatch.** `describe` can list members that
+  `call` intentionally refuses. Solver creation, open/start/step/end/close,
+  destruction and iteration are owned by the session tools. Solver callbacks
+  and `write_staged` require Python callables and are refused through `call`.
+  Use `save` for normal serialization.
+- **Standalone targets need adapters.** The existing handlers cover `output`,
+  `hotstart`, `geopackage`, `xsect` and `builder`; adding an unrelated constructible
+  class to the catalog does not implement its MCP constructor automatically.
+- **Lifecycle and configuration remain native contracts.** Author transport,
+  groundwater and surface-quality tables before starting the simulation.
+  Optional 2D services require a build and model that support them. A successful
+  metadata lookup does not establish availability.
+- **JSON is a boundary.** Returned arrays/records are serialized snapshots,
+  subject to size limits. Arbitrary Python callbacks, generators and ownership
+  transfers are not JSON APIs. A new signature needs a coercion/serialization
+  test, even when the generic dispatcher can locate it.
+- **Mutation is not transactional.** `set` reports each change independently;
+  earlier successful writes remain applied if later changes fail. Structural
+  edits trigger model serialization and reopening before the next run.
+
+For transport configuration use `describe("transport")`; for aquifer authoring
+use `describe("surface2d.groundwater")` and
+`describe("surface2d.groundwater.transport")`; surface quality is
+`describe("surface2d.quality")`. Use the returned signatures and units rather
+than translating Python keyword names or assuming all quantities use the
+project’s flow units.

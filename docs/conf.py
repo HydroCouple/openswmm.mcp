@@ -13,6 +13,7 @@ extensions = [
     "sphinx.ext.intersphinx",
     "sphinx.ext.viewcode",
     "myst_parser",
+    "sphinx_epytext",  # Gym support API docstrings use epytext.
 ]
 
 templates_path = ["_templates"]

@@ -46,3 +46,13 @@ async def test_flooding(tools, inp_path):
 pytest tests/unit -q                  # full suite (needs the compiled engine)
 pytest tests/unit -q -k "not gym"     # without the gym extra
 ```
+
+
+## Coverage means dispatch, not every numerical scenario
+
+Run `test_catalog_contract.py`, `test_method_contract.py` and `test_gym_envs.py`
+against the same rebuilt engine used by the server. The method contract includes
+expected validation/lifecycle refusals; passing it does not mean every method
+completed a physically meaningful simulation. Keep successful model-specific
+round trips for newly added tables, forcing, persistence and optional features.
+The catalog must be regenerated in the engine repository before these checks.

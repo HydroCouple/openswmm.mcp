@@ -50,8 +50,7 @@ class GymStore:
     C{config_dir}, so multiple server processes pointed at the same
     directory observe each other's configs and a restart loses nothing.
 
-    @ivar config_dir: Directory holding C{<name>.json} files; created
-        on first write.
+    @ivar config_dir: Directory holding C{<name>.json} files, created on first write.
     @type config_dir: L{Path}
     """
 
