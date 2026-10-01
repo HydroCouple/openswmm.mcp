@@ -1,6 +1,7 @@
 """Unit tests for GymStore JSON persistence (plan Phase 1, §7.1).
 
-Pure-Python: no engine or gym extra required. Per CLAUDE.md §4.1 all
+Pure-Python: requires the gym extra for its config models, but no engine
+simulation. Per CLAUDE.md §4.1 all
 store files are written under the reviewable ``tests/_output/`` tree.
 """
 
@@ -11,6 +12,9 @@ import shutil
 from pathlib import Path
 
 import pytest
+
+pytest.importorskip("openswmm_gymnasium")
+
 from openswmm_gymnasium.spec.config import EnvConfig, ObservationSpec
 
 from openswmm_mcp.errors import ToolError

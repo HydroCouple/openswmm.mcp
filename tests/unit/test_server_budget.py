@@ -36,6 +36,8 @@ MAX_CHARS = 40_000  # ~11k tokens for every tool definition together
 
 
 async def _definitions(settings: ServerSettings) -> list[dict]:
+    if "gym" in settings.toolsets.split(","):
+        pytest.importorskip("openswmm_gymnasium")
     tools = await build_server(settings).list_tools()
     return [t.to_mcp_tool().model_dump(exclude_none=True) for t in tools]
 
@@ -70,6 +72,8 @@ async def test_run_python_is_opt_in_and_stdio_only():
 @pytest.mark.parametrize("toolsets", ["core", "core,gym"])
 async def test_stdio_handshake_as_a_desktop_client(toolsets, inp_path, output_dir):
     """Launch the server the way Claude Desktop does and use it over stdio."""
+    if "gym" in toolsets.split(","):
+        pytest.importorskip("openswmm_gymnasium")
     import os
     import sys
 

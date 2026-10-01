@@ -62,6 +62,8 @@ async def test_resources_and_prompts(tools, inp_path, output_dir, monkeypatch):
         assert "node" in index
         node = json.loads((await client.read_resource("swmm://catalog/node"))[0].text)
         assert any(m["name"] == "depth" for m in node["members"])
+        sessions = json.loads((await client.read_resource("swmm://sessions"))[0].text)
+        assert [s["session_id"] for s in sessions] == ["r"]
         summary = json.loads((await client.read_resource("swmm://session/r/summary"))[0].text)
         assert summary["counts"]["node"] == 12
         skills = json.loads((await client.read_resource("swmm://skills"))[0].text)

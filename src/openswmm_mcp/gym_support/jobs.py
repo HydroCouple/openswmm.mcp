@@ -67,7 +67,8 @@ from openswmm_mcp.errors import ErrorCode, ToolError
 class OptimizationConfig(BaseModel):
     """Declarative optimization-run settings.
 
-    @ivar algorithm: C{"random_search"}, C{"grid_search"}, or a lowercase Platypus MOEA name (e.g. C{"nsga2"}).
+    @ivar algorithm: C{"random_search"}, C{"grid_search"}, or a lowercase
+        Platypus MOEA name (e.g. C{"nsga2"}).
     @ivar budget: Maximum design evaluations for the job.
     @ivar population_size: MOEA population size (Platypus only).
     @ivar grid_levels: Per-dimension levels for C{grid_search}.

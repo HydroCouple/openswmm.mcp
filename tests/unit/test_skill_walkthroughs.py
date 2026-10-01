@@ -25,6 +25,7 @@ from .conftest import Tools
 @pytest.fixture
 async def gym_tools(output_dir: Path, monkeypatch):
     """A client to a server with the gym toolset, as operational-optimization needs."""
+    pytest.importorskip("openswmm_gymnasium")
     monkeypatch.setenv("OPENSWMM_MCP_WORKING_DIR", str(output_dir))
     monkeypatch.setenv("OPENSWMM_MCP_LOG_LEVEL", "WARNING")
     monkeypatch.setenv("OPENSWMM_MCP_TOOLSETS", "core,gym")

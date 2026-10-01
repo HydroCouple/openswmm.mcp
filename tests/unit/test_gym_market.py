@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 
 pytest.importorskip("fastmcp")
+pytest.importorskip("openswmm_gymnasium")
 
 from openswmm_mcp.config import ServerSettings
 from openswmm_mcp.gym_support.jobs import JobManager
@@ -122,7 +123,6 @@ def _market_config(output_dir: Path) -> dict:
 
 @pytest.mark.integration
 async def test_market_random_search_then_apply(ctx, output_dir, job_manager):
-    pytest.importorskip("openswmm_gymnasium")
     from openswmm_mcp.gym_support.run_tools import get_job_results, start_optimization
     from openswmm_mcp.gym_support.score_tools import apply_design
 
@@ -183,7 +183,6 @@ def _schedule_config(output_dir: Path) -> dict:
 
 @pytest.mark.integration
 async def test_schedule_optimize_then_apply(ctx, output_dir, job_manager):
-    pytest.importorskip("openswmm_gymnasium")
     import json
 
     from openswmm_mcp.gym_support.run_tools import get_job_results, start_optimization
@@ -214,7 +213,6 @@ async def test_schedule_optimize_then_apply(ctx, output_dir, job_manager):
 
 @pytest.mark.integration
 async def test_market_nsga2_front(ctx, output_dir, job_manager):
-    pytest.importorskip("openswmm_gymnasium")
     pytest.importorskip("platypus")
     from openswmm_mcp.gym_support.run_tools import get_job_results, start_optimization
 
@@ -228,4 +226,9 @@ async def test_market_nsga2_front(ctx, output_dir, job_manager):
     assert final["state"] == "done", final["error"]
     results = await get_job_results(ctx, job_id=snap["job_id"])
     assert results["pareto"]
-    assert results["evaluations_count"] == 12
+    # Platypus counts reused, already evaluated offspring toward its budget.
+    # The engine log only contains the candidates that needed a new simulation.
+    count = results["evaluations_count"]
+    assert 6 <= count <= 12
+    assert count == final["evaluations_done"]
+    assert count == len((output_dir / "nsga2" / "evaluations.jsonl").read_text().splitlines())

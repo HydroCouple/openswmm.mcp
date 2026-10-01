@@ -1,7 +1,7 @@
 """Unit tests for the gym_* capability/config tools (plan Phase 2).
 
-Capability and CRUD tools are pure (no gym extra); validation tools run
-against the real engine and skip when ``openswmm_gymnasium`` is absent.
+All tests require the gym extra for the shared environment spec. Capability
+and CRUD tools are pure; validation tools run against the real engine.
 All files are written to the reviewable ``tests/_output/`` tree
 (CLAUDE.md §4.1).
 """
@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 pytest.importorskip("fastmcp")
+pytest.importorskip("openswmm_gymnasium")
 
 from openswmm_mcp.config import ServerSettings
 from openswmm_mcp.errors import ToolError
@@ -203,7 +204,6 @@ async def test_create_duplicate_requires_overwrite(ctx):
 
 
 async def test_validate_requires_exactly_one_of_name_or_config(ctx):
-    pytest.importorskip("openswmm_gymnasium")
     with pytest.raises(ToolError, match="exactly one"):
         await validate_env_config(ctx)
     with pytest.raises(ToolError, match="exactly one"):
@@ -212,7 +212,6 @@ async def test_validate_requires_exactly_one_of_name_or_config(ctx):
 
 @pytest.mark.integration
 async def test_validate_inline_config_reports_spaces(ctx, output_dir):
-    pytest.importorskip("openswmm_gymnasium")
     inp = output_dir / "site_drainage_example.inp"
     shutil.copy(_REFERENCE_INP, inp)
 
@@ -233,7 +232,6 @@ async def test_validate_inline_config_reports_spaces(ctx, output_dir):
 
 @pytest.mark.integration
 async def test_validate_stored_config_with_bad_element_id(ctx, output_dir):
-    pytest.importorskip("openswmm_gymnasium")
     inp = output_dir / "site_drainage_example.inp"
     shutil.copy(_REFERENCE_INP, inp)
 

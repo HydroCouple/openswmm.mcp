@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 
 pytest.importorskip("fastmcp")
+pytest.importorskip("openswmm_gymnasium")
 pytest.importorskip("gymnasium")
 
 from openswmm_gymnasium.spec.envs import EnvManager
@@ -80,7 +81,6 @@ def _copy_inp(output_dir: Path) -> str:
 
 @pytest.mark.integration
 async def test_run_episode_constant_policy_writes_artifacts(ctx, output_dir):
-    pytest.importorskip("openswmm_gymnasium")
     from openswmm_mcp.gym_support.run_tools import run_episode
 
     run_dir = output_dir / "run"
@@ -107,7 +107,6 @@ async def test_run_episode_constant_policy_writes_artifacts(ctx, output_dir):
 
 @pytest.mark.integration
 async def test_run_episode_replay_stops_when_exhausted(ctx, output_dir):
-    pytest.importorskip("openswmm_gymnasium")
     from openswmm_mcp.gym_support.run_tools import run_episode
 
     summary = await run_episode(
@@ -122,7 +121,6 @@ async def test_run_episode_replay_stops_when_exhausted(ctx, output_dir):
 
 @pytest.mark.integration
 async def test_run_episode_default_run_dir_beside_model(ctx, output_dir):
-    pytest.importorskip("openswmm_gymnasium")
     from openswmm_mcp.gym_support.run_tools import run_episode
 
     inp = _copy_inp(output_dir)
@@ -139,7 +137,6 @@ async def test_run_episode_default_run_dir_beside_model(ctx, output_dir):
 
 @pytest.mark.integration
 async def test_interactive_loop_matches_direct_env(ctx, output_dir):
-    pytest.importorskip("openswmm_gymnasium")
     from openswmm_gymnasium.spec.config import EnvConfig, build_env
 
     from openswmm_mcp.gym_support.run_tools import (
@@ -188,7 +185,6 @@ async def test_interactive_loop_matches_direct_env(ctx, output_dir):
 
 @pytest.mark.integration
 async def test_env_open_duplicate_and_capacity(ctx, output_dir):
-    pytest.importorskip("openswmm_gymnasium")
     from openswmm_mcp.gym_support.run_tools import env_close, env_open
 
     ctx.lifespan_context["env_manager"] = EnvManager(max_envs=1)
@@ -204,7 +200,6 @@ async def test_env_open_duplicate_and_capacity(ctx, output_dir):
 
 @pytest.mark.integration
 async def test_idle_envs_are_swept(ctx, output_dir):
-    pytest.importorskip("openswmm_gymnasium")
     from openswmm_mcp.gym_support.run_tools import env_open, list_envs
 
     ctx.lifespan_context["env_manager"] = EnvManager(idle_timeout_s=0.05)

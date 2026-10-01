@@ -24,7 +24,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Hydrology",
 ]
 dependencies = [
-    "fastmcp[auth]>=3.2",
+    "fastmcp[auth]>=3.2,<4",
     "pydantic>=2.0",
     "pydantic-settings>=2.0",
     "numpy>=1.21",
@@ -34,7 +34,7 @@ dependencies = [
 
 [project.optional-dependencies]
 gym = [
-    "openswmm.gymnasium[spec]",
+    "openswmm.gymnasium[spec]>=0.1.0.dev0",
 ]
 dev = [
     "pytest>=7.0",

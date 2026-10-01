@@ -1,8 +1,8 @@
 """Unit tests for background optimization jobs (plan Phase 4).
 
-Config/metadata/bookkeeping tests are pure. Job-execution tests run the
-real handle-based engine via ``openswmm_gymnasium`` (no mocks) and skip
-when it is absent; the NSGA-II test additionally requires platypus-opt.
+All tests require the gym extra for the shared environment spec. Config,
+metadata, and bookkeeping tests are pure; job-execution tests run the real
+engine (no mocks). The NSGA-II test additionally requires platypus-opt.
 Artifacts land in the reviewable ``tests/_output/`` tree (CLAUDE.md
 §4.1).
 """
@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 
 pytest.importorskip("fastmcp")
+pytest.importorskip("openswmm_gymnasium")
 
 from openswmm_gymnasium.spec.config import EnvConfig, ObservationSpec
 from pydantic import ValidationError
@@ -163,7 +164,6 @@ def _control_curve_config(inp: str) -> EnvConfig:
 
 
 def test_control_curve_dimensions_labels_and_bounds():
-    pytest.importorskip("openswmm_gymnasium")
     dims = design_dimensions(_control_curve_config("m.inp"))
     assert [d.key for d in dims] == [
         "control_curve/ORIF/y[0]",
@@ -175,7 +175,6 @@ def test_control_curve_dimensions_labels_and_bounds():
 
 
 def test_precondition_gate_accepts_control_curve_rejects_bare_rtc(job_manager):
-    pytest.importorskip("openswmm_gymnasium")
     # A control_curve config has a searchable static factory -> accepted.
     design_dimensions(_control_curve_config("m.inp"))  # no raise
     # A bare rtc config has neither design nor policy factory -> rejected.
@@ -209,7 +208,6 @@ def _copy_inp(output_dir: Path) -> str:
 
 @pytest.mark.integration
 async def test_random_search_job_runs_in_background(ctx, output_dir, job_manager):
-    pytest.importorskip("openswmm_gymnasium")
     from openswmm_mcp.gym_support.run_tools import get_job, get_job_results, start_optimization
 
     snap = await start_optimization(
@@ -249,7 +247,6 @@ async def test_random_search_job_runs_in_background(ctx, output_dir, job_manager
 
 @pytest.mark.integration
 async def test_cancel_stops_between_evaluations(ctx, output_dir, job_manager):
-    pytest.importorskip("openswmm_gymnasium")
     from openswmm_mcp.gym_support.run_tools import cancel_job, get_job_results, start_optimization
 
     snap = await start_optimization(
@@ -270,7 +267,6 @@ async def test_cancel_stops_between_evaluations(ctx, output_dir, job_manager):
 
 @pytest.mark.integration
 async def test_grid_search_covers_levels(ctx, output_dir, job_manager):
-    pytest.importorskip("openswmm_gymnasium")
     from openswmm_mcp.gym_support.run_tools import start_optimization
 
     cfg = _cip_config(_copy_inp(output_dir))
@@ -297,7 +293,6 @@ async def test_grid_search_covers_levels(ctx, output_dir, job_manager):
 
 @pytest.mark.integration
 async def test_nsga2_produces_nondominated_front(ctx, output_dir, job_manager):
-    pytest.importorskip("openswmm_gymnasium")
     pytest.importorskip("platypus")
     from openswmm_mcp.gym_support.run_tools import get_job_results, start_optimization
 
@@ -336,7 +331,6 @@ def _copy_b01(output_dir: Path) -> str:
 
 @pytest.mark.integration
 async def test_control_curve_nsga2_front_and_decode(ctx, output_dir, job_manager):
-    pytest.importorskip("openswmm_gymnasium")
     pytest.importorskip("platypus")
     from openswmm_mcp.gym_support.run_tools import (
         decode_policy,
@@ -372,7 +366,6 @@ async def test_control_curve_nsga2_front_and_decode(ctx, output_dir, job_manager
 
 @pytest.mark.integration
 async def test_decode_policy_rejects_non_control_curve(ctx, output_dir, job_manager):
-    pytest.importorskip("openswmm_gymnasium")
     from openswmm_mcp.gym_support.run_tools import decode_policy, start_optimization
 
     snap = await start_optimization(
@@ -410,7 +403,6 @@ async def test_start_optimization_accepts_json_string_and_echoes_resolved(
     # Issue #1 + #9: a JSON-*string* optimization arg is honored (not silently
     # downgraded), and the resolved settings are echoed in the snapshot and the
     # results so a downgrade would be unmissable.
-    pytest.importorskip("openswmm_gymnasium")
     from openswmm_mcp.gym_support.run_tools import get_job_results, start_optimization
 
     snap = await start_optimization(

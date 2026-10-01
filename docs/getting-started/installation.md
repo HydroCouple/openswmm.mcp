@@ -21,6 +21,16 @@ pip install "openswmm.mcp[dev]"    # tests and linting
 pip install "openswmm.mcp[docs]"   # Sphinx documentation
 ```
 
+The gym tools require `openswmm.gymnasium >= 0.1.0.dev0`; the PyPI `0.0.0`
+placeholder does not include the spec API. Until a compatible release is
+published, use a companion checkout that includes `openswmm_gymnasium.spec`
+and install it before the gym extra:
+
+```bash
+pip install -e "../openswmm.gymnasium[spec]"
+pip install 'openswmm.mcp[gym]'
+```
+
 The gym tools are registered only with `OPENSWMM_MCP_TOOLSETS=core,gym`; see
 {doc}`configuration`, which also covers Claude Desktop.
 

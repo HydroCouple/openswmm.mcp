@@ -15,7 +15,7 @@ from openswmm_mcp.auth import create_auth
 from openswmm_mcp.config import ServerSettings
 from openswmm_mcp.dependencies import server_lifespan, toolsets
 from openswmm_mcp.prompts.workflows import prompts_mcp
-from openswmm_mcp.resources import resources_mcp
+from openswmm_mcp.resources import register_resources
 from openswmm_mcp.skills import skills_mcp
 from openswmm_mcp.tools import access, model, results
 
@@ -72,7 +72,7 @@ def build_server(settings: ServerSettings | None = None) -> FastMCP:
         from openswmm_mcp.tools.code import run_python
 
         server.tool(run_python)
-    server.mount(resources_mcp)
+    register_resources(server)
     server.mount(prompts_mcp)
     server.mount(skills_mcp)
     return server

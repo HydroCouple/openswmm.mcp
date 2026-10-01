@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 pytest.importorskip("fastmcp")
+pytest.importorskip("openswmm_gymnasium")
 
 from openswmm_mcp.config import ServerSettings
 from openswmm_mcp.errors import ToolError
@@ -61,7 +62,6 @@ async def test_pareto_filter_accepts_json_string_front_via_binding_layer():
     # BeforeValidator decodes it), NOT fail with a pydantic list/dict_type
     # error before the tool body ever runs. Goes through mcp.call_tool to
     # exercise that binding layer (a plain function call would bypass it).
-    pytest.importorskip("openswmm_gymnasium")
     from openswmm_mcp.config import ServerSettings
     from openswmm_mcp.server import build_server
 
@@ -119,7 +119,6 @@ def test_pick_evaluation(tmp_path):
 
 @pytest.mark.integration
 async def test_score_front_matches_direct_calls(output_dir):
-    pytest.importorskip("openswmm_gymnasium")
     import numpy as np
     from openswmm_gymnasium import scoring
 
@@ -164,7 +163,6 @@ async def test_score_front_matches_direct_calls(output_dir):
 
 @pytest.mark.integration
 async def test_pareto_filter_inline(output_dir):
-    pytest.importorskip("openswmm_gymnasium")
     from openswmm_mcp.gym_support.score_tools import pareto_filter
 
     ctx = _Ctx(str(output_dir))
@@ -222,7 +220,6 @@ async def _finished_job(ctx, job_manager, config: dict, out: Path, seed: int) ->
 
 @pytest.mark.integration
 async def test_compare_runs_and_apply_design(output_dir, session_manager, inp_path):
-    pytest.importorskip("openswmm_gymnasium")
     from openswmm_mcp.gym_support.score_tools import apply_design, compare_runs
 
     job_manager = JobManager(max_workers=2)
