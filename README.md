@@ -70,7 +70,7 @@ The gym tools need the `gym` extra (`pip install "openswmm-mcp[gym]"`) and
 ### Requirements
 
 - Python 3.10+
-- `openswmm >= 6.0.0a4` built with `openswmm.engine.catalog` (the OpenSWMM engine Python bindings)
+- `openswmm >= 6.0.0a4.dev1` built with `openswmm.engine.catalog` (the OpenSWMM engine Python bindings)
 - `fastmcp >= 3.2`
 - `pydantic >= 2.0`
 - `numpy >= 1.21`

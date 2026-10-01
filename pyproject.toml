@@ -29,7 +29,7 @@ dependencies = [
     "pydantic-settings>=2.0",
     "numpy>=1.21",
     # The handle-based v6 engine with its API catalog (openswmm.engine.catalog).
-    "openswmm>=6.0.0a4",
+    "openswmm>=6.0.0a4.dev1",
 ]
 
 [project.optional-dependencies]

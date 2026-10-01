@@ -91,9 +91,9 @@ Alternatively, if you installed with `uv` and want to use the `uvx` runner:
 ## Requirements
 
 - **Python**: 3.10 or later
-- **OpenSWMM Engine**: `openswmm>=6.0.0a1` (the compiled C engine bindings
-  must be available for simulation features; the server can start without them
-  but tools that call the engine will fail)
+- **OpenSWMM Engine**: `openswmm>=6.0.0a4.dev1` (required compiled engine
+  bindings, including `openswmm.engine.catalog`). Later development builds
+  and the completed `6.0.0a4` release satisfy this minimum.
 
 ## Verifying the Installation
 

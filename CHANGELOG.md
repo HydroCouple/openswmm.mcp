@@ -22,7 +22,7 @@ version is now `0.2.0.dev0`.
 - **The SWMM 5 (legacy) backend.** Every session runs the handle-based
   OpenSWMM 6 engine. `save(profile="SWMM5")` still writes a SWMM 5 compatible
   `.inp`.
-- The `engine` optional extra: `openswmm>=6.0.0a4` is now a required
+- The `engine` optional extra: `openswmm>=6.0.0a4.dev1` is now a required
   dependency, and the server needs an engine build that ships
   `openswmm.engine.catalog`.
 - `openswmm_mcp.gym_support.config`, `.registry` and `.envs`: the environment
