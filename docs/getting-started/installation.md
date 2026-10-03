@@ -1,0 +1,122 @@
+# Installation
+
+## From PyPI
+
+The simplest way to install the OpenSWMM MCP Server is via pip:
+
+```bash
+pip install openswmm.mcp
+```
+
+This installs the server and all required runtime dependencies (`fastmcp`,
+`openswmm`, `pydantic`, `pydantic-settings`, `numpy`). The engine must be a
+build that ships `openswmm.engine.catalog`, which every catalog-driven tool
+reads.
+
+## Optional extras
+
+```bash
+pip install "openswmm.mcp[gym]"    # gym tools: openswmm.gymnasium with its spec extra
+pip install "openswmm.mcp[dev]"    # tests and linting
+pip install "openswmm.mcp[docs]"   # Sphinx documentation
+```
+
+The gym tools require `openswmm.gymnasium >= 0.1.0.dev0`; the PyPI `0.0.0`
+placeholder does not include the spec API. Until a compatible release is
+published, use a companion checkout that includes `openswmm_gymnasium.spec`
+and install it before the gym extra:
+
+```bash
+pip install -e "../openswmm.gymnasium[spec]"
+pip install 'openswmm.mcp[gym]'
+```
+
+The gym tools are registered only with `OPENSWMM_MCP_TOOLSETS=core,gym`; see
+{doc}`configuration`, which also covers Claude Desktop.
+
+## From Source
+
+Clone the repository and install in editable mode:
+
+```bash
+git clone https://github.com/HydroCouple/openswmm.mcp.git
+cd openswmm.mcp
+pip install -e ".[dev]"
+```
+
+The `[dev]` extra includes testing and linting tools (`pytest`, `pytest-asyncio`,
+`pytest-cov`, `ruff`).
+
+## With uv
+
+If you use [uv](https://github.com/astral-sh/uv) for fast Python package
+management:
+
+```bash
+uv pip install openswmm.mcp
+```
+
+Or for development:
+
+```bash
+uv pip install -e ".[dev]"
+```
+
+## With Claude Code
+
+The OpenSWMM MCP Server integrates directly with
+[Claude Code](https://docs.anthropic.com/en/docs/claude-code) as an MCP
+server. Add the following to your `.claude/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "openswmm": {
+      "command": "openswmm.mcp",
+      "args": [],
+      "env": {
+        "OPENSWMM_MCP_WORKING_DIR": "/path/to/your/models"
+      }
+    }
+  }
+}
+```
+
+Alternatively, if you installed with `uv` and want to use the `uvx` runner:
+
+```json
+{
+  "mcpServers": {
+    "openswmm": {
+      "command": "uvx",
+      "args": ["openswmm.mcp"],
+      "env": {
+        "OPENSWMM_MCP_WORKING_DIR": "/path/to/your/models"
+      }
+    }
+  }
+}
+```
+
+## Requirements
+
+- **Python**: 3.10 or later
+- **OpenSWMM Engine**: `openswmm>=6.0.0a4.dev1` (required compiled engine
+  bindings, including `openswmm.engine.catalog`). Later development builds
+  and the completed `6.0.0a4` release satisfy this minimum.
+
+## Verifying the Installation
+
+After installing, verify that the server starts correctly:
+
+```bash
+python -m openswmm_mcp
+```
+
+This launches the server in stdio transport mode. Press `Ctrl+C` to stop it.
+
+You can also check the installed version:
+
+```bash
+python -c "import openswmm_mcp; print(openswmm_mcp.__version__)"
+```

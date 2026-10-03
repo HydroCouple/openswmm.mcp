@@ -1,0 +1,22 @@
+# NOTE: This file has been superseded by .github/workflows/documentation.yml,
+# which matches the naming convention used in openswmm.engine and adds the
+# qualified Pages deploy URL via `environment.url`.
+#
+# Sandbox tooling could not delete this file in place. After pulling the
+# branch, run:
+#
+#     git rm .github/workflows/docs.yml
+#
+# A no-op trigger is left here so GitHub Actions does not error out on
+# this file's presence.
+
+name: Documentation (deprecated — see documentation.yml)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  noop:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "This workflow has been renamed. See documentation.yml."
