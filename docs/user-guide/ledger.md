@@ -23,7 +23,7 @@ Each commit produces two things:
 
 | Half | Contents | Share it? |
 |---|---|---|
-| Public | `tally_id`, `root`, `fact_count`, `meta`, `schema` | Yes. Safe to send to a reviewer. |
+| Public | `tally_id`, `root`, `fact_count`, `meta`, `schema`, and `sources_root` with the `sources` it covers (see [Provenance ledger](#provenance-ledger)) | Yes. Safe to send to a reviewer. |
 | Private | The `.tally.json` file under the session folder, which holds the salt, every fact and its leaf hash | Never. The salt lets anyone rebuild and test every fact. |
 
 `tally(action="root")` and `tally(action="list")` return only the public half.
@@ -232,28 +232,34 @@ listed entries and the `sha256sum` of each file. The Phase 1 fact root is unchan
 
 ### Worked example
 
-The test run on the reference model used `local:feet`, a buffer of 25 around
-link C2, and the `id_match` rule on `FACILITYID`. The result:
-
-- 4 features returned: three at distance 0.0 (`intersects`) and one at 9.18 ft
-  (`within_buffer`).
-- Excluded: `outside_buffer` 1; `crs_incompatible` 1 (an EPSG:2236 survey layer,
-  slug `crs_mismatch`); `retired` 0; `not_yet_valid` 0.
-- 9 model elements within the buffer.
-- C2 carries 5 fact ids from the latest tally.
-- 1 document mention of C2.
-- `provenance`: `buffer` 25, `buffer_unit` "ft", `crs` "local:feet",
-  `crs_source` "map_units".
-
-The call sequence:
+On the reference model (no CRS, so the frame is `local:feet`), with a small
+GeoJSON layer of pipes and nodes whose `FACILITYID` matches model ids and an
+inspection note that mentions C2, run after `open_model` and `run` on session `mp`:
 
 ```text
 sources(action="register", path="pipes.geojson", role="network", crs="local:feet")
 sources(action="register", path="inspection.md", role="document")
 sources(action="link", session_id="mp", source_id="pipes",
         rule="id_match", params={"key": "FACILITYID"})
+tally(action="commit", session_id="mp")
 locate(session_id="mp", element_kind="link", element_id="C2", buffer=25)
 ```
+
+The `locate` result:
+
+- 3 features, all at distance 0.0 (`intersects`): the pipe linked to C2 and
+  the two node features at its ends.
+- Excluded: `outside_buffer` 1, `retired` 0, `not_yet_valid` 0, and no
+  `crs_incompatible` sources.
+- 9 model elements within 25 ft of C2.
+- C2 carries 5 fact ids from the tally just committed.
+- 1 document mention of C2.
+- `provenance`: `buffer` 25, `buffer_unit` "ft", `crs` "local:feet",
+  `crs_source` "map_units", `spatial` true, sources `pipes` and `inspection`.
+
+Had a third layer in EPSG:2236 been registered, it would appear under
+`excluded.crs_incompatible` with slug `crs_mismatch` and a warning, and the
+other two sources would still be searched.
 
 `locate` returns `elements`, `features`, `mentions`, `excluded`, `warnings` and
 `provenance`. Read `provenance` before quoting any distance: it states the unit.
