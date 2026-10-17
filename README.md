@@ -39,6 +39,8 @@ new tool code.
 - **Results** -- `timeseries`, `report`, `compare`, `export`
 - **Gym** (`OPENSWMM_MCP_TOOLSETS=core,gym`) -- `gym_describe`, `gym_config`,
   `gym_env`, `gym_job`, `gym_score`
+- **Ledger** (`OPENSWMM_MCP_TOOLSETS=core,ledger`) -- `tally` commits a finished run's
+  facts to a salted hash tree and checks narratives claim by claim
 
 See the [tools guide](docs/user-guide/tools.md) for details and the v1-to-v2
 mapping.
@@ -182,7 +184,7 @@ All settings are controlled via environment variables with the `OPENSWMM_MCP_` p
 | `OPENSWMM_MCP_TRANSPORT` | `"stdio"` | Transport protocol: `stdio`, `http`, or `sse` |
 | `OPENSWMM_MCP_HTTP_PORT` | `8080` | Port for HTTP/SSE transport |
 | `OPENSWMM_MCP_LOG_LEVEL` | `"INFO"` | Logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
-| `OPENSWMM_MCP_TOOLSETS` | `"core"` | Tool sets to register: `core`, or `core,gym` for the gym tools |
+| `OPENSWMM_MCP_TOOLSETS` | `"core"` | Tool sets to register: `core`, `core,gym` for the gym tools, or `core,ledger` for the `tally` tool (combinable: `core,gym,ledger`) |
 | `OPENSWMM_MCP_ENABLE_PYTHON` | `false` | Register `run_python` (stdio transport only; runs code with the server's permissions) |
 | `OPENSWMM_MCP_OAUTH_ISSUER` | `None` | OAuth issuer URL for JWT validation |
 | `OPENSWMM_MCP_OAUTH_AUDIENCE` | `None` | Expected OAuth audience claim |

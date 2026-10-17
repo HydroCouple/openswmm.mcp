@@ -31,7 +31,8 @@ CORE = {
     "export",
 }
 GYM = {"gym_describe", "gym_config", "gym_env", "gym_job", "gym_score"}
-MAX_TOOLS = 20
+LEDGER = {"tally"}
+MAX_TOOLS = 24  # core 14 + gym 5 + ledger 3 + run_python 1 = 23
 MAX_CHARS = 40_000  # ~11k tokens for every tool definition together
 
 
@@ -47,7 +48,7 @@ async def test_core_tool_set():
     assert names == CORE
 
 
-@pytest.mark.parametrize("toolsets", ["core", "core,gym"])
+@pytest.mark.parametrize("toolsets", ["core", "core,gym", "core,ledger", "core,gym,ledger"])
 async def test_tool_definitions_fit_the_budget(toolsets):
     definitions = await _definitions(ServerSettings(toolsets=toolsets, enable_python=True))
     size = len(json.dumps(definitions))
@@ -58,6 +59,16 @@ async def test_tool_definitions_fit_the_budget(toolsets):
 async def test_gym_toolset_adds_five_tools():
     names = {d["name"] for d in await _definitions(ServerSettings(toolsets="core,gym"))}
     assert names == CORE | GYM
+
+
+async def test_ledger_toolset_adds_tally():
+    names = {d["name"] for d in await _definitions(ServerSettings(toolsets="core,ledger"))}
+    assert names == CORE | LEDGER
+
+
+async def test_ledger_is_off_by_default():
+    names = {d["name"] for d in await _definitions(ServerSettings(toolsets="core"))}
+    assert not names & LEDGER
 
 
 async def test_run_python_is_opt_in_and_stdio_only():

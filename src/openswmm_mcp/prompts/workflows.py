@@ -102,3 +102,22 @@ def explain_results(session_id: str = "default") -> str:
         "report(..., 'mass_balance'). Say what was simulated, where the system struggles, how "
         "confident the numbers are (continuity errors) and what could be done."
     )
+
+
+@prompts_mcp.prompt()
+def verified_narrative(session_id: str = "default") -> str:
+    """Write a results narrative whose every number is verified against a tally."""
+    return (
+        f"Write a verified narrative about the results of session '{session_id}'. "
+        "Needs the ledger toolset (OPENSWMM_MCP_TOOLSETS=core,ledger).\n"
+        f"1. run(session_id='{session_id}', until='end') if it has not finished.\n"
+        f"2. tally(action='commit', session_id='{session_id}'), then "
+        "tally(action='facts', tally_id=...) to list fact ids, values and units.\n"
+        "3. Write the narrative quoting values and units exactly, with a citation "
+        "[f:kind:entity:attr] after every number. Cite every non-zero diagnostic and every "
+        "continuity_error_pct fact, or dismiss it by id. No unit conversion, no 'approximately'.\n"
+        "4. tally(action='verify', tally_id=..., claims=[{'fact_id': ..., 'value': ...}], "
+        "narrative=...). If summary.status is not 'verified', fix the narrative (never the "
+        "tally) using coverage.uncited, bare and the closest matches, and verify again.\n"
+        "End with: verified against tally <tally_id>, N claims, coverage X (root <root>)."
+    )

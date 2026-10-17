@@ -31,6 +31,13 @@ version is now `0.2.0.dev0`.
 
 ### Added
 
+- **Optional ledger toolset** (`OPENSWMM_MCP_TOOLSETS=core,ledger`): one `tally`
+  tool commits a finished run's facts to a salted hash tree, lists them for
+  citation, verifies claims and narratives claim by claim, and discloses single
+  facts to a reviewer. A `verified-narrative` skill and prompt walk a writer through
+  citing every number. Reviewers can check a disclosed fact offline with
+  `python -m openswmm_mcp.ledger verify-proof`, given only the root and fact count.
+  Standard library only; see `docs/user-guide/ledger.md`.
 - **14 core tools**: `open_model`, `run`, `session`, `save`, `describe`,
   `find`, `get`, `set`, `call`, `edit`, `timeseries`, `report`, `compare`,
   `export`. `describe`, `find`, `get`, `set` and `call` are driven by the

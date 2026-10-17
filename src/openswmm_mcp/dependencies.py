@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from fastmcp import Context
@@ -10,6 +11,7 @@ from fastmcp.server.lifespan import lifespan
 
 from openswmm_mcp.config import ServerSettings
 from openswmm_mcp.errors import ErrorCode, ToolError
+from openswmm_mcp.ledger.store import LedgerStore
 from openswmm_mcp.session import SessionManager, SimSession
 
 if TYPE_CHECKING:
@@ -58,9 +60,15 @@ async def server_lifespan(server) -> AsyncIterator[dict]:
 
         context["env_manager"] = EnvManager()
         context["job_manager"] = JobManager()
+    if "ledger" in toolsets(settings):
+        context["ledger_store"] = LedgerStore(
+            Path(settings.working_dir).expanduser().resolve() / ".ledger.sqlite"
+        )
     try:
         yield context
     finally:
+        if "ledger_store" in context:
+            context["ledger_store"].close()
         logger.info("OpenSWMM MCP server shutting down -- cleaning up sessions")
         if "job_manager" in context:
             context["job_manager"].shutdown()
@@ -96,6 +104,10 @@ def get_env_manager(ctx: Context):
 
 def get_job_manager(ctx: Context):
     return _lifespan_item(ctx, "job_manager")
+
+
+def get_ledger_store(ctx: Context) -> LedgerStore:
+    return _lifespan_item(ctx, "ledger_store")
 
 
 async def get_session(ctx: Context, session_id: str) -> SimSession:

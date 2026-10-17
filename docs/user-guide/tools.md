@@ -1,8 +1,8 @@
 # Tools
 
-The server registers **14 core tools**, **5 optional gym tools** and one opt-in
-`run_python` tool. Together their definitions are about 17k characters (under
-5k tokens), so every MCP client, including Claude Desktop, can load them.
+The server registers **14 core tools**, **5 optional gym tools**, **1 optional ledger
+tool** and one opt-in `run_python` tool. Together their definitions are about 19k characters
+(about 5k tokens), so every MCP client, including Claude Desktop, can load them.
 
 The engine exposes over a thousand functions. Instead of one tool per function,
 five generic tools (`describe`, `find`, `get`, `set`, `call`) read the engine's
@@ -96,6 +96,12 @@ folder and reopens it before initialising, so derived data is rebuilt.
 Environment specs can observe any numeric engine field through
 `observations.fields` (`{"link.stats.max_flow": ["C1"]}`) and actuate any
 writable one through the `field_setpoint` runtime factory.
+
+## Ledger tool (`OPENSWMM_MCP_TOOLSETS=core,ledger`)
+
+| Tool | Actions |
+|---|---|
+| `tally(action, ...)` | `commit`, `facts`, `verify`, `prove`, `root`, `list`. Commits a finished run's facts to a salted hash tree, lists them for citation, verifies claims and narratives, and discloses single facts to a reviewer. See [the ledger guide](ledger.md). |
 
 ## `run_python` (opt-in)
 
