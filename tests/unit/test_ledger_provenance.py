@@ -320,12 +320,14 @@ async def test_changed_file_is_an_update_with_stale_edge_warning(model, output_d
     assert any("lineage edges refer to the previous version" in w for w in changed["warnings"])
     listed = await model("sources", action="list")
     rows = [s for s in listed["sources"] if s["source_id"] == "pipes"]
-    assert len(rows) == 2  # an update is two rows: the old version retired, the new active
+    assert len(rows) == 2  # an update is two rows: the old version closed, the new active
     by_status = {r["status"]: r["sha256"] for r in rows}
     assert by_status == {
         "active": changed["source"]["sha256"],
-        "retired": first["source"]["sha256"],
+        "superseded": first["source"]["sha256"],
     }
+    loc = await model("locate", session_id="s", element_kind="node", element_id="J2")
+    assert loc["excluded"]["retired"] == 0  # an update is not a retirement
     again = await _register_network(model, output_dir, extra=[_point(1, 1, "J3", "added")])
     assert again["status"] == "unchanged"
 
@@ -378,3 +380,99 @@ async def test_sources_root_matches_listed_sources_and_changes_with_update(model
     await _link_ids(model)
     two = await model("tally", action="commit", session_id="s")
     assert two["sources_root"] and two["sources_root"] != one["sources_root"]
+
+
+# --- review fixes --------------------------------------------------------------------------
+
+
+_NO_GEOM = {
+    "type": "Feature",
+    "id": "n11-nogeom",
+    "properties": {"FACILITYID": "J11"},
+    "geometry": None,
+}
+
+
+async def test_id_match_and_manual_see_null_geometry_features(model, output_dir):
+    _write_geojson(output_dir / "table.geojson", [_NO_GEOM, _point(*J2, "J2", "n2")])
+    await model("sources", action="register", path="table.geojson", role="nodes", crs="local:feet")
+    link = await model(
+        "sources", action="link", session_id="s", source_id="table", rule="id_match",
+        params={"key": "FACILITYID", "kinds": ["node"]},
+    )  # fmt: skip
+    matched = {(e["element_id"], e["feature_key"]) for e in link["edges"]}
+    assert ("J11", "n11-nogeom") in matched and ("J2", "n2") in matched
+    manual = await model(
+        "sources", action="link", session_id="s", source_id="table", rule="manual",
+        params={"edges": [{"element_kind": "node", "element_id": "J10",
+                           "feature_key": "n11-nogeom"}]},
+    )  # fmt: skip
+    assert manual["added"] == 1 and manual["unmatched"]["count"] == 0
+
+
+async def test_nearest_skips_null_geometry_with_warning(model, output_dir):
+    _spatial()
+    _write_geojson(output_dir / "table.geojson", [_NO_GEOM, _point(J2[0] + 3, J2[1], "x", "k")])
+    await model("sources", action="register", path="table.geojson", role="nodes", crs="local:feet")
+    link = await model(
+        "sources", action="link", session_id="s", source_id="table", rule="nearest",
+        params={"max_distance": 5, "kinds": ["node"]},
+    )  # fmt: skip
+    assert [(e["element_id"], e["feature_key"]) for e in link["edges"]] == [("J2", "k")]
+    assert any("no geometry" in w for w in link["warnings"])
+
+
+async def test_corrected_csv_with_same_span_is_an_update(model, output_dir):
+    rain = output_dir / "rain.csv"
+    rain.write_text("time,rain\n2024-03-01T00:00:00,0.1\n2024-03-01T06:00:00,0.4\n")
+    first = await model("sources", action="register", path="rain.csv", role="rain")
+    assert first["source"]["valid_from"].startswith("2024-03-01T00:00:00")
+    rain.write_text("time,rain\n2024-03-01T00:00:00,0.1\n2024-03-01T06:00:00,0.5\n")
+    second = await model("sources", action="register", path="rain.csv", role="rain")
+    assert second["status"] == "updated"
+    listed = await model("sources", action="list")
+    rows = [r for r in listed["sources"] if r["source_id"] == "rain"]
+    assert sorted(r["status"] for r in rows) == ["active", "superseded"]
+
+
+async def test_one_bad_geometry_skips_that_feature_only(model, output_dir):
+    _spatial()
+    bad = {
+        "type": "Feature",
+        "id": "flat",
+        "properties": {"FACILITYID": "x"},
+        "geometry": {"type": "Polygon", "coordinates": [[list(J2), list(J11)]]},
+    }
+    await _register_network(model, output_dir, extra=[bad])
+    loc = await model("locate", session_id="s", element_kind="node", element_id="J2")
+    keys = {f["feature_key"] for f in loc["features"]}
+    assert {"n2", "p2"} <= keys and "flat" not in keys
+    assert loc["excluded"]["crs_incompatible"] == []
+    assert any("'flat'" in w for w in loc["warnings"])
+    link = await model(
+        "sources", action="link", session_id="s", source_id="pipes", rule="nearest",
+        params={"max_distance": 5, "kinds": ["node"]},
+    )  # fmt: skip
+    assert ("J2", "n2") in {(e["element_id"], e["feature_key"]) for e in link["edges"]}
+    assert any("'flat'" in w for w in link["warnings"])
+
+
+async def test_crs_none_refused_for_spatial_layers(model, output_dir):
+    _write_geojson(output_dir / "pipes.geojson", _network())
+    msg = await _expect(
+        model, "[VALIDATION_ERROR] bad_value:", "sources", action="register",
+        path="pipes.geojson", role="network", crs="none",
+    )  # fmt: skip
+    assert "local:" in msg
+
+
+async def test_degraded_provenance_lists_only_sources_read(model, output_dir, monkeypatch):
+    await _register_network(model, output_dir)
+    await _link_ids(model)
+    _write_geojson(output_dir / "other.geojson", [_point(*J2, "zz", "o1")])
+    await model("sources", action="register", path="other.geojson", role="survey", crs="local:feet")
+    import openswmm_mcp.tools.ledger as ledger_module
+
+    monkeypatch.setattr(ledger_module, "_spatial_available", lambda: False)
+    loc = await model("locate", session_id="s", element_kind="link", element_id="C2")
+    assert [s["id"] for s in loc["provenance"]["sources"]] == ["pipes"]

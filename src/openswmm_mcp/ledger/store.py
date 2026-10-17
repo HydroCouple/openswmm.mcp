@@ -622,7 +622,13 @@ class LedgerStore:
             scope += f" AND s.source_id IN ({', '.join(names)})"
         base = f"SELECT COUNT(*) FROM sources s WHERE {known('s')}{scope}"
         sql_future = base + " AND s.valid_from > :as_of"
-        sql_retired = base + " AND s.valid_to <= :as_of"
+        # A source is retired only when no version of it is valid at :as_of (an update
+        # closes the previous version, which is not a retirement).
+        sql_retired = (
+            f"SELECT COUNT(DISTINCT s.source_id) FROM sources s WHERE {known('s')}{scope} "
+            "AND s.valid_to <= :as_of AND NOT EXISTS (SELECT 1 FROM sources v "
+            f"WHERE v.source_id = s.source_id AND {known('v')} AND {valid('v')})"
+        )
         return self._read(
             lambda c: {
                 "not_yet_valid": c.execute(sql_future, params).fetchone()[0],
@@ -716,6 +722,26 @@ class LedgerStore:
             "props": json.loads(row["props_json"]),
             "recorded_at": row["recorded_at"],
         }
+
+    def features(
+        self,
+        source_id: str,
+        sha256: str,
+        as_known: str | None = None,
+        as_of: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Every visible feature of one source version, null geometries included."""
+        params: dict[str, Any] = {
+            "as_of": _t(as_of),
+            "as_known": _t(as_known),
+            "sid": source_id,
+            "sha": sha256,
+        }
+        sql = (
+            "SELECT f.* FROM features f WHERE f.source_id = :sid AND f.source_sha256 = :sha "
+            f"AND {_row_visible('f')} ORDER BY f.feature_key"
+        )
+        return self._read(lambda c: [self._feature(r) for r in c.execute(sql, params)], [])
 
     def features_in_bbox(
         self,

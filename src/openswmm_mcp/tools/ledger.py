@@ -369,6 +369,22 @@ _BBOX_INDEX = (
 )
 
 
+def _geometry_errors() -> tuple[type[BaseException], ...]:
+    """Errors that mean one feature's geometry is unusable (not its source's CRS)."""
+    import shapely.errors
+
+    return (shapely.errors.GEOSException, ValueError, TypeError)
+
+
+def _bad_features_warning(sid: str, keys: list[str]) -> str:
+    shown = ", ".join(repr(k) for k in keys[:10])
+    more = f" and {len(keys) - 10} more" if len(keys) > 10 else ""
+    return (
+        f"Source '{sid}': {len(keys)} feature(s) with unusable geometry were skipped "
+        f"({shown}{more})."
+    )
+
+
 def _refuse(code: str, slug: str, message: str) -> ToolError:
     return ToolError(f"[{code}] {slug}: {message}")
 
@@ -456,9 +472,17 @@ async def _current_source(store: LedgerStore, source_id: str) -> dict:
     return valid[-1]
 
 
-def _source_view(row: dict, now: str) -> dict:
+def _valid_at(row: dict, t: str) -> bool:
+    return (row["valid_from"] is None or row["valid_from"] <= t) and (
+        row["valid_to"] is None or t < row["valid_to"]
+    )
+
+
+def _source_view(row: dict, now: str, live: bool = False) -> dict:
+    """``status``: active; superseded (an earlier version of a live source); retired."""
     meta = row.get("meta") or {}
-    retired = row["valid_to"] is not None and row["valid_to"] <= now
+    ended = row["valid_to"] is not None and row["valid_to"] <= now
+    status = ("superseded" if live else "retired") if ended else "active"
     return {
         "source_id": row["source_id"],
         "path": row["path"],
@@ -473,7 +497,7 @@ def _source_view(row: dict, now: str) -> dict:
         "valid_to": row["valid_to"],
         "recorded_at": row["recorded_at"],
         "features": int(meta.get("feature_count", 0)),
-        "status": "retired" if retired else "active",
+        "status": status,
     }
 
 
@@ -564,6 +588,12 @@ async def _register(ctx: Context, store: LedgerStore, a: dict) -> dict:
                 "pip install pypdf. Register a .txt or .md copy otherwise."
             ) from exc
     crs = _label(a["crs"])
+    if crs == "none" and fmt in ("geojson", *_FILE_ONLY):
+        raise _invalid(
+            "bad_value",
+            f"crs='none' is for non-spatial sources, but {path.name} is a spatial layer. "
+            "Use 'local:<feet|meters>' for model coordinates without a CRS, or an EPSG code.",
+        )
     acquired = _time(a["acquired"], "acquired")
     rows = await asyncio.to_thread(store.sources, None, None, None, valid_only=False)
     source_id = a["source_id"] or _default_source_id(path, rows)
@@ -593,7 +623,9 @@ async def _register(ctx: Context, store: LedgerStore, a: dict) -> dict:
     elif fmt == "csv":
         span = await asyncio.to_thread(ingest.csv_span, path)
         meta.update(span)
-        valid_from = span.get("start")  # the first timestamp wins over acquired
+        if not any(r["source_id"] == source_id for r in rows):
+            # A new source starts at its first timestamp; an update starts at acquired/now.
+            valid_from = span.get("start")
         label = "none"
     else:
         label = "none"
@@ -705,7 +737,7 @@ async def _link(ctx: Context, store: LedgerStore, a: dict) -> dict:
     _, elements, meta = await _model(ctx, a["session_id"])
     model_sha = _model_sha(meta, a["session_id"])
     sid, sha = source["source_id"], source["sha256"]
-    features = await asyncio.to_thread(store.features_in_bbox, sid, sha, _EVERYWHERE)
+    features = await asyncio.to_thread(store.features, sid, sha)
     in_scope = [e for e in elements if not kinds or e["kind"] in kinds]
     warnings: list[str] = []
     distances: dict[tuple[str, str, str], float] = {}
@@ -737,16 +769,27 @@ async def _link(ctx: Context, store: LedgerStore, a: dict) -> dict:
             anchor = (c.x, c.y)
         try:
             frame = spatial.resolve_frame(model_label, [source["crs"]], anchor)
+            move = frame.transform_from(source["crs"])
             pairs = [(e, spatial.element_geometry(e, frame)) for e in in_scope]
-            feats = [
-                (f["feature_key"], spatial.source_geometry(f["geom"], source["crs"], frame))
-                for f in features
-                if f["geom"]
-            ]
         except CrsRefusal as exc:
             raise _from_crs(exc, sid) from exc
-        except Exception as exc:  # unreadable CRS text, failed transform
+        except Exception as exc:  # unreadable CRS text, failed transformer
             raise _invalid("bad_value", f"CRS {source['crs']} or {model_label}: {exc}") from exc
+        feats, bad, no_geom = [], [], 0
+        for f in features:
+            if not f["geom"]:
+                no_geom += 1
+                continue
+            try:
+                feats.append((f["feature_key"], move(spatial.shape(f["geom"]))))
+            except _geometry_errors():
+                bad.append(f["feature_key"])
+        if no_geom:
+            warnings.append(
+                f"{no_geom} feature(s) of '{sid}' have no geometry; nearest skips them."
+            )
+        if bad:
+            warnings.append(_bad_features_warning(sid, bad))
         found = spatial.nearest(pairs, feats, float(params["max_distance"]))
         echo = {
             "max_distance": float(params["max_distance"]),
@@ -867,8 +910,9 @@ async def sources(
     if action == "list":
         now = utc_now()
         rows = await asyncio.to_thread(store.sources, now, now, None, valid_only=False)
+        live = {r["source_id"] for r in rows if _valid_at(r, now)}
         return {
-            "sources": [_source_view(r, now) for r in rows],
+            "sources": [_source_view(r, now, r["source_id"] in live) for r in rows],
             "ledger_path": str(store.path),
             "index": store.index,
             "warnings": [_BBOX_INDEX] if store.index == "bbox" else [],
@@ -1112,23 +1156,25 @@ async def locate(
         box = (minx - buffer, miny - buffer, maxx + buffer, maxy + buffer)
 
         def _search() -> tuple[list[dict], int, list[str], list[dict]]:
-            found, missed, moved, dropped = [], 0, [], []
+            found, missed, moved, dropped, notes = [], 0, [], [], warnings
             for r in usable:
                 sid, sha, label = r["source_id"], r["sha256"], r["crs"]
                 try:
                     env = spatial.envelope_for(label, frame, box)
-                    cands = [
-                        (f, spatial.source_geometry(f["geom"], label, frame))
-                        for f in store.features_in_bbox(sid, sha, env, t_known, t_of)
-                        if f["geom"]
-                    ]
-                    total = sum(
-                        1 for f in store.features_in_bbox(sid, sha, _EVERYWHERE, t_known, t_of)
-                    )
-                except Exception as exc:  # unreadable CRS text
+                    move = frame.transform_from(label)
+                except Exception as exc:  # unreadable CRS text, failed transformer
                     dropped.append({"source_id": sid, "crs": label, "slug": "crs_unknown",
                                     "reason": f"CRS could not be read: {exc}"})  # fmt: skip
                     continue
+                cands, bad = [], []
+                for f in store.features_in_bbox(sid, sha, env, t_known, t_of):
+                    if not f["geom"]:
+                        continue
+                    try:
+                        cands.append((f, move(spatial.shape(f["geom"]))))
+                    except _geometry_errors():
+                        bad.append(f["feature_key"])
+                total = len(store.features_in_bbox(sid, sha, _EVERYWHERE, t_known, t_of))
                 if label in frame.reprojected:
                     moved.append(sid)
                 got = spatial.within(anchor, cands, buffer)
@@ -1144,10 +1190,15 @@ async def locate(
                         continue
                     seen.add(f["feature_key"])
                     d = None
-                    if f["geom"]:
-                        d = float(anchor.distance(spatial.source_geometry(f["geom"], label, frame)))
+                    if f["geom"] and f["feature_key"] not in bad:
+                        try:
+                            d = float(anchor.distance(move(spatial.shape(f["geom"]))))
+                        except _geometry_errors():
+                            bad.append(f["feature_key"])
                     found.append(_feature_row(f, r, d, "lineage"))
-                missed += max(0, total - len(seen))
+                missed += max(0, total - len(seen) - len(set(bad) - seen))
+                if bad:
+                    notes.append(_bad_features_warning(sid, sorted(set(bad))))
             return found, missed, moved, dropped
 
         hits, outside, reprojected, dropped = await asyncio.to_thread(_search)
@@ -1165,6 +1216,10 @@ async def locate(
             r = usable_ids.get(f["source_id"])
             if r is not None and r["sha256"] == f["source_sha256"]:
                 hits.append(_feature_row(f, r, None, "lineage"))
+        # Without the extra no buffer search ran: only sources that gave a lineage feature
+        # were actually read.
+        returned = {h["source_id"] for h in hits}
+        usable_ids = {k: v for k, v in usable_ids.items() if k in returned}
         if anchor_el is not None:
             near = [(anchor_el, 0.0)]
 

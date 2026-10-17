@@ -184,7 +184,8 @@ def test_update_is_two_rows_and_bitemporal(output_dir):
     # known before the update: only the original, open row
     assert shas("2026-07-01", t_first) == [SHA_A]
     assert s.excluded_counts("2025-12-01")["not_yet_valid"] == 2
-    assert s.excluded_counts("2026-07-01")["retired"] == 1
+    # An update closes the old version but the source is still live: not "retired".
+    assert s.excluded_counts("2026-07-01")["retired"] == 0
     assert s.source_version("pipes", SHA_A)["sha256"] == SHA_A
     assert s.source_version("pipes", SHA_A, as_of="2026-07-01") is None
     with pytest.raises(LedgerError) as err:
@@ -402,3 +403,35 @@ def test_predicates_verbatim():
         "(s.valid_from IS NULL OR s.valid_from <= :as_of) AND "
         "(s.valid_to IS NULL OR :as_of < s.valid_to)"
     )
+
+
+def test_features_include_null_geometry(output_dir):
+    s = _store(output_dir)
+    _reg(s)
+    s.add_features(
+        "pipes",
+        SHA_A,
+        [
+            {"feature_key": "a", "geom": {"type": "Point", "coordinates": [1, 2]},
+             "bbox": (1, 2, 1, 2), "props": {"ID": "J1"}},
+            {"feature_key": "b", "geom": None, "bbox": None, "props": {"ID": "J2"}},
+        ],
+    )  # fmt: skip
+    assert [f["feature_key"] for f in s.features("pipes", SHA_A)] == ["a", "b"]
+    everywhere = (-1e300, -1e300, 1e300, 1e300)
+    assert [f["feature_key"] for f in s.features_in_bbox("pipes", SHA_A, everywhere)] == ["a"]
+    assert s.features("pipes", SHA_B) == []
+    s.retire_source("pipes")
+    assert s.features("pipes", SHA_A) == []  # the version is no longer valid
+    s.close()
+
+
+def test_retired_counts_sources_without_a_valid_version(output_dir):
+    s = _store(output_dir)
+    _reg(s, acquired="2026-01-01")
+    _reg(s, sha=SHA_B, valid_from="2026-03-01")
+    assert s.excluded_counts("2026-04-01")["retired"] == 0
+    s.retire_source("pipes", "2026-05-01")
+    assert s.excluded_counts("2026-06-01")["retired"] == 1  # one source, two closed versions
+    assert s.excluded_counts("2026-04-01")["retired"] == 0
+    s.close()
