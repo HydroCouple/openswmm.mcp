@@ -42,6 +42,12 @@ new tool code.
 - **Ledger** (`OPENSWMM_MCP_TOOLSETS=core,ledger`) -- `tally` commits a finished run's
   facts to a salted hash tree and checks narratives claim by claim
 
+> **Ledger limitation (SI models):** `tally` commits the system volume facts
+> (`total_flooding`, `total_outflow`) only after checking their unit against the
+> `.rpt` "Flow Routing Continuity" block. That check has been tested on US-unit
+> models only. It still needs an SI test model; until one is added, SI models may
+> have these two facts listed under `dropped` instead of committed.
+
 See the [tools guide](docs/user-guide/tools.md) for details and the v1-to-v2
 mapping.
 
