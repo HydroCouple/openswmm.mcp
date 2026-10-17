@@ -4,6 +4,7 @@ Tool sets (``OPENSWMM_MCP_TOOLSETS``):
 
 * ``core`` (always) -- 14 tools: sessions and runs, catalog access, results.
 * ``gym`` -- 5 tools for openswmm.gymnasium environments and optimisation jobs.
+* ``ledger`` -- 3 tools: ``tally``, ``sources``, ``locate`` (verifiable facts and provenance).
 * ``run_python`` -- registered only with ``OPENSWMM_MCP_ENABLE_PYTHON=true`` on stdio.
 """
 
@@ -26,7 +27,9 @@ INSTRUCTIONS = (
     "methods; find/get/set to read and write fields; call to run any listed method. Values "
     "are in the model's units (describe with session_id resolves them); enums are passed by "
     "name. Bundled skills (swmm://skills; load with the use_skill prompt): "
-    "capacity-assessment, calibrate-model, operational-optimization."
+    "capacity-assessment, calibrate-model, operational-optimization, "
+    "verified-narrative (needs the ledger toolset), and model-provenance "
+    "(needs the ledger toolset)."
 )
 
 CORE_TOOLS = (
@@ -67,6 +70,11 @@ def build_server(settings: ServerSettings | None = None) -> FastMCP:
             ) from exc
 
         for fn in gym.TOOLS:
+            server.tool(fn)
+    if "ledger" in toolsets(settings):
+        from openswmm_mcp.tools import ledger
+
+        for fn in ledger.TOOLS:
             server.tool(fn)
     if settings.enable_python and settings.transport == "stdio":
         from openswmm_mcp.tools.code import run_python

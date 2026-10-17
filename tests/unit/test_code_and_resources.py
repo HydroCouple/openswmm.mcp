@@ -36,6 +36,9 @@ TOOLS = {
     "gym_job",
     "gym_score",
     "use_skill",
+    "tally",
+    "sources",
+    "locate",
 }
 
 

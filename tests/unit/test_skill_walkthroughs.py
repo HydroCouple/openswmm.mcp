@@ -35,6 +35,18 @@ async def gym_tools(output_dir: Path, monkeypatch):
         yield Tools(client)
 
 
+@pytest.fixture
+async def ledger_tools(output_dir: Path, monkeypatch):
+    """A client to a server with the ledger toolset, as verified-narrative needs."""
+    monkeypatch.setenv("OPENSWMM_MCP_WORKING_DIR", str(output_dir))
+    monkeypatch.setenv("OPENSWMM_MCP_LOG_LEVEL", "WARNING")
+    monkeypatch.setenv("OPENSWMM_MCP_TOOLSETS", "core,ledger")
+    from openswmm_mcp.server import build_server
+
+    async with Client(build_server()) as client:
+        yield Tools(client)
+
+
 async def _results(tools, session_id: str) -> None:
     """Skill step 0: reuse ENDED results, otherwise run to the end."""
     state = await tools("session", action="state", session_id=session_id)
@@ -248,3 +260,106 @@ async def test_operational_optimization(gym_tools, output_dir):
     applied = await tools("gym_score", action="apply_design", job_id=job["job_id"])
     written = json.loads(Path(applied["schedule_path"]).read_text())
     assert len(written["schedule"]["ORIF"]) == 4
+
+
+async def test_verified_narrative(ledger_tools, inp_path):
+    tools = ledger_tools
+    # 1. Run to the end.
+    await tools("open_model", path=inp_path, session_id="vn")
+    await _results(tools, "vn")
+
+    # 2. Commit.
+    committed = await tools("tally", action="commit", session_id="vn")
+    tally_id, root = committed["tally_id"], committed["root"]
+    assert tally_id.startswith("vn/") and root
+
+    # 3. List the facts.
+    listing = await tools("tally", action="facts", tally_id=tally_id)
+    facts = listing["facts"]
+    assert facts
+
+    # 4-5. Narrative from the facts, citing every material diagnostic; claims from citations.
+    def material(f):
+        return (f["scope"] == "diagnostic" and f["value"] != 0) or f["attr"].endswith(
+            "continuity_error_pct"
+        )
+
+    cited = [f for f in facts if material(f)]
+    assert any(f["attr"].endswith("continuity_error_pct") for f in cited)
+    extra = [f for f in facts if f["id"].startswith("f:link:") and f["scope"] == "output"][:1]
+    sentences = []
+    claims = []
+    for f in [*extra, *cited]:
+        unit = f" {f['unit']}" if f["unit"] else ""
+        sentences.append(f"{f['entity']} {f['attr']} is {f['value']}{unit} [{f['id']}].")
+        claims.append({"fact_id": f["id"], "value": f["value"]})
+    narrative = " ".join(sentences)
+
+    # 6. Verify.
+    result = await tools(
+        "tally", action="verify", tally_id=tally_id, claims=claims, narrative=narrative
+    )
+    assert result["summary"]["status"] == "verified", result
+    assert result["coverage"]["uncited"] == [] and result["bare"] == []
+
+    # 7. Footer from the results.
+    footer = (
+        f"verified against tally {tally_id}, {len(claims)} claims, "
+        f"coverage {result['summary']['coverage']} (root {root})"
+    )
+    assert footer.startswith("verified against tally vn/") and "coverage 1.0" in footer
+
+
+async def test_model_provenance(ledger_tools, inp_path, output_dir):
+    tools = ledger_tools
+    await tools("open_model", path=inp_path, session_id="mp")
+    await _results(tools, "mp")
+
+    layer = output_dir / "pipes.geojson"
+    features = [
+        {
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [float(i), 0.0]},
+            "properties": {"FACILITYID": fid},
+        }
+        for i, fid in enumerate(["C2", "J2", "J11"])
+    ]
+    layer.write_text(json.dumps({"type": "FeatureCollection", "features": features}))
+    note = output_dir / "inspection.md"
+    note.write_text("# Inspection\n\nConduit C2 shows root intrusion near the outlet.\n")
+
+    reg = await tools("sources", action="register", path=str(layer), role="network",
+                      crs="local:feet")  # fmt: skip
+    await tools("sources", action="register", path=str(note), role="document", crs="local:feet")
+    source_id = reg["source"]["source_id"]
+    await tools("sources", action="link", session_id="mp", source_id=source_id,
+                rule="id_match", params={"key": "FACILITYID"})  # fmt: skip
+
+    # 1. List the sources.
+    listing = await tools("sources", action="list")
+    assert {s["role"] for s in listing["sources"]} >= {"network", "document"}
+
+    # 2. Lineage.
+    lineage = await tools("sources", action="lineage", session_id="mp",
+                          element_kind="link", element_id="C2")  # fmt: skip
+    assert lineage["count"] >= 1
+    edge = lineage["edges"][0]
+    assert edge["source_id"] == source_id and edge["feature_key"] and edge["rule"] == "id_match"
+
+    # 3. Locate.
+    found = await tools("locate", session_id="mp", element_kind="link", element_id="C2")
+    query = found["query"]
+    assert query["buffer_unit"] == "ft" and query["crs"] == "local:feet"
+    assert query["buffer"] == 25.0
+    c2 = next(e for e in found["elements"] if e["id"] == "C2")
+    assert any(x["source_id"] == source_id for x in c2["lineage"])
+    assert any("C2" in m["text"] for m in found["mentions"])
+    assert found["excluded"]["crs_incompatible"] == []
+    assert {"outside_buffer", "not_yet_valid", "retired"} <= set(found["excluded"])
+
+    # 4. The provenance block, verbatim.
+    prov = found["provenance"]
+    for key in ("buffer", "buffer_unit", "crs", "spatial", "sources", "model_sha256",
+                "as_of", "as_known", "ledger_path"):  # fmt: skip
+        assert key in prov
+    assert {s["id"] for s in prov["sources"]} >= {source_id}

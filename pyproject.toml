@@ -36,6 +36,11 @@ dependencies = [
 gym = [
     "openswmm.gymnasium[spec]>=0.1.0.dev0",
 ]
+# Spatial queries for the ledger toolset (buffer search, nearest, reprojection).
+ledger = [
+    "shapely>=2.0",
+    "pyproj>=3.4",
+]
 dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21",

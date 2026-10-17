@@ -1,8 +1,8 @@
 # Tools
 
-The server registers **14 core tools**, **5 optional gym tools** and one opt-in
-`run_python` tool. Together their definitions are about 17k characters (under
-5k tokens), so every MCP client, including Claude Desktop, can load them.
+The server registers **14 core tools**, **5 optional gym tools**, **3 optional ledger
+tools** and one opt-in `run_python` tool. Together their definitions are about 22k characters
+(about 5k tokens), so every MCP client, including Claude Desktop, can load them.
 
 The engine exposes over a thousand functions. Instead of one tool per function,
 five generic tools (`describe`, `find`, `get`, `set`, `call`) read the engine's
@@ -96,6 +96,14 @@ folder and reopens it before initialising, so derived data is rebuilt.
 Environment specs can observe any numeric engine field through
 `observations.fields` (`{"link.stats.max_flow": ["C1"]}`) and actuate any
 writable one through the `field_setpoint` runtime factory.
+
+## Ledger tools (`OPENSWMM_MCP_TOOLSETS=core,ledger`)
+
+| Tool | Actions |
+|---|---|
+| `tally(action, ...)` | `commit`, `facts`, `verify`, `prove`, `root`, `list`. Commits a finished run's facts to a salted hash tree, lists them for citation, verifies claims and narratives, and discloses single facts to a reviewer. See [the ledger guide](ledger.md). |
+| `sources(action, ...)` | `register`, `list`, `link`, `lineage`, `mentions`, `retire`. Registers the files a model was built from, links source features to model elements, and answers what produced an element or which documents mention it. Spatial links need the `ledger` extra. See [the ledger guide](ledger.md). |
+| `locate(session_id, ...)` | Returns the elements, source features, lineage, mentions and exclusions within a buffer of a model element or point, as true at `as_of` and known at `as_known`. Needs the `ledger` extra for buffer search. See [the ledger guide](ledger.md). |
 
 ## `run_python` (opt-in)
 

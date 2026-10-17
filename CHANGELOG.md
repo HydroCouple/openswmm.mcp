@@ -31,6 +31,25 @@ version is now `0.2.0.dev0`.
 
 ### Added
 
+- **Optional ledger toolset** (`OPENSWMM_MCP_TOOLSETS=core,ledger`): one `tally`
+  tool commits a finished run's facts to a salted hash tree, lists them for
+  citation, verifies claims and narratives claim by claim, and discloses single
+  facts to a reviewer. A `verified-narrative` skill and prompt walk a writer through
+  citing every number. Reviewers can check a disclosed fact offline with
+  `python -m openswmm_mcp.ledger verify-proof`, given only the root and fact count.
+  Standard library only; see `docs/user-guide/ledger.md`.
+- **Provenance ledger** (`core,ledger`): `sources` registers the files a
+  model was built from (GeoJSON, `.md`/`.txt`, `.csv`, `.inp`, with `.gpkg`/`.shp`
+  and PDF as file-only or pypdf-gated), links source features to model elements by
+  `id_match`, `nearest` or `manual` rules, reports lineage and document mentions,
+  and retires sources. `locate` returns the elements, features, mentions and
+  exclusions within a buffer of an element or point, as of and as known at a time.
+  Sources in an incompatible CRS are listed and left out, never reprojected by guess.
+  `tally` also commits a `sources_root` over the linked sources.
+- **`model-provenance` skill** for tracing a model element or location back to its
+  sources.
+- **`ledger` optional extra** (`pip install 'openswmm.mcp[ledger]'`: `shapely`,
+  `pyproj`) for buffer search, `nearest` links and reprojection.
 - **14 core tools**: `open_model`, `run`, `session`, `save`, `describe`,
   `find`, `get`, `set`, `call`, `edit`, `timeseries`, `report`, `compare`,
   `export`. `describe`, `find`, `get`, `set` and `call` are driven by the

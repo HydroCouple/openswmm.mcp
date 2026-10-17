@@ -39,6 +39,15 @@ new tool code.
 - **Results** -- `timeseries`, `report`, `compare`, `export`
 - **Gym** (`OPENSWMM_MCP_TOOLSETS=core,gym`) -- `gym_describe`, `gym_config`,
   `gym_env`, `gym_job`, `gym_score`
+- **Ledger** (`OPENSWMM_MCP_TOOLSETS=core,ledger`) -- `tally` commits a finished run's
+  facts to a salted hash tree and checks narratives claim by claim; `sources` and `locate`
+  record and query the files a model was built from and what they say about each element
+
+> **Ledger limitation (SI models):** `tally` commits the system volume facts
+> (`total_flooding`, `total_outflow`) only after checking their unit against the
+> `.rpt` "Flow Routing Continuity" block. That check has been tested on US-unit
+> models only. It still needs an SI test model; until one is added, SI models may
+> have these two facts listed under `dropped` instead of committed.
 
 See the [tools guide](docs/user-guide/tools.md) for details and the v1-to-v2
 mapping.
@@ -66,6 +75,8 @@ pip install "openswmm-mcp[dev,docs]"
 
 The gym tools need the `gym` extra (`pip install "openswmm-mcp[gym]"`) and
 `OPENSWMM_MCP_TOOLSETS=core,gym`.
+
+Spatial queries for the ledger (`locate` with a point or buffer, `sources` with `rule="nearest"`) need the `ledger` extra: `pip install 'openswmm.mcp[ledger]'`. Use it with `OPENSWMM_MCP_TOOLSETS=core,ledger`.
 
 ### Requirements
 
@@ -182,7 +193,7 @@ All settings are controlled via environment variables with the `OPENSWMM_MCP_` p
 | `OPENSWMM_MCP_TRANSPORT` | `"stdio"` | Transport protocol: `stdio`, `http`, or `sse` |
 | `OPENSWMM_MCP_HTTP_PORT` | `8080` | Port for HTTP/SSE transport |
 | `OPENSWMM_MCP_LOG_LEVEL` | `"INFO"` | Logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
-| `OPENSWMM_MCP_TOOLSETS` | `"core"` | Tool sets to register: `core`, or `core,gym` for the gym tools |
+| `OPENSWMM_MCP_TOOLSETS` | `"core"` | Tool sets to register: `core`, `core,gym` for the gym tools, or `core,ledger` for the `tally`, `sources` and `locate` tools (combinable: `core,gym,ledger`) |
 | `OPENSWMM_MCP_ENABLE_PYTHON` | `false` | Register `run_python` (stdio transport only; runs code with the server's permissions) |
 | `OPENSWMM_MCP_OAUTH_ISSUER` | `None` | OAuth issuer URL for JWT validation |
 | `OPENSWMM_MCP_OAUTH_AUDIENCE` | `None` | Expected OAuth audience claim |

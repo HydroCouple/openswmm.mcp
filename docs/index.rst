@@ -26,6 +26,7 @@ Tool-definition size is covered by the server budget tests.
 
    user-guide/tools
    user-guide/optimization
+   user-guide/ledger
    user-guide/resources
    user-guide/prompts
    user-guide/examples

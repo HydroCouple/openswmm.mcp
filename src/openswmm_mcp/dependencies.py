@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from fastmcp import Context
@@ -10,6 +11,7 @@ from fastmcp.server.lifespan import lifespan
 
 from openswmm_mcp.config import ServerSettings
 from openswmm_mcp.errors import ErrorCode, ToolError
+from openswmm_mcp.ledger.store import LedgerStore
 from openswmm_mcp.session import SessionManager, SimSession
 
 if TYPE_CHECKING:
@@ -58,9 +60,15 @@ async def server_lifespan(server) -> AsyncIterator[dict]:
 
         context["env_manager"] = EnvManager()
         context["job_manager"] = JobManager()
+    if "ledger" in toolsets(settings):
+        context["ledger_store"] = LedgerStore(
+            Path(settings.working_dir).expanduser().resolve() / ".ledger.sqlite"
+        )
     try:
         yield context
     finally:
+        if "ledger_store" in context:
+            context["ledger_store"].close()
         logger.info("OpenSWMM MCP server shutting down -- cleaning up sessions")
         if "job_manager" in context:
             context["job_manager"].shutdown()
@@ -98,6 +106,10 @@ def get_job_manager(ctx: Context):
     return _lifespan_item(ctx, "job_manager")
 
 
+def get_ledger_store(ctx: Context) -> LedgerStore:
+    return _lifespan_item(ctx, "ledger_store")
+
+
 async def get_session(ctx: Context, session_id: str) -> SimSession:
     return await get_session_manager(ctx).get(session_id)
 
@@ -110,4 +122,17 @@ def require_gymnasium(feature: str = "This tool") -> None:
         raise ToolError(
             f"[{ErrorCode.DEPENDENCY_MISSING}] {feature} requires the optional "
             "openswmm.gymnasium package. Install it with: pip install 'openswmm.mcp[gym]'"
+        ) from exc
+
+
+def require_spatial(feature: str) -> None:
+    """Raise an actionable error when shapely or pyproj (the ``ledger`` extra) is missing."""
+    try:
+        import pyproj  # noqa: F401
+        import shapely  # noqa: F401
+    except ImportError as exc:
+        raise ToolError(
+            f"[{ErrorCode.DEPENDENCY_MISSING}] {feature} needs shapely and pyproj. Install "
+            "them with: pip install 'openswmm.mcp[ledger]'. register, list, id_match/manual "
+            "links, lineage and mentions work without them."
         ) from exc
