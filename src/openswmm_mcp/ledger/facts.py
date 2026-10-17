@@ -9,9 +9,9 @@ from pathlib import Path
 from typing import Any
 
 import openswmm
-from openswmm.engine import get_report_snapshot
 
 from openswmm_mcp import catalog as cat
+from openswmm_mcp._util.engine_compat import report_snapshot
 from openswmm_mcp.errors import ErrorCode, ToolError
 from openswmm_mcp.ledger.schema import FACT_SCHEMA, SCHEMA_VERSION, bin_value, fact_id
 from openswmm_mcp.session import SimSession
@@ -210,7 +210,7 @@ def extract_facts(session: SimSession) -> tuple[list[dict], dict]:
     facts: list[dict] = []
     dropped: list[dict] = []
     try:
-        raw_snapshot = get_report_snapshot(solver)
+        raw_snapshot = report_snapshot(solver)
         snapshot: dict[str, Any] | None = {
             k: cat.to_json(getattr(raw_snapshot, k))
             for k in (
@@ -220,7 +220,7 @@ def extract_facts(session: SimSession) -> tuple[list[dict], dict]:
                 "quality_continuity",
             )
         }
-    except Exception as exc:  # e.g. BadParamError on a model without subcatchments
+    except Exception as exc:  # any remaining engine failure: drop the snapshot facts
         snapshot = None
         snapshot_reason = f"report snapshot unavailable: {type(exc).__name__}: {exc}"
     counts = {"nodes_flooded": 0, "links_surcharged": 0}

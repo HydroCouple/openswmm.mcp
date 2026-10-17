@@ -19,10 +19,10 @@ from openswmm.engine import (
     OutputReader,
     OutSubcatchVar,
     OutSystemVar,
-    get_report_snapshot,
 )
 
 from openswmm_mcp import catalog as cat
+from openswmm_mcp._util.engine_compat import report_snapshot
 from openswmm_mcp._util.validation import resolve_path
 from openswmm_mcp.dependencies import get_session, get_session_manager
 from openswmm_mcp.errors import ErrorCode, ToolError, engine_error
@@ -271,13 +271,9 @@ async def report(
                 )
             target = f"{kind}.stats"
             fields = sorted(cat.members(target))
-            keys = (
-                ids
-                or [
-                    str(i)
-                    for i in cat.resolve(solver, cat.require_kind(kind)["collection"], None).ids
-                ][:top]
-            )
+            collection = cat.resolve(solver, cat.require_kind(kind)["collection"], None)
+            # The engine's bulk id getter refuses a zero count (openswmm <= 6.0.0a4.dev1).
+            keys = ids or ([str(i) for i in collection.ids][:top] if len(collection) else [])
             rows = []
             for key in keys:
                 obj = cat.resolve(solver, target, key)
@@ -288,7 +284,7 @@ async def report(
             if not _has_surface(solver):
                 return {"name": name, "active": False, "note": "The model has no 2D surface."}
             return {"name": name, "active": True, "values": _service_values(solver, target)}
-        snapshot = get_report_snapshot(solver)
+        snapshot = report_snapshot(solver)
         if name == "mass_balance":
             return {
                 "name": name,

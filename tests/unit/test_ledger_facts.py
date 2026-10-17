@@ -142,5 +142,9 @@ async def test_model_without_subcatchments(session_manager, output_dir):
     kinds = {f["kind"] for f in facts}
     assert "subcatchment" not in kinds
     assert {"node", "link"} <= kinds
-    for d in meta["dropped"]:
-        assert d["reason"]
+    # engine_compat.report_snapshot works around the engine's zero-subcatchment bug,
+    # so the snapshot facts are committed rather than dropped.
+    ids = {f["id"] for f in facts}
+    assert "f:system:system:routing_continuity_error_pct" in ids
+    assert "f:pollutant:TSS:continuity_error_pct" in ids
+    assert not [d for d in meta["dropped"] if "snapshot unavailable" in d["reason"]]
