@@ -31,7 +31,7 @@ CORE = {
     "export",
 }
 GYM = {"gym_describe", "gym_config", "gym_env", "gym_job", "gym_score"}
-LEDGER = {"tally"}
+LEDGER = {"tally", "sources", "locate"}
 MAX_TOOLS = 24  # core 14 + gym 5 + ledger 3 + run_python 1 = 23
 MAX_CHARS = 40_000  # ~11k tokens for every tool definition together
 
@@ -61,7 +61,7 @@ async def test_gym_toolset_adds_five_tools():
     assert names == CORE | GYM
 
 
-async def test_ledger_toolset_adds_tally():
+async def test_ledger_toolset_adds_three_tools():
     names = {d["name"] for d in await _definitions(ServerSettings(toolsets="core,ledger"))}
     assert names == CORE | LEDGER
 
