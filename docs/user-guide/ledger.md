@@ -158,7 +158,106 @@ its disclosed line and key and folds the path to the root. A disclosure reveals
 that one fact only: the other facts stay hidden behind their own keys, and the
 salt never leaves the private file.
 
-## Provenance ledger (coming in Phase 2)
+## Provenance ledger
 
-A later release will add a provenance ledger that records the source files and model
-edits behind each committed run.
+The provenance ledger answers where a model element came from and what is known
+about a place in the model. It uses the same toolset (`OPENSWMM_MCP_TOOLSETS=core,ledger`)
+and two tools, `sources` and `locate`. It records three things:
+
+- **Sources:** the files a model was built from (`sources`).
+- **Lineage:** edges from model elements to source features, made by one of three
+  rules: `id_match` (a key field equals the element id), `nearest` (the closest
+  feature within a distance) or `manual` (edges you list).
+- **Mentions:** element ids that appear in documents.
+
+Rows are never overwritten. A changed file adds a version, and `retire` ends a
+source's validity without deleting it. Every row carries two dates:
+
+- `as_of` is "true at the time": the world time a fact or feature was valid.
+- `as_known` is "known at the time": the ledger time when the row was recorded.
+
+### Formats
+
+| Format | What is registered |
+|---|---|
+| GeoJSON | Feature rows, with their geometry, for lineage and spatial search |
+| `.md`, `.txt` | Document rows; element ids mentioned in the text are recorded as mentions |
+| `.csv` time series | One row. Its first timestamp is `valid_from`. The data's full time span is kept in the source's metadata, and `valid_to` stays open, so an old record is not treated as retired |
+| `.inp` | A model row. Its map units are read from `[MAP]` |
+| `.gpkg`, `.shp` | File-only rows (sha256 and metadata, no features). A warning says that feature ingest supports GeoJSON only |
+| PDF | Needs `pypdf` (`pip install pypdf`). The refusal names it |
+
+### Coordinate systems
+
+The model's CRS is resolved for each `locate` or `link` call. The first match wins:
+a `crs` argument to `locate` (or `params.crs` on `link`), a `crs` given when the
+model is registered with `role="model"`, the CRS in the model's spatial section, or
+`local:<map units>` from `[MAP] Units`.
+
+| Situation | Result |
+|---|---|
+| Model with no CRS | Works in `local:<map units>`. The reference model is `local:feet`, and the buffer is in those units |
+| Declared CRS on the model (`register(role="model", crs=...)` or `locate(crs=...)`) | Declared sources are reprojected into it |
+| GeoJSON with no `crs` member | Its CRS is `unknown` until registered with `crs=...`. No default is assumed |
+| Source whose CRS cannot be aligned with the model | Left out of `locate` and listed in `excluded.crs_incompatible`. It is never reprojected by guess |
+| `link(rule="nearest")` with an incompatible source | Refused |
+| Model in degrees with no CRS | Refused. A buffer in degrees is not a distance |
+
+Every result states `buffer`, `buffer_unit` and `crs` in its `provenance` block.
+
+### Without the extra
+
+Buffer search, `nearest` links and reprojection need the `ledger` extra:
+
+```bash
+pip install 'openswmm.mcp[ledger]'
+```
+
+The extra adds `shapely>=2.0` and `pyproj>=3.4`. Without it:
+
+- `locate` on an element returns the lineage-linked features and the mentions, with
+  a warning that the buffer search was skipped. `provenance.spatial` is `false`.
+- `locate` with a `point`, and `link(rule="nearest")`, are refused with a message
+  that names the extra.
+
+`register`, `list`, `id_match` and `manual` links, `lineage`, `mentions` and
+`retire` work without it.
+
+### Tallies and sources
+
+`tally(action="commit")` also records `sources_root`: a second root over the
+sources linked to the model. Each leaf is one source's `source_id`, `sha256` and
+`role`. Publish it next to the fact root. A reviewer can recompute it from the
+listed entries and the `sha256sum` of each file. The Phase 1 fact root is unchanged.
+
+### Worked example
+
+The test run on the reference model used `local:feet`, a buffer of 25 around
+link C2, and the `id_match` rule on `FACILITYID`. The result:
+
+- 4 features returned: three at distance 0.0 (`intersects`) and one at 9.18 ft
+  (`within_buffer`).
+- Excluded: `outside_buffer` 1; `crs_incompatible` 1 (an EPSG:2236 survey layer,
+  slug `crs_mismatch`); `retired` 0; `not_yet_valid` 0.
+- 9 model elements within the buffer.
+- C2 carries 5 fact ids from the latest tally.
+- 1 document mention of C2.
+- `provenance`: `buffer` 25, `buffer_unit` "ft", `crs` "local:feet",
+  `crs_source` "map_units".
+
+The call sequence:
+
+```text
+sources(action="register", path="pipes.geojson", role="network", crs="local:feet")
+sources(action="register", path="inspection.md", role="document")
+sources(action="link", session_id="mp", source_id="pipes",
+        rule="id_match", params={"key": "FACILITYID"})
+locate(session_id="mp", element_kind="link", element_id="C2", buffer=25)
+```
+
+`locate` returns `elements`, `features`, `mentions`, `excluded`, `warnings` and
+`provenance`. Read `provenance` before quoting any distance: it states the unit.
+
+For how the model-provenance skill turns these results into an answer, see
+`src/openswmm_mcp/skills/model-provenance/SKILL.md`. It requires the ledger
+toolset and ends each answer with the `provenance` block.
