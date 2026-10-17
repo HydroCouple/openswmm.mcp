@@ -123,3 +123,16 @@ def require_gymnasium(feature: str = "This tool") -> None:
             f"[{ErrorCode.DEPENDENCY_MISSING}] {feature} requires the optional "
             "openswmm.gymnasium package. Install it with: pip install 'openswmm.mcp[gym]'"
         ) from exc
+
+
+def require_spatial(feature: str) -> None:
+    """Raise an actionable error when shapely or pyproj (the ``ledger`` extra) is missing."""
+    try:
+        import pyproj  # noqa: F401
+        import shapely  # noqa: F401
+    except ImportError as exc:
+        raise ToolError(
+            f"[{ErrorCode.DEPENDENCY_MISSING}] {feature} needs shapely and pyproj. Install "
+            "them with: pip install 'openswmm.mcp[ledger]'. register, list, id_match/manual "
+            "links, lineage and mentions work without them."
+        ) from exc

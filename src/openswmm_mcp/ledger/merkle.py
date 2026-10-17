@@ -38,12 +38,15 @@ __all__ = [
     "commit_facts",
     "disclose",
     "verify_disclosure",
+    "source_leaf",
+    "sources_root",
 ]
 
 _KEY_TAG = b"openswmm-ledger/v1/leaf-key|"
 _LEAF_PREFIX = b"\x00"
 _NODE_PREFIX = b"\x01"
 _ROOT_PREFIX = b"\x02"
+_SOURCE_TAG = b"openswmm-ledger/v1/source|"
 _FIELDS = ("scope", "kind", "entity", "attr", "unit")
 
 
@@ -253,3 +256,28 @@ def verify_disclosure(disclosure: dict[str, Any], root_hex: str, fact_count: int
         return hmac.compare_digest(published_root(digest, fact_count), bytes.fromhex(root_hex))
     except Exception:
         return False
+
+
+def source_leaf(line: str) -> bytes:
+    """Return the leaf digest of one input source, ``"{source_id}|{sha256}|{role}"``.
+
+    Unsalted: source ids, hashes and roles are listed in the tally next to the root.
+    """
+    return hashlib.sha256(_LEAF_PREFIX + _SOURCE_TAG + line.encode()).digest()
+
+
+def sources_root(entries: list[dict[str, Any]]) -> str | None:
+    """Return the published root over a model's input sources, or None when there are none.
+
+    Parameters
+    ----------
+    entries : list of dict
+        Dicts with ``source_id``, ``sha256`` and ``role``. Duplicates collapse; leaves are
+        ordered by ``source_id`` then ``sha256``. Same node and published-root rules as the
+        fact tree.
+    """
+    triples = sorted({(e["source_id"], e["sha256"], e["role"]) for e in entries})
+    if not triples:
+        return None
+    leaves = [source_leaf("|".join(t)) for t in triples]
+    return published_root(tree_root(build_tree(leaves)), len(leaves)).hex()
