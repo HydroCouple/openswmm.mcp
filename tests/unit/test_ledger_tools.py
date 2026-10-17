@@ -227,3 +227,30 @@ async def test_edited_tally_file_is_refused(ledger_tools, inp_path):
     for action, extra in (("verify", {"claims": claims}), ("facts", {}), ("root", {})):
         with pytest.raises(ToolError, match="was modified"):
             await ledger_tools("tally", action=action, tally_id=commit["tally_id"], **extra)
+
+
+async def test_facts_recommits_when_run_is_newer(ledger_tools, inp_path):
+    tools = ledger_tools
+    await tools("open_model", path=inp_path, session_id="fresh")
+    await tools("run", session_id="fresh", until="end")
+    first = await tools("tally", action="facts", session_id="fresh", label="m")
+    assert first["committed"] is True and "recommitted" not in first
+    root1 = (await tools("tally", action="root", tally_id=first["tally_id"]))["root"]
+    again = await tools("tally", action="facts", session_id="fresh", label="m")
+    assert again["committed"] is False
+    assert (await tools("tally", action="root", tally_id=again["tally_id"]))["root"] == root1
+
+    # Re-run: reset (it reopens as <stem>_edited.inp, so pin the label to keep the tally id).
+    # Reset reopens the model, then run writes a new .out file.
+    await tools("session", action="reset", session_id="fresh")
+    await tools("run", session_id="fresh", until="end")
+    newer = await tools("tally", action="facts", session_id="fresh", label="m")
+    assert newer["committed"] is True
+    assert newer["recommitted"].endswith(root1[:12])
+    # tally_id is session/label, so the new tally overwrote the old one: the pinned id
+    # now resolves to the new root.
+    root2 = (await tools("tally", action="root", tally_id=newer["tally_id"]))["root"]
+    assert root2 != root1
+    pinned = await tools("tally", action="facts", tally_id=first["tally_id"])
+    assert pinned["committed"] is False and "recommitted" not in pinned
+    assert (await tools("tally", action="root", tally_id=pinned["tally_id"]))["root"] == root2

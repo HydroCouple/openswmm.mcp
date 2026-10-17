@@ -93,6 +93,15 @@ def _build_tally(tally_id: str, facts: list[dict], meta: dict) -> tuple[dict, by
     return tally, salt
 
 
+def _fingerprint(out_path: str) -> dict | None:
+    """Identify the run that wrote the .out file (same path every run, so use mtime+size)."""
+    try:
+        st = os.stat(out_path)
+    except OSError:
+        return None
+    return {"out_path": out_path, "out_mtime_ns": st.st_mtime_ns, "out_size": st.st_size}
+
+
 async def _commit(ctx: Context, session_id: str, label: str | None) -> tuple[dict, Path]:
     sm = get_session_manager(ctx)
     store = get_ledger_store(ctx)
@@ -103,7 +112,8 @@ async def _commit(ctx: Context, session_id: str, label: str | None) -> tuple[dic
         raise _bad(f"Session '{session_id}' produced no facts to commit.")
     tally_id = f"{session_id}/{label}"
     path = sm.session_dir(session_id) / f"{label}.tally.json"
-    tally, _ = _build_tally(tally_id, facts, meta)
+    fingerprint = await asyncio.to_thread(_fingerprint, session.out_path)
+    tally, _ = _build_tally(tally_id, facts, {**meta, "run_fingerprint": fingerprint})
 
     def _persist() -> None:
         _write_json(path, tally)
@@ -160,20 +170,30 @@ async def _load(ctx: Context, tally_id: str) -> tuple[dict, Path]:
 
 async def _resolve(
     ctx: Context, tally_id: str | None, session_id: str | None, label: str | None, action: str
-) -> tuple[dict, Path, bool]:
-    if tally_id:
+) -> tuple[dict, Path, bool, dict]:
+    """Return (tally, path, committed, notes); notes may hold 'recommitted' or 'warning'."""
+    if tally_id:  # a pinned reference: always exactly this tally
         tally, path = await _load(ctx, tally_id)
-        return tally, path, False
+        return tally, path, False, {}
     if not session_id:
         raise _bad(f"action '{action}' needs 'tally_id' or 'session_id'.")
     session = await get_session_manager(ctx).get(session_id)
     name = _check_label(label or Path(session.inp_path).stem)
     try:
         tally, path = await _load(ctx, f"{session_id}/{name}")
-        return tally, path, False
     except ToolError:
         tally, path = await _commit(ctx, session_id, name)
-        return tally, path, True
+        return tally, path, True, {}
+    state = await session.call(lambda: session.state)
+    if state != "ENDED":
+        warning = f"Session has no finished run (state {state}); reusing the existing tally."
+        return tally, path, False, {"warning": warning}
+    current = await asyncio.to_thread(_fingerprint, session.out_path)
+    if (tally.get("meta") or {}).get("run_fingerprint") == current:
+        return tally, path, False, {}
+    note = f"run is newer than tally {str(tally.get('root'))[:12]}"
+    tally, path = await _commit(ctx, session_id, name)
+    return tally, path, True, {"recommitted": note}
 
 
 async def tally(
@@ -218,14 +238,14 @@ async def tally(
         }
 
     if action == "facts":
-        doc, _, committed = await _resolve(ctx, tally_id, session_id, label, action)
+        doc, _, committed, notes = await _resolve(ctx, tally_id, session_id, label, action)
         wanted = set(ids or [])
         rows = [
             {k: f.get(k) for k in _FACT_VIEW}
             for f in doc["facts"]
             if (not kind or f["kind"] == kind) and (not wanted or f["entity"] in wanted)
         ]
-        return {"tally_id": doc["tally_id"], "committed": committed, "facts": rows}
+        return {"tally_id": doc["tally_id"], "committed": committed, **notes, "facts": rows}
 
     _need(tally_id, "tally_id", action)
     doc, path = await _load(ctx, tally_id)
