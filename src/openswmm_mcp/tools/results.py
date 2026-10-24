@@ -284,7 +284,7 @@ async def report(
                 rows.append({"id": key} | {f: cat.to_json(getattr(obj, f)) for f in fields})
             return {"name": name, "kind": kind, "rows": rows}
         if name in ("2d", "groundwater"):
-            target = "surface2d" if name == "2d" else "surface2d.groundwater"
+            target = "surface2d" if name == "2d" else "groundwater2d"
             if not _has_surface(solver):
                 return {"name": name, "active": False, "note": "The model has no 2D surface."}
             return {"name": name, "active": True, "values": _service_values(solver, target)}
