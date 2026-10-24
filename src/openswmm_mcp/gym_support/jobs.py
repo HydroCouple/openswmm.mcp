@@ -16,20 +16,18 @@
 
 """Background optimization jobs over design spaces.
 
-A L{JobManager} owns a small thread pool (default C{max_workers=2};
-each job holds one Solver and is CPU-heavy) running design
-searches over C{cip}/C{joint} env configs:
+A L{JobManager} owns a small thread pool (default C{max_workers=2}) of job
+runners. Each job runs L{openswmm_gymnasium.optimize.run_study}, which
+asks its optimiser for batches of candidate designs and evaluates each
+batch in parallel on worker processes (C{OptimizationConfig.workers};
+the engine is loaded once per worker and a crashing evaluation cannot take
+this server down). Algorithms:
 
   - C{random_search} — uniform sampling baseline.
   - C{grid_search}   — full factorial over per-dimension levels,
     truncated at the budget.
-  - C{nsga2} (or any Platypus MOEA by class name) — multi-objective
-    design search via the optional C{platypus-opt} extra.
-
-One evaluation = one episode: for C{cip} the env is a single-step
-contextual bandit (design applied in C{step}); for C{joint} the design
-is fixed at C{reset(options={"design_action": ...})} and the runtime
-half runs a neutral midpoint action each step.
+  - C{nsga2}, C{nsga3}, C{spea2}, C{moead}, C{gde3} — Platypus MOEAs for
+    multi-objective design search, via the optional C{platypus-opt} extra.
 
 Cancellation is cooperative — checked between evaluations. Every job
 writes reviewable artifacts (C{job.json}, C{evaluations.jsonl},
@@ -42,7 +40,6 @@ C{result.json}) under a user-visible output directory (CLAUDE.md §4.1).
 
 from __future__ import annotations
 
-import itertools
 import json
 import threading
 import time
@@ -52,275 +49,33 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-import numpy as np
-from openswmm_gymnasium.spec.config import EnvConfig, build_env
-from openswmm_gymnasium.spec.envs import build_action, json_safe
-from pydantic import BaseModel, ConfigDict, Field
+from openswmm_gymnasium.optimize import (
+    ALGORITHMS,
+    DesignDimension,
+    OptimizationConfig,
+    StudyCancelled,
+    run_study,
+)
+from openswmm_gymnasium.optimize import design_dimensions as _design_dimensions
+from openswmm_gymnasium.spec import SpecError
+from openswmm_gymnasium.spec.config import EnvConfig
 
 from openswmm_mcp.errors import ErrorCode, ToolError
 
-# ---------------------------------------------------------------------------
-# Config
-# ---------------------------------------------------------------------------
-
-
-class OptimizationConfig(BaseModel):
-    """Declarative optimization-run settings.
-
-    @ivar algorithm: C{"random_search"}, C{"grid_search"}, or a lowercase
-        Platypus MOEA name (e.g. C{"nsga2"}).
-    @ivar budget: Maximum design evaluations for the job.
-    @ivar population_size: MOEA population size (Platypus only).
-    @ivar grid_levels: Per-dimension levels for C{grid_search}.
-    @ivar seed: RNG seed for sampling algorithms and episode resets.
-    @ivar max_steps_per_episode: Safety cap per evaluation episode.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    algorithm: str = "random_search"
-    budget: int = Field(default=50, ge=1)
-    population_size: int = Field(default=20, ge=2)
-    grid_levels: int = Field(default=5, ge=2)
-    seed: int | None = None
-    max_steps_per_episode: int = Field(default=10_000, ge=1)
-
-    def resolved(self) -> dict[str, Any]:
-        """The search settings actually applied, for echoing in every job
-        snapshot and result.
-
-        Surfacing these makes a silent algorithm/budget downgrade impossible to
-        miss: a caller who reads the start response or C{gym_job(action='status')} sees the
-        real C{algorithm}/C{budget} the run used, not just whatever it
-        requested (previously these lived only in C{job.json}). Only the fields
-        that affect the chosen algorithm are included.
-
-        @rtype: dict
-        """
-        out: dict[str, Any] = {
-            "algorithm": self.algorithm,
-            "budget": self.budget,
-            "seed": self.seed,
-        }
-        if self.algorithm in _PLATYPUS_ALGORITHMS:
-            out["population_size"] = self.population_size
-        elif self.algorithm == "grid_search":
-            out["grid_levels"] = self.grid_levels
-        return out
-
+__all__ = ["DesignDimension", "Job", "JobManager", "OptimizationConfig", "design_dimensions"]
 
 JobState = Literal["pending", "running", "done", "failed", "cancelled"]
 
-#: Platypus MOEA class names accepted as ``algorithm`` (lowercase key).
-_PLATYPUS_ALGORITHMS = {
-    "nsga2": "NSGAII",
-    "nsga3": "NSGAIII",
-    "spea2": "SPEA2",
-    "moead": "MOEAD",
-    "gde3": "GDE3",
-}
-
-
-# ---------------------------------------------------------------------------
-# Design-space metadata
-# ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class DesignDimension:
-    """One design factory's slice of the search space.
-
-    @ivar key: Action-space key (the factory's C{name} param).
-    @ivar labels: Per-component labels, C{"<kind>:<element_id>"}.
-    @ivar low: Lower bound: a scalar broadcast across components, or a per-component tuple.
-    @ivar high: Upper bound, scalar or per-component like C{low}.
-
-    Tuple bounds allow different physical ranges for each component, such as
-    storage C{(a,b,c)} or RDII C{(R,dmax,drecov,dinit)}.
-
-    """
-
-    key: str
-    labels: tuple[str, ...]
-    low: float | tuple[float, ...]
-    high: float | tuple[float, ...]
-
-    @property
-    def size(self) -> int:
-        """Number of components in this dimension group.
-
-        @rtype: int
-        """
-        return len(self.labels)
-
-
-def _market_dimensions(env_config: EnvConfig) -> list[DesignDimension]:
-    """Derive search dimensions from a market env's policy space.
-
-    Each tunable controller parameter (cost-curve onset/steepness/ceiling, PID
-    gains) becomes a single-component dimension carrying its own bounds.
-
-    @param env_config: A C{"market"} env config.
-    @type env_config: L{EnvConfig}
-    @rtype: list of L{DesignDimension}
-    @raise ToolError: C{DEPENDENCY_MISSING} without the gym extra.
-    """
-    try:
-        from openswmm_gymnasium.config import MarketConfig
-        from openswmm_gymnasium.spaces import MarketPolicySpace
-    except ImportError as exc:
-        raise ToolError(
-            f"[{ErrorCode.DEPENDENCY_MISSING}] Market optimization requires the "
-            "optional openswmm.gymnasium package. Install it with: "
-            "pip install 'openswmm.mcp[gym]'"
-        ) from exc
-
-    market = MarketConfig.from_dict(env_config.market_config)
-    market.validate()
-    bounds = (
-        {k: tuple(v) for k, v in env_config.policy_bounds.items()}
-        if env_config.policy_bounds
-        else None
-    )
-    space = MarketPolicySpace.from_config(market, bounds=bounds, tune_full=env_config.tune_full)
-    return [
-        DesignDimension(key=p.label, labels=(p.label,), low=p.low, high=p.high)
-        for p in space.params
-    ]
-
-
-def _schedule_dimensions(env_config: EnvConfig) -> list[DesignDimension]:
-    """Derive search dimensions from an open-loop control schedule.
-
-    Each per-structure scheduled setting becomes a single-component dimension.
-
-    @param env_config: A C{"schedule"} env config.
-    @type env_config: L{EnvConfig}
-    @rtype: list of L{DesignDimension}
-    @raise ToolError: C{DEPENDENCY_MISSING} without the gym extra.
-    """
-    try:
-        from openswmm_gymnasium.spaces import SchedulePolicySpace
-    except ImportError as exc:
-        raise ToolError(
-            f"[{ErrorCode.DEPENDENCY_MISSING}] Schedule optimization requires the "
-            "optional openswmm.gymnasium package. Install it with: "
-            "pip install 'openswmm.mcp[gym]'"
-        ) from exc
-
-    lo, hi = env_config.schedule_bounds or [0.0, 1.0]
-    space = SchedulePolicySpace(
-        env_config.structure_ids, env_config.n_points, low=float(lo), high=float(hi)
-    )
-    return [
-        DesignDimension(
-            key=label, labels=(label,), low=float(space.low[i]), high=float(space.high[i])
-        )
-        for i, label in enumerate(space.labels)
-    ]
-
-
-def _control_curve_dimensions(env_config: EnvConfig) -> list[DesignDimension]:
-    """Derive search dimensions from a reactive PWL control-curve policy.
-
-    Each per-knot setting becomes a single-component dimension bounded by its
-    asset's C{[y_low, y_high]} and labeled C{control_curve/<link_id>/y[<k>]}, so
-    a job's decision vector decodes straight back to per-asset curves.
-
-    @param env_config: A C{"control_curve"} env config.
-    @type env_config: L{EnvConfig}
-    @rtype: list of L{DesignDimension}
-    @raise ToolError: C{DEPENDENCY_MISSING} without the gym extra.
-    """
-    try:
-        from openswmm_gymnasium.spaces import ControlCurvePolicySpace
-    except ImportError as exc:
-        raise ToolError(
-            f"[{ErrorCode.DEPENDENCY_MISSING}] Control-curve optimization requires "
-            "the optional openswmm.gymnasium package. Install it with: "
-            "pip install 'openswmm.mcp[gym]'"
-        ) from exc
-
-    space = ControlCurvePolicySpace.from_params(env_config.policy_factory.params)
-    low, high = space.low, space.high
-    return [
-        DesignDimension(key=label, labels=(label,), low=float(low[i]), high=float(high[i]))
-        for i, label in enumerate(space.labels)
-    ]
-
 
 def design_dimensions(env_config: EnvConfig) -> list[DesignDimension]:
-    """Derive labeled search-space dimensions from the config.
+    """Labelled search-space dimensions of a config (see L{openswmm_gymnasium.optimize}).
 
-    For C{"market"}/C{"schedule"}/C{"control_curve"} configs the dimensions
-    come from the controller policy space; otherwise from the design factories.
-
-    @param env_config: Config whose factories / policy span the space.
-    @type env_config: L{EnvConfig}
-    @return: One entry per factory (or policy parameter), in config order.
-    @rtype: list of L{DesignDimension}
-    @raise ToolError: C{VALIDATION_ERROR} when the config has no searchable
-        static factory (no design_factory and no policy_factory).
+    @raise ToolError: C{VALIDATION_ERROR} when the config has nothing to search.
     """
-    if env_config.env_type == "market":
-        return _market_dimensions(env_config)
-    if env_config.env_type == "schedule":
-        return _schedule_dimensions(env_config)
-    if env_config.env_type == "control_curve":
-        return _control_curve_dimensions(env_config)
-    if not env_config.design_factories:
-        raise ToolError(
-            f"[{ErrorCode.VALIDATION_ERROR}] Optimization requires an env config "
-            "with a searchable static factory: design_factories (env_type 'cip' "
-            "or 'joint') or a policy_factory (env_type 'control_curve')."
-        )
-    dims: list[DesignDimension] = []
-    for spec in env_config.design_factories:
-        # Construct the factory (no solver needed — the Box is built in
-        # __init__) and read its true flat shape + per-component bounds. This
-        # supports factories whose per-element component count and bounds vary
-        # (storage coeffs, LID sizing+type, RDII R+IA), not just uniform Box.
-        factory = spec.construct()
-        space = factory.space
-        lo = np.asarray(space.low, dtype=float).ravel()
-        hi = np.asarray(space.high, dtype=float).ravel()
-        size = int(lo.shape[0])
-        params = spec.params
-        ids = params.get("link_ids") or params.get("node_ids") or params.get("subcatch_ids") or []
-        if len(ids) == size:
-            labels = tuple(f"{spec.kind}:{eid}" for eid in ids)
-        else:
-            labels = tuple(f"{spec.kind}[{i}]" for i in range(size))
-        dims.append(
-            DesignDimension(
-                key=params.get("name", spec.kind),
-                labels=labels,
-                low=tuple(lo.tolist()),
-                high=tuple(hi.tolist()),
-            )
-        )
-    return dims
-
-
-def _term_directions(env_config: EnvConfig) -> dict[str, str]:
-    """Map reward-term name to C{"minimize"}/C{"maximize"} direction.
-
-    Constructs the configured terms (lazy gym import) to read their
-    public C{direction}/C{name}; an empty config means the env default,
-    a single all-nodes C{flooding_volume} cost.
-
-    @param env_config: The env config.
-    @type env_config: L{EnvConfig}
-    @return: Ordered name -> direction mapping.
-    @rtype: dict
-    """
-    if not env_config.reward_terms:
-        return {"flooding_volume": "minimize"}
-    directions: dict[str, str] = {}
-    for spec in env_config.reward_terms:
-        term = spec.construct()
-        directions[term.name] = term.direction
-    return directions
+    try:
+        return _design_dimensions(env_config)
+    except SpecError as exc:
+        raise ToolError(str(exc)) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -379,251 +134,21 @@ class Job:
             }
 
 
-class _Cancelled(Exception):
-    """Internal: raised between evaluations on cooperative cancel."""
-
-
-# ---------------------------------------------------------------------------
-# Evaluation engine
-# ---------------------------------------------------------------------------
-
-
-class _Evaluator:
-    """Runs one episode per candidate design and logs objectives.
-
-    Reuses a single env (one Solver handle) across all evaluations of a
-    job. Objectives are direction-adjusted costs-to-minimize: a
-    C{maximize} term's component is negated, so every algorithm can
-    minimize uniformly.
-
-    @ivar evaluations: JSON-safe log of every evaluation, in order.
-    """
-
-    def __init__(self, job: Job, dims: list[DesignDimension]) -> None:
-        """
-        @param job: The owning job (progress + cancellation).
-        @type job: L{Job}
-        @param dims: Design-space metadata.
-        @type dims: list of L{DesignDimension}
-        """
-        self._job = job
-        self._dims = dims
-        self._env = build_env(job.env_config)
-        self._is_cip = job.env_config.env_type == "cip"
-        # market/schedule/control_curve are single-step envs whose action is
-        # the raw policy vector (one step runs the whole closed-loop episode).
-        self._is_policy_env = job.env_config.env_type in (
-            "market",
-            "schedule",
-            "control_curve",
-        )
-        self._directions = _term_directions(job.env_config)
-        self.objective_names = list(self._directions)
-        self.evaluations: list[dict[str, Any]] = []
-        self._eval_file = (job.output_dir / "evaluations.jsonl").open("w", encoding="utf-8")
-
-    def close(self) -> None:
-        """Close the env and the evaluation log."""
-        self._env.close()
-        self._eval_file.close()
-
-    def _design_payload(self, vector: np.ndarray) -> dict[str, np.ndarray]:
-        """Split a flat decision vector into per-factory arrays.
-
-        @param vector: Flat vector spanning all dims, in order.
-        @type vector: L{numpy.ndarray}
-        @return: Mapping of factory key to its slice.
-        @rtype: dict
-        """
-        payload: dict[str, np.ndarray] = {}
-        offset = 0
-        for dim in self._dims:
-            payload[dim.key] = np.asarray(vector[offset : offset + dim.size], dtype=np.float32)
-            offset += dim.size
-        return payload
-
-    def evaluate(self, vector: np.ndarray) -> list[float]:
-        """Evaluate one flat design vector with a full episode.
-
-        @param vector: Flat decision vector.
-        @type vector: L{numpy.ndarray}
-        @return: Direction-adjusted cost per objective (minimize).
-        @rtype: list of float
-        @raise _Cancelled: When the job's cancel event is set.
-        """
-        if self._job.cancel_event.is_set():
-            raise _Cancelled()
-        design = self._design_payload(vector)
-
-        if self._is_policy_env:
-            # market/schedule: the action *is* the raw policy vector; one step
-            # runs the whole episode under the controller.
-            self._env.reset(seed=self._job.opt_config.seed)
-            _obs, _reward, terminated, truncated, info = self._env.step(
-                np.asarray(vector, dtype=np.float32)
-            )
-            components = dict(info.get("reward_components", {}))
-            steps = 1
-        elif self._is_cip:
-            self._env.reset(seed=self._job.opt_config.seed)
-            action = build_action(self._env.action_space, {"design": json_safe(design)})
-            _obs, _reward, terminated, truncated, info = self._env.step(action)
-            components = dict(info.get("reward_components", {}))
-            steps = 1
-        else:  # joint: design fixed at reset, neutral runtime each step
-            self._env.reset(seed=self._job.opt_config.seed, options={"design_action": design})
-            neutral = build_action(self._env.action_space, None)
-            components: dict[str, float] = {}
-            steps = 0
-            terminated = truncated = False
-            while steps < self._job.opt_config.max_steps_per_episode and not (
-                terminated or truncated
-            ):
-                _obs, _reward, terminated, truncated, info = self._env.step(neutral)
-                steps += 1
-                for term, value in info.get("reward_components", {}).items():
-                    components[term] = components.get(term, 0.0) + float(value)
-
-        costs = [
-            float(components.get(name, 0.0))
-            * (1.0 if self._directions[name] == "minimize" else -1.0)
-            for name in self.objective_names
-        ]
-        record = {
-            "evaluation": len(self.evaluations) + 1,
-            "decisions": json_safe(design),
-            "objectives": dict(zip(self.objective_names, costs)),
-            "steps": steps,
-        }
-        self.evaluations.append(record)
-        self._eval_file.write(json.dumps(record) + "\n")
-        self._eval_file.flush()
-        with self._job.lock:
-            self._job.evaluations_done = len(self.evaluations)
-        return costs
-
-
-# ---------------------------------------------------------------------------
-# Algorithms
-# ---------------------------------------------------------------------------
-
-
-def _flat_bounds(dims: list[DesignDimension]) -> tuple[np.ndarray, np.ndarray]:
-    """Return flat (low, high) bound vectors across all dims.
-
-    @rtype: tuple of two L{numpy.ndarray}
-    """
-    low = np.concatenate([np.broadcast_to(np.asarray(d.low, dtype=float), (d.size,)) for d in dims])
-    high = np.concatenate(
-        [np.broadcast_to(np.asarray(d.high, dtype=float), (d.size,)) for d in dims]
-    )
-    return low, high
-
-
-def _run_random_search(evaluator: _Evaluator, dims, opt: OptimizationConfig) -> None:
-    """Uniform random sampling of the design space (internal)."""
-    low, high = _flat_bounds(dims)
-    rng = np.random.default_rng(opt.seed)
-    for _ in range(opt.budget):
-        evaluator.evaluate(rng.uniform(low, high))
-
-
-def _run_grid_search(evaluator: _Evaluator, dims, opt: OptimizationConfig) -> None:
-    """Full factorial over per-dimension levels, capped at budget (internal)."""
-    low, high = _flat_bounds(dims)
-    axes = [np.linspace(lo, hi, opt.grid_levels) for lo, hi in zip(low, high)]
-    for i, point in enumerate(itertools.product(*axes)):
-        if i >= opt.budget:
-            break
-        evaluator.evaluate(np.asarray(point))
-
-
-def _run_platypus(evaluator: _Evaluator, dims, opt: OptimizationConfig) -> None:
-    """Run a Platypus MOEA named by ``opt.algorithm`` (internal).
-
-    @raise ToolError: C{DEPENDENCY_MISSING} when platypus-opt is not
-        installed.
-    """
-    try:
-        import platypus
-    except ImportError as exc:
-        raise ToolError(
-            f"[{ErrorCode.DEPENDENCY_MISSING}] Algorithm '{opt.algorithm}' "
-            "requires the optional platypus-opt package. Install it with: "
-            "pip install 'openswmm.gymnasium[platypus]'"
-        ) from exc
-
-    low, high = _flat_bounds(dims)
-    n_vars = low.shape[0]
-    n_objs = len(evaluator.objective_names)
-
-    problem = platypus.Problem(n_vars, n_objs)
-    problem.types[:] = [platypus.Real(lo, hi) for lo, hi in zip(low, high)]
-    problem.directions[:] = [platypus.Problem.MINIMIZE] * n_objs
-    problem.function = lambda variables: evaluator.evaluate(np.asarray(variables))
-
-    algorithm_cls = getattr(platypus, _PLATYPUS_ALGORITHMS[opt.algorithm])
-    algorithm = algorithm_cls(problem, population_size=opt.population_size)
-    algorithm.run(opt.budget)
-
-
-# ---------------------------------------------------------------------------
-# Result assembly
-# ---------------------------------------------------------------------------
-
-
-def _assemble_result(evaluator: _Evaluator) -> dict[str, Any]:
-    """Compute the Pareto set / best pick over all logged evaluations.
-
-    Uses C{openswmm_gymnasium.scoring.pareto_front} for multi-objective
-    runs; single-objective runs report the argmin.
-
-    @param evaluator: The finished evaluator.
-    @type evaluator: L{_Evaluator}
-    @return: Result payload (objective names, evaluation count, pareto
-        entries, best entry).
-    @rtype: dict
-    """
-    evaluations = evaluator.evaluations
-    names = evaluator.objective_names
-    if not evaluations:
-        return {"objective_names": names, "evaluations_count": 0, "pareto": [], "best": None}
-
-    costs = np.array([[e["objectives"][n] for n in names] for e in evaluations])
-    if len(names) == 1:
-        best_idx = int(np.argmin(costs[:, 0]))
-        pareto_idxs = [best_idx]
-    else:
-        from openswmm_gymnasium.scoring import pareto_front
-
-        front = pareto_front(costs)
-        pareto_idxs = [i for i, row in enumerate(costs) if any(np.allclose(row, f) for f in front)]
-        # Best by equal-weight sum as a convenient single pick.
-        best_idx = int(np.argmin(costs.sum(axis=1)))
-
-    return {
-        "objective_names": names,
-        "evaluations_count": len(evaluations),
-        "pareto": [evaluations[i] for i in pareto_idxs],
-        "best": evaluations[best_idx],
-    }
-
-
 # ---------------------------------------------------------------------------
 # Manager
 # ---------------------------------------------------------------------------
 
 
 class JobManager:
-    """Owns the background thread pool and all job records.
+    """Owns the job-runner threads and all job records.
 
     @ivar max_workers: Pool size (default: 2).
     """
 
     def __init__(self, max_workers: int = 2) -> None:
         """
-        @param max_workers: Concurrent job cap; each job holds one
-            Solver handle and saturates a core.
+        @param max_workers: Concurrent job cap; each job runs its own pool
+            of evaluation worker processes.
         @type max_workers: int
         """
         self.max_workers = max_workers
@@ -654,11 +179,10 @@ class JobManager:
             configs without design factories.
         """
         algo = opt_config.algorithm
-        if algo not in ("random_search", "grid_search") and algo not in _PLATYPUS_ALGORITHMS:
-            valid = ["random_search", "grid_search", *_PLATYPUS_ALGORITHMS]
+        if algo not in ALGORITHMS:
             raise ToolError(
                 f"[{ErrorCode.VALIDATION_ERROR}] Unknown algorithm '{algo}'. "
-                f"Valid algorithms: {', '.join(valid)}."
+                f"Valid algorithms: {', '.join(ALGORITHMS)}."
             )
         design_dimensions(env_config)  # validates design factories exist
 
@@ -700,41 +224,33 @@ class JobManager:
             job.state = "running"
             job.started_at = time.time()
 
-        evaluator: _Evaluator | None = None
+        def progress(record: dict[str, Any]) -> None:
+            with job.lock:
+                job.evaluations_done = record["evaluation"]
+
         try:
-            dims = design_dimensions(job.env_config)
-            evaluator = _Evaluator(job, dims)
-            if job.opt_config.algorithm == "random_search":
-                _run_random_search(evaluator, dims, job.opt_config)
-            elif job.opt_config.algorithm == "grid_search":
-                _run_grid_search(evaluator, dims, job.opt_config)
-            else:
-                _run_platypus(evaluator, dims, job.opt_config)
-            result = _assemble_result(evaluator)
-            # Echo the applied search settings into the result so result.json
-            # and gym_job(action='results') both record what actually ran (#9).
-            result["optimization"] = job.opt_config.resolved()
-            (job.output_dir / "result.json").write_text(
-                json.dumps(json_safe(result), indent=2) + "\n", encoding="utf-8"
+            result = run_study(
+                job.env_config,
+                job.opt_config,
+                job.output_dir,
+                should_stop=job.cancel_event.is_set,
+                on_evaluation=progress,
             )
             with job.lock:
-                job.result = json_safe(result)
+                job.result = result
                 job.state = "done"
-        except _Cancelled:
+        except StudyCancelled:
             with job.lock:
                 job.state = "cancelled"
         except Exception as exc:  # job thread must never die silently
             with job.lock:
                 job.state = "failed"
-                job.error = f"{type(exc).__name__}: {exc}"
+                job.error = (
+                    str(exc) if isinstance(exc, SpecError) else f"{type(exc).__name__}: {exc}"
+                )
         finally:
             with job.lock:
                 job.finished_at = time.time()
-            if evaluator is not None:
-                try:
-                    evaluator.close()
-                except Exception:
-                    pass
 
     # -- queries ---------------------------------------------------------------
 
