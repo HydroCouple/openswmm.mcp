@@ -3,6 +3,10 @@
 v1 registered 663 tools (~515k characters of tool definitions, over 140k
 tokens) and could not be loaded by Claude Desktop. These budgets fail the
 build before that can happen again.
+
+The budgets cover every toolset together, including the seven ``platform_*``
+tools the cloud execution platform plan (2026-10-15, §1A) adds later, so room
+for them is reserved now.
 """
 
 from __future__ import annotations
@@ -31,7 +35,10 @@ CORE = {
     "export",
 }
 GYM = {"gym_describe", "gym_config", "gym_env", "gym_job", "gym_score"}
-MAX_TOOLS = 20
+#: platform_targets/session/model/estimate/run/job/results (platform plan §1A).
+PLATFORM_TOOLS_RESERVED = 7
+PLATFORM_CHARS_RESERVED = 7 * 1_500
+MAX_TOOLS = 26  # 14 core + 5 gym + 7 reserved platform tools (review plan §10, P4)
 MAX_CHARS = 40_000  # ~11k tokens for every tool definition together
 
 
@@ -51,8 +58,10 @@ async def test_core_tool_set():
 async def test_tool_definitions_fit_the_budget(toolsets):
     definitions = await _definitions(ServerSettings(toolsets=toolsets, enable_python=True))
     size = len(json.dumps(definitions))
-    assert len(definitions) <= MAX_TOOLS, [d["name"] for d in definitions]
-    assert size <= MAX_CHARS, f"{size} characters of tool definitions"
+    names = [d["name"] for d in definitions]
+    counted = [n for n in names if n != "run_python"]  # opt-in, stdio only
+    assert len(counted) + PLATFORM_TOOLS_RESERVED <= MAX_TOOLS, names
+    assert size + PLATFORM_CHARS_RESERVED <= MAX_CHARS, f"{size} characters of tool definitions"
 
 
 async def test_gym_toolset_adds_five_tools():

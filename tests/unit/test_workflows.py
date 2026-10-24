@@ -217,12 +217,13 @@ async def test_build_a_model_from_scratch(tools):
         method="set_nodes",
         args={"from_node": "J1", "to_node": "O1"},
     )
-    await tools(
+    applied = await tools(
         "set",
         session_id="new",
-        kind="link.xsect",
-        changes=[{"id": "C1", "field": "g1", "value": 1.0}],
+        kind="link",
+        changes=[{"id": "C1", "field": "xsect", "value": ["CIRCULAR", 1.0, 0, 0, 0]}],
     )
+    assert applied["applied"] == 1, applied
     ran = await tools("run", session_id="new")
     assert ran["finished"]
     summary = await tools("report", session_id="new", name="summary")

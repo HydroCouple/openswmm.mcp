@@ -32,6 +32,14 @@ except ImportError as exc:  # pragma: no cover - depends on the installed engine
 
 from openswmm_mcp.errors import ErrorCode, ToolError
 
+#: Engine catalog revision these tools are written against (openswmm.engine.catalog.revision).
+MIN_CATALOG_REVISION = 2
+if getattr(_engine_catalog, "revision", lambda: 1)() < MIN_CATALOG_REVISION:  # pragma: no cover
+    raise ImportError(
+        f"openswmm.mcp needs engine catalog revision {MIN_CATALOG_REVISION} or newer; the "
+        "installed openswmm is older. Upgrade or rebuild the openswmm package."
+    )
+
 # Lifecycle and handle-level Solver members are driven by the session tools;
 # dispatching them through ``call`` would desynchronise session state.
 SOLVER_DENY = frozenset(
@@ -82,8 +90,13 @@ def _members_by_target() -> dict[str, dict[str, dict[str, Any]]]:
     return out
 
 
+def canonical(path: str) -> str:
+    """Current spelling of a catalog path (``surface2d.groundwater`` -> ``groundwater2d``)."""
+    return path if path in targets() else _engine_catalog.canonical(path)
+
+
 def members(target: str) -> dict[str, dict[str, Any]]:
-    return _members_by_target().get(target, {})
+    return _members_by_target().get(canonical(target), {})
 
 
 def element_kinds() -> dict[str, dict[str, Any]]:
@@ -97,7 +110,7 @@ def suggest(word: str, choices: Any) -> str:
 
 
 def require_target(name: str) -> dict[str, Any]:
-    entry = targets().get(name)
+    entry = targets().get(canonical(name))
     if entry is None:
         raise ToolError(
             f"[{ErrorCode.VALIDATION_ERROR}] Unknown target '{name}'."
@@ -171,7 +184,7 @@ def parse_target(text: str) -> tuple[str, str | None]:
 
 def resolve(solver: Any, target: str, key: str | int | None) -> Any:
     try:
-        return _engine_catalog.resolve(solver, target, key)
+        return _engine_catalog.resolve(solver, canonical(target), key)
     except ValueError as exc:
         raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] {exc}") from None
 
@@ -180,6 +193,32 @@ def lookup_bulk(solver: Any, path: str) -> Any:
     """Read a collection array such as ``nodes.depths``."""
     target, _, name = path.rpartition(".")
     return getattr(resolve(solver, target, None), name)
+
+
+def service_values(solver: Any, target: str) -> dict[str, Any]:
+    """Current scalar property values of a service target, plus its ``items()`` when it is a
+    mapping (``options`` lists every option)."""
+    values: dict[str, Any] = {}
+    obj = resolve(solver, target, None)
+    entries = members(target)
+    for name, m in entries.items():
+        if m["form"] != "property" or "NDArray" in m.get("type", ""):
+            continue
+        try:
+            values[name] = to_json(getattr(obj, name), limit=50)
+        except Exception as exc:
+            values[name] = f"unavailable: {type(exc).__name__}"
+    items = entries.get("items")
+    if (
+        items
+        and items["form"] in ("method", "item")
+        and not any(p["required"] for p in items.get("params", []))
+    ):
+        try:
+            values["items"] = to_json(dict(obj.items()))
+        except Exception as exc:
+            values["items"] = f"unavailable: {type(exc).__name__}"
+    return values
 
 
 # ---------------------------------------------------------------------------
@@ -202,6 +241,12 @@ def coerce(value: Any, type_str: str, name: str = "", working_dir: Path | None =
     if value is None:
         return None
     t = type_str or ""
+    if t == "XSection" and isinstance(value, (list, tuple, dict)):
+        # A link's cross-section is assigned whole: [shape, g1, g2, g3, g4] or a dict.
+        if isinstance(value, dict):
+            value = [value.get(k, 0.0) for k in ("shape", "g1", "g2", "g3", "g4")]
+        shape, *geoms = [*value, 0.0, 0.0, 0.0, 0.0][:5]
+        return (coerce(shape, "XSectShape"), *(float(g) for g in geoms))
     for enum_name in _enum_names(t):
         if isinstance(value, str) and not value.lstrip("-").isdigit():
             cls = getattr(_enums, enum_name)
@@ -237,10 +282,14 @@ def coerce(value: Any, type_str: str, name: str = "", working_dir: Path | None =
     return value
 
 
-def to_json(value: Any, limit: int = MAX_ARRAY) -> Any:
+def to_json(value: Any, limit: int = MAX_ARRAY, _depth: int = 0) -> Any:
     """Convert an engine value to plain JSON (enums by name, arrays capped)."""
     if value is None or isinstance(value, str):
         return value
+    if isinstance(value, (np.dtype, type)):
+        return str(value)
+    if _depth > 6:  # self-referencing objects: stop rather than recurse forever
+        return repr(value)
     if isinstance(value, (bool, np.bool_)):
         return bool(value)
     if isinstance(value, enum.Enum):
@@ -258,21 +307,27 @@ def to_json(value: Any, limit: int = MAX_ARRAY) -> Any:
         return value.total_seconds()
     if isinstance(value, np.ndarray):
         if value.ndim == 0:
-            return to_json(value.item(), limit)
+            return to_json(value.item(), limit, _depth + 1)
         if value.dtype.names:
             value = [dict(zip(value.dtype.names, row)) for row in value[:limit]]
-            return [to_json(v, limit) for v in value]
+            return [to_json(v, limit, _depth + 1) for v in value]
         flat = value if value.ndim <= 1 else value.reshape(len(value), -1)
-        out = [to_json(v, limit) for v in flat[:limit].tolist()]
+        out = [to_json(v, limit, _depth + 1) for v in flat[:limit].tolist()]
         return out
     if hasattr(value, "_asdict"):
-        return {k: to_json(v, limit) for k, v in value._asdict().items()}
+        return {k: to_json(v, limit, _depth + 1) for k, v in value._asdict().items()}
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
-        return {f.name: to_json(getattr(value, f.name), limit) for f in dataclasses.fields(value)}
+        return {
+            f.name: to_json(getattr(value, f.name), limit, _depth + 1)
+            for f in dataclasses.fields(value)
+        }
     if isinstance(value, dict):
-        return {str(to_json(k)): to_json(v, limit) for k, v in list(value.items())[:limit]}
+        return {
+            str(to_json(k, limit, _depth + 1)): to_json(v, limit, _depth + 1)
+            for k, v in list(value.items())[:limit]
+        }
     if isinstance(value, (list, tuple, set)):
-        return [to_json(v, limit) for v in list(value)[:limit]]
+        return [to_json(v, limit, _depth + 1) for v in list(value)[:limit]]
     if hasattr(value, "id") and hasattr(value, "index"):
         return value.id  # an element wrapper: report it by id
     fields = {}
@@ -286,5 +341,5 @@ def to_json(value: Any, limit: int = MAX_ARRAY) -> Any:
         if not callable(v):
             fields[k] = v
     if fields:
-        return {k: to_json(v, limit) for k, v in fields.items()}
+        return {k: to_json(v, limit, _depth + 1) for k, v in fields.items()}
     return repr(value)

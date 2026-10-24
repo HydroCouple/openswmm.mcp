@@ -7,17 +7,26 @@ through these five tools, so new engine capabilities need no new tool code.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from fastmcp import Context
 from openswmm.engine import (
+    FlowTracer,
     GeoPackage,
+    HeatSnapshot,
     HotStart,
+    LinkType,
     ModelBuilder,
+    NodeType,
+    Output2DReader,
     OutputReader,
+    TraceLink,
+    TraceNode,
     XSectionGeometry,
     _enums,
+    capabilities,
 )
 from openswmm.engine import _dates as dates_functions
 from openswmm.engine import _datetime as datetime_functions
@@ -154,10 +163,12 @@ async def describe(ctx: Context, topic: str = "", session_id: str | None = None)
     """Discover everything the engine exposes.
 
     "" lists element kinds, services, standalone targets and enums; "<kind>" or "<service>"
-    (e.g. "node", "link", "surface2d.groundwater", "forcing") lists fields and methods with
+    (e.g. "node", "link", "groundwater2d", "forcing") lists fields and methods with
     type, units, read/write and lifecycle phases; "<target>.<member>" gives full detail;
-    "enum:<Name>" lists enum members; "output" lists time-series variables. With
-    session_id, units resolve to the model's unit system and element counts are shown.
+    "enum:<Name>" lists enum members; "output" lists time-series variables;
+    "capabilities" describes the engine build (features, threads, checkpoints). With
+    session_id, units resolve to the model's unit system, element counts are shown and a
+    service's current values are included ("options" lists every option).
     """
     session = await get_session(ctx, session_id) if session_id else None
     solver = session.solver if session else None
@@ -178,8 +189,18 @@ async def describe(ctx: Context, topic: str = "", session_id: str | None = None)
                 kind: [m.lower() for m in cat.catalog()["enums"][enum]]
                 for kind, enum in _OUTPUT_ENUMS.items()
             } | {"note": "Pollutant concentrations: variable 'quality:<pollutant id>'."}
-        if topic in cat.targets():
-            return _describe_target(topic, solver)
+        if topic == "capabilities":
+            return capabilities()
+        name = cat.canonical(topic)
+        if name in cat.targets():
+            out = _describe_target(name, solver)
+            entry = cat.targets()[name]
+            if solver is not None and "collection" not in entry and "construct" not in entry:
+                try:
+                    out["values"] = cat.service_values(solver, name)
+                except Exception as exc:
+                    out["values"] = f"unavailable: {type(exc).__name__}: {exc}"
+            return out
         target, _, name = topic.rpartition(".")
         member = cat.members(target).get(name) if target else None
         if member is None:
@@ -430,6 +451,14 @@ def _bind(member: dict, args: dict[str, Any], session: SimSession, base: Path) -
         )
     positional, keywords, gap = [], {}, False
     for p in params:
+        if "Callable" in p["type"]:
+            if p["required"] or p["name"] in args:
+                raise ToolError(
+                    f"[{ErrorCode.NOT_SUPPORTED}] {member['path']} takes a Python callback "
+                    f"('{p['name']}'), which cannot be passed over MCP."
+                )
+            gap = True
+            continue
         if "Solver" in p["type"] and p["name"] not in args:
             value = session.require_solver()  # e.g. HotStart.apply(solver)
         elif p["name"] not in args:
@@ -476,9 +505,65 @@ _ROOT_CLASSES = {
     "hotstart": HotStart,
     "xsect": XSectionGeometry,
     "builder": ModelBuilder,
+    "surface_output": Output2DReader,
+    "trace": FlowTracer,
+    "heat_snapshot": HeatSnapshot,
 }
 # Objects the session caches and closes itself.
-_CACHED = {"output", "geopackage", "builder"}
+_CACHED = {"output", "geopackage", "builder", "surface_output"}
+_US_FT_TO_M = 0.3048
+
+
+def _surface_reader(session: SimSession, file: Any, base: Path) -> Output2DReader:
+    """A cached reader of a 2D results file: *file*, or the session's own 2D output."""
+    if file is None:
+        if session.state != "ENDED":
+            raise ToolError(
+                f"[{ErrorCode.INVALID_STATE}] The session's 2D output is read after "
+                "run(until='end'); or pass args.file with a 2D results path."
+            )
+        results = session.require_solver().open_results()
+        try:
+            if results.surface is None:
+                raise ToolError(
+                    f"[{ErrorCode.NOT_SUPPORTED}] The model writes no 2D output "
+                    "([2D_OPTIONS] OUTPUT_FILE); pass args.file with a 2D results path."
+                )
+            file = results.surface.reader.path
+        finally:
+            results.close()
+    path = str(cat.coerce(file, "PathLike", "path", base))
+    key = f"surface:{path}"
+    if key not in session.readers:
+        session.readers[key] = Output2DReader(path)
+    return session.readers[key]
+
+
+def _tracer(session: SimSession) -> FlowTracer:
+    """A flow tracer over the session model's network (link lengths in metres)."""
+    if "trace" not in session.readers:
+        solver = session.require_solver()
+        scale = _US_FT_TO_M if solver.unit_system == "US" else 1.0
+        nodes = [TraceNode(n.id, NodeType(int(n.type))) for n in solver.nodes]
+        links = [
+            TraceLink(
+                link.id,
+                link.from_node.index,
+                link.to_node.index,
+                LinkType(int(link.type)),
+                float(link.length) * scale,
+            )
+            for link in solver.links
+        ]
+        session.readers["trace"] = FlowTracer(nodes, links)
+    return session.readers["trace"]
+
+
+def _heat_snapshot(session: SimSession) -> HeatSnapshot:
+    """The session's heat-state snapshot, taken on first use."""
+    if "heat_snapshot" not in session.readers:
+        session.readers["heat_snapshot"] = HeatSnapshot(session.require_solver())
+    return session.readers["heat_snapshot"]
 
 
 def _xsect(session: SimSession, args: dict[str, Any], base: Path) -> XSectionGeometry:
@@ -510,41 +595,68 @@ def _xsect(session: SimSession, args: dict[str, Any], base: Path) -> XSectionGeo
 
 def _standalone(
     session: SimSession, target: str, member: dict, args: dict[str, Any], base: Path
-) -> Any:
-    """The object a standalone target's method runs on (constructed or cached)."""
+) -> Callable[[], Any]:
+    """Take a standalone target's constructor arguments out of *args*; return a factory for
+    the object its method runs on (constructed or cached), so the method's own arguments
+    are checked before anything is opened."""
     if member.get("static"):
         if target == "xsect" and isinstance(args.get("link"), str):
             args["link"] = session.require_solver().links[args["link"]]
-        return _ROOT_CLASSES[target]
+        return lambda: _ROOT_CLASSES[target]
     if target in _CACHED and member["name"] == "close":
         raise ToolError(
             f"[{ErrorCode.NOT_SUPPORTED}] The session opens and closes '{target}' readers itself."
         )
     if target == "xsect":
-        return _xsect(session, args, base)
+        section = _xsect(session, args, base)
+        return lambda: section
     if target == "builder":
         if member["name"] == "to_solver":
             raise ToolError(
                 f"[{ErrorCode.NOT_SUPPORTED}] A built model cannot run in place: write it with "
                 "call(target='builder', method='write', args={'path': ...}) and open_model it."
             )
-        return _builder(session)
+        return lambda: _builder(session)
+    if target == "surface_output":
+        file = args.pop("file", None)  # a method argument may itself be named 'path'
+        return lambda: _surface_reader(session, file, base)
+    if target in ("trace", "heat_snapshot"):
+        make = _tracer if target == "trace" else _heat_snapshot
+        if member["name"] == "close":
+            return lambda: _ClosingHandle(session, target, make)
+        return lambda: make(session)
     path = args.pop("path", None)
     if target == "output":
-        return session.output_reader(
+        return lambda: session.output_reader(
             str(cat.coerce(path, "PathLike", "path", base)) if path else None
         )
     if path is None:
         raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] '{target}' needs a 'path' argument.")
     path = str(cat.coerce(path, "PathLike", "path", base))
     if target == "geopackage":
-        key = f"gpkg:{path}"
-        if key not in session.readers:
-            session.readers[key] = GeoPackage(path)
-        return session.readers[key]
+
+        def _gpkg() -> GeoPackage:
+            key = f"gpkg:{path}"
+            if key not in session.readers:
+                session.readers[key] = GeoPackage(path)
+            return session.readers[key]
+
+        return _gpkg
     if target == "hotstart":
-        return HotStart.open(path)
+        return lambda: HotStart.open(path)
     raise ToolError(f"[{ErrorCode.NOT_SUPPORTED}] '{target}' has no MCP handler.")
+
+
+class _ClosingHandle:
+    """``close`` on a session-cached handle: closes it and forgets it."""
+
+    def __init__(self, session: SimSession, key: str, make: Callable[[SimSession], Any]):
+        self._session, self._key, self._make = session, key, make
+
+    def close(self) -> None:
+        handle = self._session.readers.pop(self._key, None)
+        if handle is not None:
+            handle.close()
 
 
 async def call(
@@ -555,8 +667,10 @@ async def call(
     target is a service ("forcing", "tables", "controls", "surface2d", "reactions", ...),
     an element "<kind>:<id>[.<subview>]" such as "node:OUT1.outfall", a standalone target
     ("output", "xsect", "geopackage", "hotstart" with their constructor args; "builder" for a
-    model authored from scratch, then write it and open_model it) or a function module
-    ("datetime"). args are keyword arguments matching the catalog signature,
+    model authored from scratch, then write it and open_model it; "surface_output" for 2D
+    results, args.file defaulting to the session's; "trace" for flow tracing over the
+    session's network; "heat_snapshot") or a function module ("datetime"). args are
+    keyword arguments matching the catalog signature,
     e.g. call("s", "forcing", "node_lat_inflow", {"node": "J1", "value": 2.5, "persist": true}).
     """
     session = await get_session(ctx, session_id)
@@ -590,13 +704,15 @@ async def call(
 
     def _run() -> Any:
         if "construct" in entry:
-            obj = _standalone(session, name, member, args, base)
+            make = _standalone(session, name, member, args, base)
         else:
-            obj = cat.resolve(session.require_solver(), name, key)
+            solver = session.require_solver()
+            make = lambda: cat.resolve(solver, name, key)  # noqa: E731
+        if member["form"] == "item":
+            return cat.to_json(_item(make(), method, member, args))
+        positional, keywords = _bind(member, args, session, base)
+        obj = make()
         try:
-            if member["form"] == "item":
-                return cat.to_json(_item(obj, method, member, args))
-            positional, keywords = _bind(member, args, session, base)
             if name == "editor" or _STRUCTURAL.match(method):
                 session.structure_edited = True  # before mutating
             return cat.to_json(getattr(obj, method)(*positional, **keywords))

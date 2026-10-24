@@ -19,6 +19,7 @@ from openswmm.engine import (
     OutputReader,
     OutSubcatchVar,
     OutSystemVar,
+    Results,
     get_report_snapshot,
 )
 
@@ -50,11 +51,18 @@ T = TypeVar("T")
 # ---------------------------------------------------------------------------
 # Output reading
 # ---------------------------------------------------------------------------
-async def _with_reader(ctx: Context, source: str, fn: Callable[[OutputReader], T]) -> T:
-    """Run ``fn(reader)`` in a worker thread on a fresh reader of *source*'s output.
+_SURFACE_SUFFIXES = (".h5", ".hdf5", ".nc")
+_SURFACE_KINDS = ("cell", "edge")
 
-    *source* is a session ID or an ``.out`` path. A session's output is read under
-    the session lock, and only once its run has ended.
+
+async def _with_results(
+    ctx: Context, source: str, fn: Callable[[Results], T], *, live: bool = False
+) -> T:
+    """Run ``fn(results)`` in a worker thread on fresh readers of *source*'s outputs.
+
+    *source* is a session ID, a binary ``.out`` path or a 2D ``.h5`` path. A
+    session's outputs are read under the session lock once its run has ended,
+    or, with ``live=True``, the 1D output while it is still running.
     """
     sm = get_session_manager(ctx)
     session = await sm.get(source) if await sm.exists(source) else None
@@ -66,16 +74,27 @@ async def _with_reader(ctx: Context, source: str, fn: Callable[[OutputReader], T
             )
 
     def _run() -> T:
-        if session is not None and session.state != "ENDED":
-            raise ToolError(
-                f"[{ErrorCode.INVALID_STATE}] Session '{source}' has no finished results "
-                f"(state {session.state}); run it with run(until='end') first."
-            )
-        reader = OutputReader(session.out_path if session is not None else str(path))
+        if session is not None:
+            if live and session.state not in ("STARTED", "RUNNING", "ENDED"):
+                raise ToolError(
+                    f"[{ErrorCode.INVALID_STATE}] Session '{source}' has not started "
+                    f"(state {session.state}); live results need a running simulation."
+                )
+            if not live and session.state != "ENDED":
+                raise ToolError(
+                    f"[{ErrorCode.INVALID_STATE}] Session '{source}' has no finished results "
+                    f"(state {session.state}); run it with run(until='end') first, or pass "
+                    "live=True to read the 1D output while it runs."
+                )
+            results = session.require_solver().open_results(live=live and session.state != "ENDED")
+        elif path.suffix.lower() in _SURFACE_SUFFIXES:
+            results = Results(surface=str(path))
+        else:
+            results = Results(str(path), live=live)
         try:
-            return fn(reader)
+            return fn(results)
         finally:
-            reader.close()
+            results.close()
 
     if session is not None:
         return await session.call(_run, context=f"results of {source}")
@@ -87,9 +106,77 @@ async def _with_reader(ctx: Context, source: str, fn: Callable[[OutputReader], T
         raise engine_error(exc, f"results of {source}") from exc
 
 
+def _output(results: Results) -> OutputReader:
+    if results.output is None:
+        raise ToolError(
+            f"[{ErrorCode.VALIDATION_ERROR}] This source has no 1D output; use kind 'cell' "
+            "or 'edge' for 2D results."
+        )
+    return results.output
+
+
+def _surface_series(results: Results, kind: str, variable: str, ids: list[str] | None):
+    """Yield ``(id, (times, values))`` of a 2D variable for cells (``"12"``) or cell edges
+    (``"12:0"``); every cell when ids is None."""
+    surface = results.surface
+    if surface is None:
+        raise ToolError(
+            f"[{ErrorCode.VALIDATION_ERROR}] This source has no 2D output (the model needs "
+            "[2D_OPTIONS] OUTPUT_FILE)."
+        )
+    if variable.lower().startswith("species:"):
+        name = variable.split(":", 1)[1]
+        if name not in surface.species:
+            raise ToolError(
+                f"[{ErrorCode.VALIDATION_ERROR}] Unknown species '{name}'; recorded: "
+                f"{sorted(surface.species)}."
+            )
+        field = surface.species[name]
+    else:
+        recorded = surface.variables
+        if variable not in recorded:
+            raise ToolError(
+                f"[{ErrorCode.VALIDATION_ERROR}] 2D variable '{variable}' was not recorded."
+                f"{cat.suggest(variable, recorded)} Recorded: {sorted(recorded)}."
+            )
+        field = recorded[variable]
+    need = ("time", "cell", "edge") if kind == "edge" else ("time", "cell")
+    if tuple(field.dimensions) != need:
+        raise ToolError(
+            f"[{ErrorCode.VALIDATION_ERROR}] '{variable}' has axes {field.dimensions}; kind "
+            f"'{kind}' reads variables with axes {need}."
+        )
+    times = field.times
+    keys = ids if ids is not None else [str(i) for i in range(len(surface.cells))]
+    for key in keys:
+        try:
+            parts = [int(p) for p in str(key).split(":")]
+            bound = (
+                field.bind(cell=parts[0], edge=parts[1])
+                if kind == "edge"
+                else field.bind(cell=parts[0])
+            )
+        except (ValueError, IndexError):
+            raise ToolError(
+                f"[{ErrorCode.VALIDATION_ERROR}] {kind} ids are "
+                + ("'<cell>:<edge>' integer pairs" if kind == "edge" else "integer cell indices")
+                + f"; got '{key}'."
+            ) from None
+        yield str(key), (times, np.asarray(bound.read(), dtype=float))
+
+
+def _series_pairs(results: Results, kind: str, variable: str, ids: list[str] | None):
+    if kind in _SURFACE_KINDS:
+        return _surface_series(results, kind, variable, ids)
+    return _output_series(_output(results), kind, variable, ids)
+
+
 def _variable(kind: str, variable: str, reader: OutputReader) -> int:
     if kind not in _VARS:
-        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] kind must be one of {sorted(_VARS)}.")
+        raise ToolError(
+            f"[{ErrorCode.VALIDATION_ERROR}] kind must be one of "
+            f"{sorted(_VARS) + list(_SURFACE_KINDS)}."
+        )
     enum = _VARS[kind]
     name = variable.strip()
     if name.lower().startswith(("quality:", "concentration:")):
@@ -179,53 +266,63 @@ async def timeseries(
     start: str | None = None,
     end: str | None = None,
     max_points: int = 500,
+    live: bool = False,
 ) -> dict:
-    """Read result time series from a session (source = session_id) or an .out file path.
+    """Read result time series from a session (source = session_id), an .out or a 2D .h5 file.
 
-    kind is node, link, subcatchment or system (ids ignored). variable is an output variable
-    ("depth", "flow", "runoff", "quality:TSS", ...; see describe("output")). Longer series
-    are downsampled to max_points, preserving peaks.
+    kind is node, link, subcatchment, system (ids ignored), cell (ids are 2D cell indices) or
+    edge (ids '<cell>:<edge>'). variable is an output variable ("depth", "flow", "runoff",
+    "quality:TSS", a recorded 2D variable, "species:<name>"; see describe("output")). Longer
+    series are downsampled to max_points, preserving peaks. live=True reads the 1D output of
+    a session that is still running.
     """
 
-    def _run(reader: OutputReader) -> dict:
-        var = _variable(kind, variable, reader)
-        times, lo, hi = _window(reader, start, end)
-        keys = [None] if kind == "system" else ids
-        series = {}
-        for key in keys:
-            values = _series(reader, kind, key, var, lo, hi)
-            t, v = _decimate(times[lo : hi + 1], values, max_points)
-            series[key or "system"] = {
-                "times": [str(x) for x in t],
-                "values": cat.to_json(v),
-                "peak": cat.to_json(values.max()) if len(values) else None,
-            }
+    def _run(results: Results) -> dict:
+        if kind in _SURFACE_KINDS:
+            pairs = list(_surface_series(results, kind, variable, ids))
+            lo_t = np.datetime64(datetime.fromisoformat(start)) if start else None
+            hi_t = np.datetime64(datetime.fromisoformat(end)) if end else None
+            series, periods = {}, 0
+            for key, (times, values) in pairs:
+                keep = np.ones(len(times), dtype=bool)
+                if lo_t is not None:
+                    keep &= times >= lo_t
+                if hi_t is not None:
+                    keep &= times <= hi_t
+                t, v = _decimate(times[keep], values[keep], max_points)
+                periods = int(keep.sum())
+                series[key] = {
+                    "times": [str(x) for x in t],
+                    "values": cat.to_json(v),
+                    "peak": cat.to_json(values[keep].max()) if keep.any() else None,
+                }
+        else:
+            reader = _output(results)
+            var = _variable(kind, variable, reader)
+            times, lo, hi = _window(reader, start, end)
+            series, periods = {}, hi - lo + 1
+            for key in [None] if kind == "system" else ids:
+                values = _series(reader, kind, key, var, lo, hi)
+                t, v = _decimate(times[lo : hi + 1], values, max_points)
+                series[key or "system"] = {
+                    "times": [str(x) for x in t],
+                    "values": cat.to_json(v),
+                    "peak": cat.to_json(values.max()) if len(values) else None,
+                }
         return {
             "source": source,
             "kind": kind,
             "variable": variable,
-            "periods": hi - lo + 1,
+            "periods": periods,
             "series": series,
         }
 
-    return await _with_reader(ctx, source, _run)
+    return await _with_results(ctx, source, _run, live=live)
 
 
 # ---------------------------------------------------------------------------
 # report
 # ---------------------------------------------------------------------------
-def _service_values(solver: Any, target: str) -> dict[str, Any]:
-    values = {}
-    for name, m in cat.members(target).items():
-        if m["form"] != "property" or "NDArray" in m.get("type", ""):
-            continue
-        try:
-            values[name] = cat.to_json(getattr(cat.resolve(solver, target, None), name), limit=50)
-        except Exception as exc:
-            values[name] = f"unavailable: {type(exc).__name__}"
-    return values
-
-
 def _has_surface(solver: Any) -> bool:
     try:
         return bool(solver.surface2d.n_cells)
@@ -287,7 +384,7 @@ async def report(
             target = "surface2d" if name == "2d" else "groundwater2d"
             if not _has_surface(solver):
                 return {"name": name, "active": False, "note": "The model has no 2D surface."}
-            return {"name": name, "active": True, "values": _service_values(solver, target)}
+            return {"name": name, "active": True, "values": cat.service_values(solver, target)}
         snapshot = get_report_snapshot(solver)
         if name == "mass_balance":
             return {
@@ -387,8 +484,8 @@ async def compare(
             data = await asyncio.to_thread(_observed_csv, resolve_path(source, base))
             pairs = data.items() if keys is None else ((k, data[k]) for k in keys if k in data)
             return consume(iter(pairs))
-        return await _with_reader(
-            ctx, source, lambda reader: consume(_output_series(reader, kind, variable, keys))
+        return await _with_results(
+            ctx, source, lambda results: consume(_series_pairs(results, kind, variable, keys))
         )
 
     series_a = await _read(a, ids, dict)
@@ -453,15 +550,15 @@ async def export(
             ]
     else:
 
-        def _table(reader: OutputReader) -> tuple[list[str], list[list[Any]]]:
-            pairs = list(_output_series(reader, kind, variable, None))
+        def _table(results: Results) -> tuple[list[str], list[list[Any]]]:
+            pairs = list(_series_pairs(results, kind, variable, None))
             times = pairs[0][1][0] if pairs else []
             rows = [
                 [str(t), *(cat.to_json(v[n]) for _, (_, v) in pairs)] for n, t in enumerate(times)
             ]
             return ["time", *(k for k, _ in pairs)], rows
 
-        header, rows = await _with_reader(ctx, session_id, _table)
+        header, rows = await _with_results(ctx, session_id, _table)
     dest.parent.mkdir(parents=True, exist_ok=True)
     if fmt == "json":
         dest.write_text(json.dumps([dict(zip(header, r)) for r in rows]), encoding="utf-8")
