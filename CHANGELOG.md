@@ -22,9 +22,9 @@ version is now `0.2.0.dev0`.
 - **The SWMM 5 (legacy) backend.** Every session runs the handle-based
   OpenSWMM 6 engine. `save(profile="SWMM5")` still writes a SWMM 5 compatible
   `.inp`.
-- The `engine` optional extra: `openswmm>=6.0.0a4.dev1` is now a required
-  dependency, and the server needs an engine build that ships
-  `openswmm.engine.catalog`.
+- The `engine` optional extra: `openswmm>=6.0.0a4.dev2` is now a required
+  dependency, and the server needs an engine catalog of revision 2 or later
+  (`openswmm.engine.catalog`).
 - `openswmm_mcp.gym_support.config`, `.registry` and `.envs`: the environment
   spec layer moved to `openswmm_gymnasium.spec`, and the `gym` extra now
   installs `openswmm.gymnasium[spec]`.
@@ -60,9 +60,33 @@ version is now `0.2.0.dev0`.
   definition size (`test_server_budget.py`).
 - Unit labels come from the engine catalog (`openswmm.engine.catalog.unit_label`),
   shared with openswmm.gymnasium.
+- **`describe("capabilities")`** reports the engine build
+  (`openswmm.engine.capabilities()`). `describe` resolves shared-view names to
+  their canonical target (`surface2d.groundwater` is `groundwater2d`), and with
+  a `session_id` returns a service's current values: `describe("options")`
+  lists every option through the engine's own key enumeration.
+- **2D and live results.** `timeseries`, `compare` and `export` read 2D cell and
+  edge series (`kind="cell"` / `"edge"`, ids `"12"` / `"12:3"`) and species,
+  and `timeseries(live=True)` reads a running session's 1D output.
+- **`call` reaches flow tracing (`trace`), the 2D results reader
+  (`surface_output`) and heat snapshots.** Methods that take a Python callback
+  are refused, naming the method.
+- **Optimisation jobs run on `openswmm_gymnasium.optimize`.** `gym_job` evaluates
+  each population in parallel on local worker processes
+  (`optimization.workers`, default all but one CPU, at most 8). An engine
+  crash fails only its candidate (`optimization.on_failure`: `"fail"` or
+  `"penalty"`) instead of the server.
+- The tool budget test reserves room for the 7 `platform_*` tools of the cloud
+  execution platform plan (core + gym + platform ≤ 26 tools, 40k characters).
+  The server instructions and `open_model` mark text read from model and result
+  files as data, not instructions.
 
 ### Fixed
 
+- `report(name="groundwater")` raised `KeyError` on every meshed model: the
+  catalog target is now `groundwater2d`.
+- `set` on a cross-section changed nothing: its geometry fields are read-only.
+  `link.xsect` now takes `[shape, g1, g2, g3, g4]` or a mapping.
 - `find` and `get` on an element kind the model has none of (subcatchments in a
   2D-only model) returned an engine error; they now return no rows.
 - `get_item`, `set_item` and `delete_item` through `call` name a missing `key`
