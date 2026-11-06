@@ -451,15 +451,7 @@ def _bind(member: dict, args: dict[str, Any], session: SimSession, base: Path) -
         )
     positional, keywords, gap = [], {}, False
     for p in params:
-        if "Callable" in p["type"]:
-            if p["required"] or p["name"] in args:
-                raise ToolError(
-                    f"[{ErrorCode.NOT_SUPPORTED}] {member['path']} takes a Python callback "
-                    f"('{p['name']}'), which cannot be passed over MCP."
-                )
-            gap = True
-            continue
-        if "Solver" in p["type"] and p["name"] not in args:
+        if "Solver" in p["type"] and "Callable" not in p["type"] and p["name"] not in args:
             value = session.require_solver()  # e.g. HotStart.apply(solver)
         elif p["name"] not in args:
             if p["required"]:
@@ -470,6 +462,11 @@ def _bind(member: dict, args: dict[str, Any], session: SimSession, base: Path) -
             gap = True
             continue
         else:
+            if "Callable" in p["type"]:
+                raise ToolError(
+                    f"[{ErrorCode.NOT_SUPPORTED}] {member['path']} takes a Python callback "
+                    f"('{p['name']}'), which cannot be passed over MCP."
+                )
             value = cat.coerce(args[p["name"]], p["type"], p["name"], base)
         if gap or p.get("keyword_only"):
             keywords[p["name"]] = value
@@ -599,6 +596,15 @@ def _standalone(
     """Take a standalone target's constructor arguments out of *args*; return a factory for
     the object its method runs on (constructed or cached), so the method's own arguments
     are checked before anything is opened."""
+    if target == "split_frame":
+
+        def _unsupported_frame() -> Any:
+            raise ToolError(
+                f"[{ErrorCode.NOT_SUPPORTED}] Native split frames require in-process "
+                "Python ownership and cannot be passed over MCP."
+            )
+
+        return _unsupported_frame
     if member.get("static"):
         if target == "xsect" and isinstance(args.get("link"), str):
             args["link"] = session.require_solver().links[args["link"]]

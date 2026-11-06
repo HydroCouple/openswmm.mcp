@@ -54,7 +54,9 @@ def _model(name: str) -> str:
 
 def _required(member: dict) -> list[str]:
     return [
-        p["name"] for p in member.get("params", []) if p["required"] and "Solver" not in p["type"]
+        p["name"]
+        for p in member.get("params", [])
+        if p["required"] and ("Solver" not in p["type"] or "Callable" in p["type"])
     ]
 
 
