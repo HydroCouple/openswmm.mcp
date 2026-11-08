@@ -21,6 +21,12 @@ jobs:
   pytest:
     name: pytest (Python ${{ matrix.python-version }}, ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    env:
+      VCPKG_ROOT: ${{ github.workspace }}/.ci/vcpkg
+      VCPKG_BINARY_SOURCES: "clear;files,${{ github.workspace }}/.ci/vcpkg-cache,readwrite"
+      CMAKE_BUILD_PARALLEL_LEVEL: "2"
+      OMP_NUM_THREADS: "1"
+      OPENSWMM_2D_BACKEND: cpu
     permissions:
       contents: read
     strategy:
@@ -32,16 +38,69 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
 
+      # The required engine is not on PyPI yet. Build a pinned source version
+      # with the real 2D/HDF5 and GeoPackage features exercised by this suite.
+      - name: Checkout engine
+        uses: actions/checkout@v5
+        with:
+          repository: HydroCouple/openswmm.engine
+          ref: 76c032fb4a2f510b59071051585949afa076422a
+          path: .ci/openswmm.engine
+
+      - name: Checkout vcpkg
+        uses: actions/checkout@v5
+        with:
+          repository: microsoft/vcpkg
+          ref: 9e593bb18ea69cc5095e012465dcd675a822ed0d
+          path: .ci/vcpkg
+
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+
+      - name: Set up MSVC
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Prepare native dependency cache
+        shell: bash
+        run: mkdir -p .ci/vcpkg-cache
+
+      - name: Cache native dependencies
+        uses: actions/cache@v4
+        with:
+          path: .ci/vcpkg-cache
+          key: vcpkg-${{ runner.os }}-${{ runner.arch }}-9e593bb18ea69cc5095e012465dcd675a822ed0d-2d-geopackage
+
+      - name: Bootstrap vcpkg (Unix)
+        if: runner.os != 'Windows'
+        run: ./.ci/vcpkg/bootstrap-vcpkg.sh -disableMetrics
+
+      - name: Bootstrap vcpkg (Windows)
+        if: runner.os == 'Windows'
+        run: .\.ci\vcpkg\bootstrap-vcpkg.bat -disableMetrics
+
+      - name: Install engine from source
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "scikit-build-core>=0.11" "Cython>=3.0.12" \
+            "cmake>=4.3" ninja "numpy>=1.21"
+          python -m pip install --no-build-isolation ./.ci/openswmm.engine/python \
+            --config-settings=cmake.define.VCPKG_MANIFEST_NO_DEFAULT_FEATURES=ON \
+            --config-settings=cmake.define.VCPKG_MANIFEST_FEATURES="2d;geopackage" \
+            --config-settings=cmake.define.OPENSWMM_BUILD_2D=ON \
+            --config-settings=cmake.define.OPENSWMM_WITH_HDF5=ON \
+            --config-settings=cmake.define.OPENSWMM_WITH_GEOPACKAGE=ON \
+            --config-settings=cmake.define.OPENSWMM_BUILD_GPU_PLUGIN=OFF
 
       - name: Install package + dev extras
         shell: bash
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
+          python -m pip check
 
       - name: Run unit tests
         shell: bash
