@@ -233,8 +233,14 @@ ruff format src/ tests/
 
 ### Building Docs
 
+For a docs-only environment, install the documentation requirements and the
+package without its runtime dependencies. Sphinx uses import mocks for the
+engine and optional integrations.
+
 ```bash
-sphinx-build -b html docs docs/_build/html
+python -m pip install -r docs/requirements.txt
+python -m pip install --no-deps -e .
+sphinx-build -b html -W --keep-going docs docs/_build/html
 ```
 
 The documentation site uses [PyData Sphinx Theme](https://pydata-sphinx-theme.readthedocs.io/) with [MyST Parser](https://myst-parser.readthedocs.io/) for Markdown support.

@@ -128,8 +128,14 @@ ruff format src/ tests/
 
 ## Building Documentation
 
+For a docs-only environment, install the documentation requirements and the
+package without its runtime dependencies. Sphinx uses import mocks for the
+engine and optional integrations.
+
 ```bash
-sphinx-build -W -b html docs docs/_build/html
+python -m pip install -r docs/requirements.txt
+python -m pip install --no-deps -e .
+sphinx-build -b html -W --keep-going docs docs/_build/html
 ```
 
 Open `docs/_build/html/index.html` in a browser to preview.

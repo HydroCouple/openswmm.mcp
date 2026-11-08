@@ -9,6 +9,7 @@ on:
       - "src/openswmm_mcp/**"
       - "README.md"
       - "CHANGELOG.md"
+      - "pyproject.toml"
       - ".github/workflows/documentation.yml"
   pull_request:
     branches: [main, dev]
@@ -17,6 +18,7 @@ on:
       - "src/openswmm_mcp/**"
       - "README.md"
       - "CHANGELOG.md"
+      - "pyproject.toml"
       - ".github/workflows/documentation.yml"
   workflow_dispatch:
 
@@ -45,10 +47,11 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install docs + package extras
+      - name: Install documentation dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[docs]"
+          python -m pip install -r docs/requirements.txt
+          python -m pip install --no-deps -e .
 
       - name: Build Sphinx HTML (strict, fail on warning)
         # docs/CNAME pins the Pages custom domain and must ride along at the

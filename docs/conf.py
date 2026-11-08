@@ -1,5 +1,10 @@
 """Sphinx configuration for the OpenSWMM MCP Server documentation."""
 
+from contextlib import ExitStack
+from importlib import import_module
+
+from sphinx.ext.autodoc.mock import mock
+
 project = "OpenSWMM MCP Server"
 copyright = "2026, Caleb Buahin"
 author = "Caleb Buahin"
@@ -68,5 +73,19 @@ autosummary_generate = True
 # redeclare the abstract members of Backend).
 suppress_warnings = ["ref.python", "duplicate"]
 
-# Don't fail if openswmm C extensions aren't installed
-autodoc_mock_imports = ["openswmm", "openswmm.engine", "fastmcp"]
+# Documentation imports the Python API without the compiled engine or optional integrations.
+autodoc_mock_imports = ["openswmm", "fastmcp", "openswmm_gymnasium"]
+
+# The server checks catalog compatibility at import time. Keep the engine mock
+# alive across autodoc imports and give it the minimum revision expected by
+# openswmm_mcp.catalog.MIN_CATALOG_REVISION; no engine methods run in this build.
+_docs_mocks = ExitStack()
+_docs_mocks.enter_context(mock(["openswmm"]))
+_engine = import_module("openswmm.engine")
+_catalog = _engine.catalog
+_catalog.revision = lambda: 2
+_engine.catalog = _catalog
+
+
+def setup(app):
+    app.connect("build-finished", lambda app, exception: _docs_mocks.close())
