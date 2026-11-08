@@ -467,7 +467,11 @@ def _bind(member: dict, args: dict[str, Any], session: SimSession, base: Path) -
                     f"[{ErrorCode.NOT_SUPPORTED}] {member['path']} takes a Python callback "
                     f"('{p['name']}'), which cannot be passed over MCP."
                 )
-            value = cat.coerce(args[p["name"]], p["type"], p["name"], base)
+            # The reader's path names an HDF5 object; args.file selects the file.
+            arg_base = (
+                None if member.get("target") == "surface_output" and p["name"] == "path" else base
+            )
+            value = cat.coerce(args[p["name"]], p["type"], p["name"], arg_base)
         if gap or p.get("keyword_only"):
             keywords[p["name"]] = value
         else:
