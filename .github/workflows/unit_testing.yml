@@ -81,6 +81,12 @@ jobs:
         if: runner.os == 'Windows'
         run: .\.ci\vcpkg\bootstrap-vcpkg.bat -disableMetrics
 
+      # Apple Clang does not ship the OpenMP runtime. The pinned engine's
+      # legacy library needs it to avoid its duplicate serial fallback symbols.
+      - name: Install OpenMP (macOS)
+        if: runner.os == 'macOS'
+        run: brew install libomp
+
       - name: Install engine from source
         shell: bash
         run: |
