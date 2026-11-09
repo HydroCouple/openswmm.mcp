@@ -1,0 +1,170 @@
+<!doctype html><html><head><meta charset="utf-8"><title>OpenSWMM — Optimization Results Dashboard</title>
+<style>
+body{font-family:-apple-system,Segoe UI,Arial;margin:0;background:#f5f6f8;color:#222}
+header{padding:14px 20px;background:#fff;border-bottom:1px solid #e4e6eb}header h1{font-size:19px;margin:0}header p{margin:4px 0 0;color:#666;font-size:13px}
+.tabs{display:flex;gap:4px;padding:8px 14px 0;background:#fff;border-bottom:1px solid #e4e6eb;flex-wrap:wrap}
+.tab{cursor:pointer;border:1px solid #e4e6eb;border-bottom:none;background:#f1f3f5;border-radius:8px 8px 0 0;padding:8px 14px;font-size:13px;color:#444}
+.tab.active{background:#fff;color:#111;font-weight:600;box-shadow:0 -2px 0 #2b6cb0 inset}
+.panel{padding:14px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.full{grid-column:1/-1}@media(max-width:980px){.grid{grid-template-columns:1fr}}
+.card{background:#fff;border:1px solid #e4e6eb;border-radius:10px;padding:10px}
+#pareto,#savings{width:100%;height:380px}#compare{width:100%;height:560px}#econBars,#pcoords,#ctlLines,#ctlHeat,#robFlood,#robCso{width:100%}
+#kpis,#econCards{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:8px}@media(max-width:980px){#kpis,#econCards{grid-template-columns:repeat(2,1fr)}}
+.kpi{border:1px solid #e4e6eb;border-radius:10px;padding:10px;text-align:center;background:#fafbfc}.kpi.good{border-color:#b7e1c4}.kpi.bad{border-color:#f1b0ab}
+.kpi .kv{font-size:20px;font-weight:700}.kpi.good .kv{color:#1e7e34}.kpi.bad .kv{color:#b3261e}.kpi .kl{font-size:12px;color:#444;margin-top:2px}.kpi .ks{font-size:11px;color:#888}
+.bar{display:flex;align-items:center;gap:10px;padding:8px 4px;flex-wrap:wrap}
+select{padding:5px 8px;border-radius:8px;border:1px solid #cbd2d9;font-size:13px}button{cursor:pointer;border:1px solid #cbd2d9;background:#fff;border-radius:8px;padding:5px 11px;font-size:13px}
+.window{background:#f8fafc;border:1px dashed #cbd5e0;border-radius:8px;margin:6px 4px;padding:6px 10px}.window .hd{font-size:12px;color:#444;font-weight:600;margin-bottom:2px}
+.window .controls{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.window label{font-size:12px;color:#555}.window input[type=range]{flex:1;min-width:120px}
+.msg{color:#555;font-size:13px;padding:4px 4px 10px}
+</style><script>/* __PLOTLY_JS__ : inline plotly.min.js (offline) or a CDN <script> */</script></head><body>
+<header><h1>Optimization Results Dashboard</h1>
+<p>Comprehensive evaluation of control configurations: Pareto trade-offs, cost-benefit/ROI, multi-objective parallel coordinates, control explainability, and robustness across a storm ensemble. (Synthetic demo data.)</p></header>
+<div class="tabs"><div class="tab active" data-tab="tradeoffs">Trade-offs</div><div class="tab" data-tab="econ">Cost-benefit</div><div class="tab" data-tab="pcoords">Parallel coords</div><div class="tab" data-tab="control">Control</div><div class="tab" data-tab="robust">Robustness</div></div>
+
+<div class="panel" id="panel-tradeoffs">
+  <div class="grid">
+    <div class="card"><div id="pareto"></div></div>
+    <div class="card"><div id="savings"></div></div>
+    <div class="card full"><div id="kpis"></div></div>
+    <div class="card full"><div class="bar"><strong>Granular asset:</strong><select id="assetSel"></select>
+      <span style="color:#666;font-size:12px">— dotted = baseline, solid = optimized; orange = baseline window, green = optimized</span></div>
+      <div id="compare"></div>
+      <div class="window"><div class="hd">Window (global ⇄ local) — macro &amp; granular linked</div>
+        <div class="controls"><label>start</label><input type="range" id="winStart"><label>end</label><input type="range" id="winEnd"><button id="btnFull">Full</button><button id="btnEvent">Event</button></div></div></div>
+  </div>
+</div>
+
+<div class="panel" id="panel-econ" style="display:none"><div class="card"><div id="econBars" style="height:380px"></div></div><div id="econCards"></div></div>
+
+<div class="panel" id="panel-pcoords" style="display:none"><div class="card"><div id="pcoords" style="height:520px"></div></div></div>
+
+<div class="panel" id="panel-control" style="display:none">
+  <div class="msg" id="ctlMsg"></div>
+  <div class="card"><div id="ctlLines" style="height:340px"></div></div>
+  <div class="card" style="margin-top:14px"><div id="ctlHeat" style="height:360px"></div></div></div>
+
+<div class="panel" id="panel-robust" style="display:none">
+  <div class="msg" id="robMsg"></div>
+  <div class="grid"><div class="card"><div id="robFlood" style="height:360px"></div></div><div class="card"><div id="robCso" style="height:360px"></div></div></div>
+  <div id="relCard" style="max-width:280px;margin-top:14px"></div></div>
+
+<script>var DATA=/* __DATA_JSON__ : json.dumps(DATA) per DASHBOARD.md */ {};</script><script>/* Optimization-results dashboard — tabbed analysis suite. Driven by DATA. */
+(function () {
+  "use strict";
+  function $(id){return document.getElementById(id);}
+  var T=DATA.times.length, times=DATA.times, win=[0,T-1], syncing=false, sel=null;
+  function cfg(id){for(var i=0;i<DATA.configs.length;i++)if(DATA.configs[i].id===id)return DATA.configs[i];return null;}
+  function cfgIdx(id){for(var i=0;i<DATA.configs.length;i++)if(DATA.configs[i].id===id)return i;return -1;}
+  function fmt$(v){return (v<0?"-$":"$")+Math.abs(Math.round(v)).toLocaleString();}
+  function nearestIdx(x){var b=0,bd=1e18;for(var i=0;i<T;i++){var d=Math.abs(times[i]-x);if(d<bd){bd=d;b=i;}}return b;}
+
+  /* ---- Pareto ---- */
+  var paretoDiv=$("pareto"),savingsDiv=$("savings"),compareDiv=$("compare"),kpis=$("kpis"),assetSel=$("assetSel");
+  function buildPareto(){
+    var dom=DATA.configs.filter(function(c){return !c.pareto;}),par=DATA.configs.filter(function(c){return c.pareto;}).sort(function(a,b){return a.objectives.flooding-b.objectives.flooding;});
+    var tr=[{x:dom.map(function(c){return c.objectives.flooding;}),y:dom.map(function(c){return c.objectives.cso;}),customdata:dom.map(function(c){return c.id;}),mode:"markers",type:"scatter",name:"dominated",marker:{color:"#cbd5e0",size:9,line:{width:1,color:"#a0aec0"}},hovertemplate:"%{customdata}<br>flood %{x:.2f} · CSO %{y:.2f}<extra></extra>"},
+      {x:par.map(function(c){return c.objectives.flooding;}),y:par.map(function(c){return c.objectives.cso;}),customdata:par.map(function(c){return c.id;}),mode:"markers+lines",type:"scatter",name:"Pareto front",line:{color:"#cbd5e0",dash:"dot"},marker:{size:15,color:par.map(function(c){return c.savings.cost;}),colorscale:"Viridis",colorbar:{title:"$ saved",x:1.02},line:{width:1.5,color:"#2d3748"}},hovertemplate:"%{customdata}<br>flood %{x:.2f} · CSO %{y:.2f}<br>saved %{marker.color:$,.0f}<extra></extra>"}];
+    Plotly.newPlot(paretoDiv,tr,{title:"Pareto front — click a configuration",xaxis:{title:"flooding cost"},yaxis:{title:"uncontrolled-discharge cost"},margin:{l:60,r:20,t:40,b:45},template:"plotly_white",showlegend:false},{responsive:true});
+    paretoDiv.on("plotly_click",function(ev){if(ev.points&&ev.points.length)selectConfig(ev.points[0].customdata);});
+  }
+  function markSelected(){var par=DATA.configs.filter(function(c){return c.pareto;}).sort(function(a,b){return a.objectives.flooding-b.objectives.flooding;});
+    Plotly.restyle(paretoDiv,{"marker.line.width":[par.map(function(c){return c.id===sel?4:1.5;})],"marker.line.color":[par.map(function(c){return c.id===sel?"#e53e3e":"#2d3748";})]},[1]);}
+  function buildSavings(){var c=cfg(sel),b=DATA.baseline.objectives,keys=DATA.obj_keys,labels=keys.map(function(k){return DATA.obj_labels[k];});
+    Plotly.react(savingsDiv,[{x:labels,y:keys.map(function(k){return b[k];}),name:"baseline",type:"bar",marker:{color:"#a0aec0"}},{x:labels,y:keys.map(function(k){return c.objectives[k];}),name:"optimized",type:"bar",marker:{color:"#38a169"}}],
+      {title:"Objective costs — baseline vs "+sel,barmode:"group",yaxis:{title:"normalized cost",range:[0,1]},margin:{l:55,r:20,t:40,b:60},template:"plotly_white",legend:{orientation:"h",y:-0.3}});}
+  function renderKPIs(){var c=cfg(sel),dWin=(DATA.baseline.event_window[1]-DATA.baseline.event_window[0])-(c.event_window[1]-c.event_window[0]);
+    var cards=[["Cost savings",fmt$(c.savings.cost),"vs "+fmt$(DATA.baseline.cost),"good"],["Flooding reduction",c.savings.flood_pct+"%","objective ↓","good"],["Uncontrolled ↓",c.savings.cso_pct+"%","untreated spill","good"],["Adverse window ↓",dWin.toFixed(2)+" h","shorter impact",dWin>=0?"good":"bad"]];
+    kpis.innerHTML="";cards.forEach(function(k){var d=document.createElement("div");d.className="kpi "+k[3];d.innerHTML="<div class='kv'>"+k[1]+"</div><div class='kl'>"+k[0]+"</div><div class='ks'>"+k[2]+"</div>";kpis.appendChild(d);});}
+  function evShapes(w,color){return [{type:"rect",xref:"x",yref:"paper",x0:w[0],x1:w[1],y0:0,y1:1,fillcolor:color,opacity:0.12,line:{width:0},layer:"below"}];}
+  function buildCompare(){var c=cfg(sel),b=DATA.baseline,a=assetSel.value;
+    var tr=[{x:times,y:b.macro.flooding,name:"flooding — baseline",yaxis:"y",line:{color:"crimson",dash:"dot"}},
+      {x:times,y:c.macro.flooding,name:"flooding — optimized",yaxis:"y",line:{color:"crimson"},fill:"tonexty",fillcolor:"rgba(220,20,60,0.12)"},
+      {x:times,y:b.macro.uncontrolled,name:"uncontrolled — baseline",yaxis:"y",line:{color:"purple",dash:"dot"}},
+      {x:times,y:c.macro.uncontrolled,name:"uncontrolled — optimized",yaxis:"y",line:{color:"purple"}},
+      {x:times,y:b.granular[a],name:a+" — baseline",xaxis:"x2",yaxis:"y2",line:{color:"#2b6cb0",dash:"dot"}},
+      {x:times,y:c.granular[a],name:a+" — optimized",xaxis:"x2",yaxis:"y2",line:{color:"#2b6cb0"},fill:"tonexty",fillcolor:"rgba(43,108,176,0.12)"}];
+    Plotly.react(compareDiv,tr,{title:"Baseline vs optimized — macro (top) & granular (bottom), linked x",grid:{rows:2,columns:1,pattern:"coupled",roworder:"top to bottom"},
+      xaxis:{anchor:"y",range:[times[win[0]],times[win[1]]]},xaxis2:{anchor:"y2",title:"hour",matches:"x"},yaxis:{domain:[0.56,1],title:"macro rate"},yaxis2:{domain:[0,0.44],title:a+" util",range:[0,1.3]},
+      shapes:evShapes(b.event_window,"orange").concat(evShapes(c.event_window,"green")),template:"plotly_white",hovermode:"x unified",legend:{orientation:"h",y:-0.18},margin:{l:60,r:20,t:40,b:40}});}
+  function applyWindow(){if(syncing)return;syncing=true;Plotly.relayout(compareDiv,{"xaxis.range":[times[win[0]],times[win[1]]]});$("winStart").value=win[0];$("winEnd").value=win[1];syncing=false;}
+  function onZoom(e){if(syncing)return;if(e["xaxis.autorange"]){win=[0,T-1];applyWindow();return;}
+    if(e["xaxis.range[0]"]!==undefined){win=[Math.max(0,nearestIdx(e["xaxis.range[0]"])),Math.min(T-1,nearestIdx(e["xaxis.range[1]"]))];$("winStart").value=win[0];$("winEnd").value=win[1];}}
+
+  /* ---- Cost-benefit ---- */
+  function buildEcon(){
+    if(!sel)return;var e=cfg(sel).economics;
+    Plotly.react("econBars",[
+      {x:["Damage avoided","CSO penalty avoided","Energy saved"],y:[e.damage_avoided,e.cso_penalty_avoided,e.energy_saved],name:"annual benefit",type:"bar",marker:{color:"#38a169"}},
+      {x:["Capital (one-time)","O&M / yr"],y:[e.capital,e.om_annual],name:"cost",type:"bar",marker:{color:"#e15759"}}],
+      {title:"Cost vs benefit — "+sel,barmode:"group",yaxis:{title:"$"},margin:{l:70,r:20,t:40,b:60},template:"plotly_white",legend:{orientation:"h",y:-0.3}});
+    var cards=[["Net annual",fmt$(e.benefit_annual-e.om_annual),"benefit − O&M",e.benefit_annual>e.om_annual?"good":"bad"],
+      ["Payback",e.payback_years+" yr","capital ÷ net",e.payback_years<10?"good":"bad"],
+      ["NPV (20 yr, 4%)",fmt$(e.npv),"net present value",e.npv>0?"good":"bad"],
+      ["Capital",fmt$(e.capital),"one-time","good"]];
+    var w=$("econCards");w.innerHTML="";cards.forEach(function(k){var d=document.createElement("div");d.className="kpi "+k[3];d.innerHTML="<div class='kv'>"+k[1]+"</div><div class='kl'>"+k[0]+"</div><div class='ks'>"+k[2]+"</div>";w.appendChild(d);});
+  }
+
+  /* ---- Parallel coordinates ---- */
+  function buildPcoords(){
+    var keys=DATA.obj_keys, rows=DATA.configs;
+    var dims=[{label:"config #",values:rows.map(function(_,i){return i;}),range:[0,rows.length-1]}];
+    keys.forEach(function(k){dims.push({label:DATA.obj_labels[k],values:rows.map(function(c){return c.objectives[k];}),range:[0,1]});});
+    dims.push({label:"$ saved",values:rows.map(function(c){return c.savings.cost;})});
+    Plotly.newPlot("pcoords",[{type:"parcoords",line:{color:rows.map(function(c){return c.savings.cost;}),colorscale:"Viridis",showscale:true,colorbar:{title:"$ saved"}},dimensions:dims}],
+      {title:"Multi-objective trade-offs — every configuration across all four objectives (lower cost = better). Selecting a Pareto point isolates its line.",margin:{l:60,r:40,t:60,b:30},template:"plotly_white"},{responsive:true});
+    updatePcoords();
+  }
+  function updatePcoords(){var idx=cfgIdx(sel);if(idx<0)return;try{Plotly.restyle("pcoords",{"dimensions[0].constraintrange":[[idx-0.4,idx+0.4]]});}catch(e){}}
+
+  /* ---- Control explainability ---- */
+  function buildControl(){
+    var c=cfg(sel);
+    if(!c||!c.control){$("ctlMsg").textContent="Select a Pareto-front configuration to see its control trace.";$("ctlLines").innerHTML="";$("ctlHeat").innerHTML="";return;}
+    $("ctlMsg").textContent="Configuration "+sel+": actuator settings, market prices, and the asset×time price heatmap.";
+    var ct=c.control, tr=[];
+    ct.routes.forEach(function(r){tr.push({x:ct.times,y:r.setting,name:r.id+" setting",mode:"lines"});});
+    ct.routes.forEach(function(r){tr.push({x:ct.times,y:r.price_buyer.map(function(b,i){return b-r.price_seller[i];}),name:r.id+" price diff",yaxis:"y2",line:{dash:"dot"}});});
+    Plotly.react("ctlLines",tr,{title:"Actuator settings (left) & buyer−seller price differential (right)",xaxis:{title:"hour"},yaxis:{title:"setting [0–1]",range:[0,1]},yaxis2:{title:"price differential",overlaying:"y",side:"right",showgrid:false},margin:{l:55,r:55,t:40,b:40},template:"plotly_white",hovermode:"x unified",legend:{orientation:"h",y:-0.3}});
+    Plotly.react("ctlHeat",[{type:"heatmap",z:ct.heat,x:ct.times,y:ct.heat_assets,colorscale:"YlOrRd",zmin:0,zmax:1,colorbar:{title:"price"}}],
+      {title:"Capacity price by asset over time — bright = expensive (stressed/scarce)",xaxis:{title:"hour"},margin:{l:120,r:20,t:40,b:40},template:"plotly_white"});
+  }
+
+  /* ---- Robustness ---- */
+  function buildRobust(){
+    var c=cfg(sel);
+    if(!c||!c.ensemble){$("robMsg").textContent="Select a Pareto-front configuration to see ensemble robustness.";$("robFlood").innerHTML="";$("robCso").innerHTML="";$("relCard").innerHTML="";return;}
+    $("robMsg").textContent="Configuration "+sel+" across a storm ensemble (baseline vs optimized).";
+    var en=c.ensemble,be=DATA.baseline.ensemble;
+    Plotly.react("robFlood",[{x:en.storms,y:be.flood,name:"baseline",type:"bar",marker:{color:"#a0aec0"}},{x:en.storms,y:en.flood,name:"optimized",type:"bar",marker:{color:"#38a169"}}],
+      {title:"Flooding cost per storm",barmode:"group",yaxis:{title:"flooding cost"},margin:{l:55,r:20,t:40,b:70},template:"plotly_white",legend:{orientation:"h",y:-0.35}});
+    Plotly.react("robCso",[{x:en.storms,y:be.cso,name:"baseline",type:"bar",marker:{color:"#a0aec0"}},{x:en.storms,y:en.cso,name:"optimized",type:"bar",marker:{color:"#b07aa1"}}],
+      {title:"Uncontrolled-discharge cost per storm",barmode:"group",yaxis:{title:"CSO cost"},margin:{l:55,r:20,t:40,b:70},template:"plotly_white",legend:{orientation:"h",y:-0.35}});
+    $("relCard").innerHTML="<div class='kpi "+(en.reliability_pct>=85?"good":"bad")+"'><div class='kv'>"+en.reliability_pct+"%</div><div class='kl'>Reliability across ensemble</div><div class='ks'>storms meeting targets</div></div>";
+  }
+
+  /* ---- selection + tabs ---- */
+  function selectConfig(id){sel=id;markSelected();buildSavings();renderKPIs();buildCompare();applyWindow();
+    if(built.econ)buildEcon();if(built.pcoords)updatePcoords();if(built.control)buildControl();if(built.robust)buildRobust();}
+  var built={tradeoffs:true};
+  var builders={econ:buildEcon,pcoords:buildPcoords,control:buildControl,robust:buildRobust};
+  function showTab(id){document.querySelectorAll(".tab").forEach(function(b){b.classList.toggle("active",b.dataset.tab===id);});
+    document.querySelectorAll(".panel").forEach(function(p){p.style.display=p.id==="panel-"+id?"block":"none";});
+    if(!built[id]&&builders[id]){builders[id]();built[id]=true;}
+    setTimeout(function(){document.querySelectorAll("#panel-"+id+" .js-plotly-plot").forEach(function(d){Plotly.Plots.resize(d);});},30);}
+  document.querySelectorAll(".tab").forEach(function(b){b.addEventListener("click",function(){showTab(b.dataset.tab);});});
+
+  /* ---- init ---- */
+  DATA.asset_ids.forEach(function(a){var o=document.createElement("option");o.value=a;o.textContent=a;assetSel.appendChild(o);});
+  assetSel.addEventListener("change",function(){buildCompare();applyWindow();});
+  var wS=$("winStart"),wE=$("winEnd");wS.min=0;wS.max=T-2;wS.value=0;wE.min=1;wE.max=T-1;wE.value=T-1;
+  function onWin(ev){var lo=parseInt(wS.value,10),hi=parseInt(wE.value,10);if(hi<=lo){if(ev.target===wS)hi=lo+1;else lo=hi-1;wS.value=lo;wE.value=hi;}win=[lo,hi];applyWindow();}
+  wS.addEventListener("input",onWin);wE.addEventListener("input",onWin);
+  $("btnFull").addEventListener("click",function(){win=[0,T-1];applyWindow();});
+  $("btnEvent").addEventListener("click",function(){var w=DATA.baseline.event_window;win=[nearestIdx(w[0]),nearestIdx(w[1])];applyWindow();});
+  compareDiv.on("plotly_relayout",onZoom);
+  buildPareto();
+  var best=DATA.configs.filter(function(c){return c.pareto;}).sort(function(a,b){return b.savings.cost-a.savings.cost;})[0];
+  selectConfig(best.id);
+})();
+</script></body></html>

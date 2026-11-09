@@ -1,0 +1,12 @@
+# Documentation imports use the engine and optional-server mocks in conf.py.
+# Keep the Sphinx tools aligned with the project's docs extra.
+sphinx>=7.0
+pydata-sphinx-theme>=0.15
+myst-parser>=3.0
+sphinx-autodoc-typehints
+sphinx-epytext>=0.0.4
+
+# Other dependencies needed to import the MCP modules for autodoc.
+pydantic>=2.0
+pydantic-settings>=2.0
+numpy>=1.21
