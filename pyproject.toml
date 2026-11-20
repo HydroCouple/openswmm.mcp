@@ -34,7 +34,8 @@ dependencies = [
 
 [project.optional-dependencies]
 gym = [
-    "openswmm.gymnasium[spec]>=0.1.0.dev0",
+    # 0.1.0.dev1: evaluate_decisions, apply_decisions and the study manifest.
+    "openswmm.gymnasium[spec]>=0.1.0.dev1",
 ]
 # The platform toolset: contracts, client and packaging (the platform's base install).
 platform = [
