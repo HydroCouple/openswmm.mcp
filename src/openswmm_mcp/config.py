@@ -26,6 +26,11 @@ class ServerSettings(BaseSettings):
     platform_url: str | None = None
     platform_token: str | None = None
     platform_project_id: str | None = None
+    # Write platform-format revision and attempt manifests for every local run that starts
+    # from an opened model (openswmm_mcp.provenance; needs the "platform" extra). Off by
+    # default: it packages the model and copies its report and binary output.
+    local_manifests: bool = False
+
     # Register the ``run_python`` tool (Python with the session's Solver in
     # scope). Honoured only on the stdio transport; never enable it on a
     # server reachable by others.

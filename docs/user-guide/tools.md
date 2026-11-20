@@ -149,7 +149,9 @@ times, whether it succeeded, and its tool call id. `platform_run` sends that id 
 platform, which writes it into the run's provenance, so a run leads back to the call that
 submitted it. With the platform toolset each line also names the platform agent session and
 the person it acts for; the water ontology's `platform_to_rows --journal` loads the lines as
-`ToolCall` rows.
+`ToolCall` rows. With `OPENSWMM_MCP_LOCAL_MANIFESTS=true` (and the `platform` extra), a local
+`run` that starts from an opened model also writes platform-format revision and attempt
+manifests under `<session>/local/<run id>/`, which load the same way.
 
 ## `run_python` (opt-in)
 

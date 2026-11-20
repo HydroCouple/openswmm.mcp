@@ -20,7 +20,7 @@ from openswmm.engine import (
 from openswmm_mcp import catalog as cat
 from openswmm_mcp import provenance
 from openswmm_mcp._util.validation import resolve_path
-from openswmm_mcp.dependencies import get_session, get_session_manager
+from openswmm_mcp.dependencies import get_session, get_session_manager, get_settings
 from openswmm_mcp.errors import ErrorCode, ToolError
 from openswmm_mcp.journal import ACTIVE, CURRENT_CALL
 from openswmm_mcp.session import SimSession
@@ -253,7 +253,11 @@ async def run(
         solver = session.require_solver()
     if state in (EngineState.OPENED, EngineState.INITIALIZED):
         session.local_run = None
-        if state == EngineState.OPENED and provenance.available():
+        if (
+            state == EngineState.OPENED
+            and get_settings(ctx).local_manifests
+            and provenance.available()
+        ):
             session.local_run = await session.call(
                 provenance.begin, session, CURRENT_CALL.get(), context="recording the run"
             )

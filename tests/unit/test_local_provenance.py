@@ -15,7 +15,30 @@ import pytest
 pytest.importorskip("hydrocouple_platform.packaging")
 
 
-async def test_a_local_run_and_its_journal_load_as_a_platform_run(tools, inp_path, output_dir):
+async def test_local_manifests_are_opt_in(tools, inp_path):
+    await tools("open_model", path=inp_path, session_id="off")
+    assert "provenance" not in await tools("run", session_id="off")
+
+
+async def test_a_local_run_and_its_journal_load_as_a_platform_run(
+    inp_path, output_dir, monkeypatch
+):
+    from fastmcp import Client
+
+    from openswmm_mcp.server import build_server
+
+    monkeypatch.setenv("OPENSWMM_MCP_WORKING_DIR", str(output_dir))
+    monkeypatch.setenv("OPENSWMM_MCP_LOCAL_MANIFESTS", "true")
+    async with Client(build_server()) as client:
+
+        async def tools(tool, **arguments):
+            return (await client.call_tool(tool, arguments)).structured_content
+
+        written = await _run_recorded(tools, inp_path)
+    await _check(written, output_dir)
+
+
+async def _run_recorded(tools, inp_path) -> dict:
     await tools("open_model", path=inp_path, session_id="loc")
     await tools(
         "set",
@@ -23,8 +46,10 @@ async def test_a_local_run_and_its_journal_load_as_a_platform_run(tools, inp_pat
         kind="subcatchment",
         changes=[{"id": "S1", "field": "width", "value": 300.0}],
     )
-    run = await tools("run", session_id="loc")
-    written = run["provenance"]
+    return (await tools("run", session_id="loc"))["provenance"]
+
+
+async def _check(written: dict, output_dir: Path) -> None:
     attempt = Path(written["attempt"])
     manifest = json.loads((attempt / "attempt.json").read_text())
     actor = manifest["provenance"]["actor"]

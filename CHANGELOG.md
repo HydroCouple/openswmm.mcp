@@ -36,8 +36,8 @@ version is now `0.2.0.dev0`.
   now writes every design kind through the job's own factories with the values the evaluation
   used (a `link_diameter` rescales the whole section, as it was scored, instead of setting
   `geom1`).
-- **Local runs leave platform-format manifests** (with the `platform` extra): a `run` that
-  starts from an opened model writes `<session>/local/<run id>/` with the model as it ran
+- **Local runs can leave platform-format manifests** (opt-in, `OPENSWMM_MCP_LOCAL_MANIFESTS=true`,
+  with the `platform` extra): a `run` that starts from an opened model writes `<session>/local/<run id>/` with the model as it ran
   (edits included) packaged with its revision manifest, and an `attempt/` folder
   (`attempt.json`, `run.json`, `summary.json`, `model.rpt`, `model.out`) whose actor names
   the journal and the call that started the run. Without the platform toolset the journal

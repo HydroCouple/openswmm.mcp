@@ -17,6 +17,7 @@ file, or in the Claude Code MCP server configuration.
 | `OPENSWMM_MCP_PLATFORM_URL` | `str` | `None` | The hydrocouple.platform control plane (platform toolset). |
 | `OPENSWMM_MCP_PLATFORM_TOKEN` | `str` | `None` | An agent session credential (`hcps_...`) for the platform toolset. |
 | `OPENSWMM_MCP_PLATFORM_PROJECT_ID` | `str` | `None` | The platform project used when a tool call names none. |
+| `OPENSWMM_MCP_LOCAL_MANIFESTS` | `bool` | `false` | Write platform-format revision and attempt manifests for each local run under `<session>/local/` (needs the `platform` extra). It packages the model and copies the report and binary output. |
 | `OPENSWMM_MCP_ENABLE_PYTHON` | `bool` | `false` | Register `run_python` (stdio transport only). |
 | `OPENSWMM_MCP_OAUTH_ISSUER` | `str` | `None` | OAuth token issuer URL (HTTP transport only). |
 | `OPENSWMM_MCP_OAUTH_AUDIENCE` | `str` | `None` | OAuth audience identifier (HTTP transport only). |

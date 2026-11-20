@@ -6,9 +6,10 @@ A local ``run`` that starts from an opened model writes, under
 holding ``attempt.json``, ``run.json``, ``summary.json``, ``model.rpt`` and ``model.out``.
 The attempt's actor names the journal's session and the tool call that started the run,
 so the water ontology's ``platform_to_rows`` loads a local run and its journal the way it
-loads a platform run. It uses hydrocouple.platform's base install (the ``platform`` extra);
-without it nothing is written. Forcing and other writes made while the run steps are not
-in the model file: the journal records them.
+loads a platform run. It is opt-in (``OPENSWMM_MCP_LOCAL_MANIFESTS=true``) and uses
+hydrocouple.platform's base install (the ``platform`` extra); otherwise nothing is written.
+Forcing and other writes made while the run steps are not in the model file: the journal
+records them.
 """
 
 from __future__ import annotations
