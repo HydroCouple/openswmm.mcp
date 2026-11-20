@@ -18,8 +18,14 @@ class ServerSettings(BaseSettings):
     http_port: int = 8080
     log_level: str = "INFO"
 
-    # Comma-separated tool sets to register: "core" (always), "gym".
+    # Comma-separated tool sets to register: "core" (always), "gym", "platform".
     toolsets: str = "core"
+    # The platform toolset: the control plane's URL, an agent session credential
+    # ("hcps_...", created by a person for this server; never the person's own token)
+    # and the project used when a tool call names none.
+    platform_url: str | None = None
+    platform_token: str | None = None
+    platform_project_id: str | None = None
     # Register the ``run_python`` tool (Python with the session's Solver in
     # scope). Honoured only on the stdio transport; never enable it on a
     # server reachable by others.

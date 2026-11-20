@@ -37,7 +37,8 @@ class _RefusalsAsOneLine(logging.Filter):
 
 @lifespan
 async def server_lifespan(server) -> AsyncIterator[dict]:
-    """Create the shared session manager (and gym managers when that toolset is on)."""
+    """Create the shared session manager (and the gym managers and the platform client when
+    those toolsets are on)."""
     settings = ServerSettings()
     logging.basicConfig(
         level=getattr(logging, settings.log_level.upper(), logging.INFO),
@@ -58,10 +59,16 @@ async def server_lifespan(server) -> AsyncIterator[dict]:
 
         context["env_manager"] = EnvManager()
         context["job_manager"] = JobManager()
+    if "platform" in toolsets(settings):
+        from openswmm_mcp.tools.platform import connect
+
+        context["platform"] = connect(settings)
     try:
         yield context
     finally:
         logger.info("OpenSWMM MCP server shutting down -- cleaning up sessions")
+        if "platform" in context:
+            context["platform"].close()
         if "job_manager" in context:
             context["job_manager"].shutdown()
             context["env_manager"].close_all()

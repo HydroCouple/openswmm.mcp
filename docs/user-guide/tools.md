@@ -105,6 +105,28 @@ Environment specs can observe any numeric engine field through
 `observations.fields` (`{"link.stats.max_flow": ["C1"]}`) and actuate any
 writable one through the `field_setpoint` runtime factory.
 
+## Platform tools (`OPENSWMM_MCP_TOOLSETS=core,platform`)
+
+Seven tools submit runs to [hydrocouple.platform](https://github.com/HydroCouple/hydrocouple.platform)
+and read their results. A platform run executes in the compute target's runner, not in the
+server process; platform ids are never local session ids. The toolset needs the `platform`
+extra and three settings: `OPENSWMM_MCP_PLATFORM_URL`, `OPENSWMM_MCP_PLATFORM_TOKEN` and,
+optionally, `OPENSWMM_MCP_PLATFORM_PROJECT_ID`. The token is an agent session credential
+(`hcps_...`) that a person creates for the server; the server refuses a person's own
+sign-in token. The platform checks every submission against that session's budget.
+
+| Tool | What it does |
+|---|---|
+| `platform_targets()` | The person the session acts for, each organization's compute targets, and the approved workflows with their parameter schemas. Read-only. |
+| `platform_session(action, project_id, name)` | `list` or `create` persistent platform sessions in a project. |
+| `platform_model(action, path, target_id, revision_id)` | `upload` packages a local `.inp` with the files it references and registers it as an immutable revision; `get` returns a revision. |
+| `platform_estimate(revision_id, target_id, workflow, parameters)` | Validate a would-be run: findings, job class, cost band and whether approval would be required. Read-only. |
+| `platform_run(revision_id, target_id, workflow, parameters, idempotency_key)` | Submit a run. Returns `ACCEPTED`, or `PENDING_APPROVAL` when the request is outside the session's budget; a person approves it. |
+| `platform_job(action, job_id, project_id, state)` | `status` (state, progress, attempts, failure), `list`, or `cancel`. |
+| `platform_results(run_id, table)` | Provenance first, then continuity quality, the artifact list, and the run summary: its tables with row counts, or one table's columns (engine catalog path and unit) and rows. Only `summary.json` is fetched, and it is checked against its published sha256. Read-only. |
+
+A platform error keeps its code, its `retryable` flag and its `next_action` in the refusal.
+
 ## `run_python` (opt-in)
 
 `OPENSWMM_MCP_ENABLE_PYTHON=true` registers `run_python(session_id, code)` on

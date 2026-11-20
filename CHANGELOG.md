@@ -31,6 +31,12 @@ version is now `0.2.0.dev0`.
 
 ### Added
 
+- **Platform toolset** (`OPENSWMM_MCP_TOOLSETS=core,platform`, extra `platform`): seven
+  tools over `hydrocouple_platform.client.PlatformClient` that list targets and workflows,
+  package and upload a model as a revision, estimate, submit, follow and read runs.
+  `platform_results` returns provenance first and reads the run summary by checksum,
+  without downloading the report or the binary output. The server signs in with an agent
+  session credential and refuses a person's token.
 - **`inspect` beside `call`** (15 core tools). A catalogued method runs through `inspect`
   when the engine catalog gives it the effect `read`, and through `call` otherwise; each
   refuses the other's methods and names the right tool. `describe` lists the tool of every

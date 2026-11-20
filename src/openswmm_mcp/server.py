@@ -4,6 +4,7 @@ Tool sets (``OPENSWMM_MCP_TOOLSETS``):
 
 * ``core`` (always) -- 15 tools: sessions and runs, catalog access, results.
 * ``gym`` -- 5 tools for openswmm.gymnasium environments and optimisation jobs.
+* ``platform`` -- 7 tools that submit runs to hydrocouple.platform and read their results.
 * ``run_python`` -- registered only with ``OPENSWMM_MCP_ENABLE_PYTHON=true`` on stdio.
 """
 
@@ -99,6 +100,20 @@ def build_server(settings: ServerSettings | None = None) -> FastMCP:
 
         for fn in gym.TOOLS:
             server.tool(fn)
+    if "platform" in toolsets(settings):
+        try:
+            import hydrocouple_platform.client  # noqa: F401
+        except ImportError as exc:
+            raise ImportError(
+                "OPENSWMM_MCP_TOOLSETS includes 'platform', which needs hydrocouple.platform: "
+                "pip install 'openswmm.mcp[platform]'"
+            ) from exc
+        from openswmm_mcp.tools import platform
+
+        for fn in platform.TOOLS:
+            server.tool(
+                fn, annotations={"readOnlyHint": True} if fn in platform.READ_ONLY else None
+            )
     if settings.enable_python and settings.transport == "stdio":
         from openswmm_mcp.tools.code import run_python
 

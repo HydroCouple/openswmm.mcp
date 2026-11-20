@@ -40,6 +40,10 @@ new tool code.
 - **Results** -- `timeseries`, `report`, `compare`, `export`
 - **Gym** (`OPENSWMM_MCP_TOOLSETS=core,gym`) -- `gym_describe`, `gym_config`,
   `gym_env`, `gym_job`, `gym_score`
+- **Platform** (`OPENSWMM_MCP_TOOLSETS=core,platform`) -- `platform_targets`,
+  `platform_session`, `platform_model`, `platform_estimate`, `platform_run`,
+  `platform_job`, `platform_results`: submit runs to hydrocouple.platform under an agent
+  session's budget and read their results, provenance first
 
 See the [tools guide](docs/user-guide/tools.md) for details and the v1-to-v2
 mapping.
