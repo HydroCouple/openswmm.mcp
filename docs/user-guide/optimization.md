@@ -222,6 +222,8 @@ position): it returns each link's fixed `x_knots` and the applied
 | `gym_job(action='decode_policy')` | Decode a `control_curve` result vector into per-asset PWL curves. |
 | `gym_score(action='pareto')` / `gym_score(action='score')` / `gym_score(action='compare')` | Pareto filtering and quality indicators. |
 | `gym_score(action='apply_design')` | Apply an optimized design vector to an open model session. |
+| `gym_score(action='behavioural')` | A calibration's behavioural set: the evaluations its acceptance rule (`optimization.acceptance`, or `rule`) accepts, written to `behavioural-set.json`. |
+| `gym_score(action='bands')` | Prediction bands of the behavioural set: quantiles of `series` (`"link.flow:C11"`) at every report time, one CSV per series under `bands/`. |
 
 The environment specs these tools accept are defined in
 `openswmm_gymnasium.spec`; `gym_describe()` returns their JSON schemas and

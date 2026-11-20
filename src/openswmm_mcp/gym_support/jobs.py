@@ -312,6 +312,14 @@ class JobManager:
         """
         return self._get_job(job_id).env_config
 
+    def get_opt_config(self, job_id: str) -> OptimizationConfig:
+        """Return the optimization settings a job was started with, its acceptance rule
+        among them.
+
+        @raise ToolError: C{ELEMENT_NOT_FOUND}.
+        """
+        return self._get_job(job_id).opt_config
+
     def results(self, job_id: str) -> dict[str, Any]:
         """Return the full result payload of a finished job.
 

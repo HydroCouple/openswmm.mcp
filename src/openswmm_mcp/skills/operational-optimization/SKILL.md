@@ -135,36 +135,51 @@ Drive the simulation stepwise, acting each control interval:
 Record per-step time series of prices, differentials, settings, and the running
 objectives. → verify: loop completes and constraint compliance is logged.
 
-### 3. Optional — NSGA-II tuning of the market
+### 3. Search the controller (and the design) over several storms
 
-Treat the **cost-curve parameters (onset/steepness/ceiling) and PID gains** as
-the decision vector and search them against the operational objectives. This is
-wired end to end as a dedicated gym env (`env_type: "market"`): the engine runs
-the reactive controller internally per candidate, so there is **no outer loop**.
+Tune by **study**: an evaluator scores every candidate on each storm of an event
+set and the search sees the aggregate, so a one-storm winner cannot pass as a
+recommendation. The study's manifest records the env config, the search and the
+seed, so the result can be run again to the same evaluations.
 
-1. Build a `market` env config:
-   - `market_config` — this skill's market JSON (the controller being tuned).
-   - `reward_terms` — the objectives to minimize: `uncontrolled_discharge`
-     (`link_ids` = conduits feeding untreated outfalls), `storage_underutilization`
-     (`node_ids` = storage nodes), `pump_energy` (`link_ids` = pumps), and/or
-     `flooding_volume`.
-   - `observations` — a few nodes/links to record for the report.
-   - optional `policy_bounds` to override per-field search ranges; `tune_full`
-     to also tune piecewise-linear knees.
-2. `gym_config(action="create")` → `gym_config(action="validate")` →
-   `gym_job(action="start")` (`algorithm: nsga2`, set `budget`/`population_size`). Each evaluation runs one
-   full episode under the controller built from a candidate vector (curve
-   onset/ceiling/steepness + PID Kp/Ki/Kd).
-3. `gym_score(action="pareto")` / `gym_score(action="score")` to inspect the
-   front, then `gym_score(action="apply_design")` to write the selected **`market_config.tuned.json`** to the
-   job's output dir. A market job tunes the controller, not the model, so no
-   model session is edited.
+1. **The storms.** Put each storm's rain series (a CSV with ISO datetimes and
+   one rain column) in the model's folder, for example `rain/10yr.csv`; a
+   platform revision carries them as sidecar files. List them in the env
+   config's `events` (`name`, `series`, `gage`, `start`, `end`, and `weight` and
+   `return_period` where known) and choose `event_aggregation`: `max` (the worst
+   storm), `mean`, `weighted_mean` (by weight) or `sum`. Each event runs the
+   model in its own window with its gage reading the storm's series.
+2. **The env config.** `env_type: "market"` tunes this skill's market (the
+   decision vector is the cost-curve onset/ceiling/steepness and PID gains;
+   `market_config` is the market JSON, `policy_bounds` and `tune_full`
+   optional). `env_type: "joint"` searches a design and runs runtime control
+   together: design factories (`field_design`, `link_diameter`, `field_choice`
+   for discrete sizes or counts such as `link.barrels`) plus runtime factories.
+   `reward_terms` are the objectives: `uncontrolled_discharge` (`link_ids` =
+   conduits feeding untreated outfalls), `storage_underutilization`
+   (`node_ids` = storages), `pump_energy` (`link_ids` = pumps), and/or
+   `flooding_volume`; `objectives` names a subset when other terms should only
+   be recorded. `gym_config(action="create")` → `gym_config(action="validate")`.
+3. **Search.** `gym_job(action="start", optimization={"algorithm": "nsga2",
+   "budget": ..., "population_size": ..., "seed": ...})`. Each evaluation runs
+   one episode per event; every term's per-event value is recorded as
+   `<term>@<event>` beside the aggregates. Poll `gym_job(action="status")`.
+4. **Front and choice.** `gym_score(action="pareto")` and
+   `gym_score(action="score")` to inspect the front, then
+   `gym_score(action="apply_design")`: a market job writes
+   **`market_config.tuned.json`** to the job's output dir (it tunes the
+   controller, not the model); a joint job writes the design onto a session,
+   which you `save` to a new `.inp`. When the study ran on the platform,
+   `platform_model(action="derive", ...)` makes the chosen design a revision
+   derived from the evaluated one, with the study and evaluation recorded.
 
-Inspect available reward terms / env support with `gym_describe`. These gym tools
-need the server started with `OPENSWMM_MCP_TOOLSETS=core,gym`.
+Inspect available reward terms, design factories and env support with
+`gym_describe`. These gym tools need the server started with
+`OPENSWMM_MCP_TOOLSETS=core,gym`.
 
-The output is a **Pareto set** of market configurations, not one answer.
-→ verify: the applied configuration reproduces its reported objectives.
+The output is a **Pareto set** scored over the storms, not one answer.
+→ verify: the applied configuration reproduces its reported objectives, and its
+per-event metrics show how it does on each storm.
 
 **Alternative — open-loop schedule (`env_type: "schedule"`).** When you want a
 fixed operating plan for a *known* event rather than a reactive controller,
@@ -172,10 +187,12 @@ optimize a precomputed per-structure setting schedule directly: set
 `structure_ids`, `n_points` (settings per structure over the event), and
 `control_interval_seconds`; the decision vector is the schedule itself. Same
 `gym_job(action="start")` → `gym_score(action="pareto")` →
-`gym_score(action="apply_design")` flow; applying writes **`schedule.tuned.json`**. This is open-loop (no live
-feedback) — full-event optimal control. (A true receding-horizon MPC predictor
-is not offered: SWMM hot-start does not faithfully resume mid-event on this
-engine, so a re-simulated horizon would be unreliable.)
+`gym_score(action="apply_design")` flow; applying writes **`schedule.tuned.json`**.
+With `events`, one schedule is scored from the start of each storm's window.
+This is open-loop (no live feedback) — full-event optimal control. (A true
+receding-horizon MPC predictor is not offered: SWMM hot-start does not
+faithfully resume mid-event on this engine, so a re-simulated horizon would be
+unreliable.)
 
 ### 4. Deliverable
 
@@ -202,9 +219,9 @@ baseline-vs-optimized macro and granular time series together. Additional tabs:
 9. Control explainability — actuator-setting and buyer/seller price-differential
    timelines, plus an asset×time capacity-price heatmap (which assets traded
    capacity, and when each gate/pump acted).
-10. Robustness — the selected configuration re-evaluated across a storm ensemble,
-    with a reliability summary, so a one-storm winner is not mistaken for a
-    recommendation.
+10. Robustness — the selected configuration's per-event metrics across the
+    study's storms (`<term>@<event>`), with a reliability summary, so a one-storm
+    winner is not mistaken for a recommendation.
 
 Persist the market config and tuned parameters as JSON, export the iteration/
 Pareto evaluations as CSV, and write the controlled model to a **new** `.inp`

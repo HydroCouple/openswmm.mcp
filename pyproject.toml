@@ -31,14 +31,16 @@ dependencies = [
     # The handle-based v6 engine with its API catalog (openswmm.engine.catalog).
     "openswmm>=6.0.0a4.dev2",
     # Fit metrics for compare (openswmm_gymnasium.rewards.fit); its base install needs only
-    # gymnasium and numpy beyond the engine.
-    "openswmm.gymnasium>=0.1.0.dev1",
+    # gymnasium and numpy beyond the engine. 0.1.0.dev2: behavioural sets, prediction bands
+    # and decision_values (gym_score, platform derive).
+    "openswmm.gymnasium>=0.1.0.dev2",
 ]
 
 [project.optional-dependencies]
 gym = [
-    # 0.1.0.dev1: evaluate_decisions, apply_decisions and the study manifest.
-    "openswmm.gymnasium[spec]>=0.1.0.dev1",
+    # 0.1.0.dev1: evaluate_decisions, apply_decisions and the study manifest; 0.1.0.dev2:
+    # behavioural sets, prediction bands and discrete dimensions.
+    "openswmm.gymnasium[spec]>=0.1.0.dev2",
 ]
 # The platform toolset: contracts, client and packaging (the platform's base install).
 platform = [

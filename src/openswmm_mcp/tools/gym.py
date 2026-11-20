@@ -125,7 +125,7 @@ async def gym_job(
 
 async def gym_score(
     ctx: Context,
-    action: Literal["pareto", "score", "compare", "apply_design"],
+    action: Literal["pareto", "score", "compare", "apply_design", "behavioural", "bands"],
     job_id: str | None = None,
     job_ids: JsonStrList = None,
     front: JsonFloatMatrix = None,
@@ -136,9 +136,15 @@ async def gym_score(
     weights: JsonFloatMatrix = None,
     session_id: str = "default",
     evaluation: int | str = "best",
+    rule: JsonObject = None,
+    series: JsonStrList = None,
+    quantiles: JsonFloatVector = None,
+    event: str | None = None,
 ) -> dict:
     """Score optimisation results: Pareto-filter a front, compute indicators (hypervolume,
-    IGD, epsilon, R2, spread), compare jobs, or apply a job's chosen design to a session."""
+    IGD, epsilon, R2, spread), compare jobs, or apply a job's chosen design to a session.
+    "behavioural" keeps a calibration's accepted evaluations (the job's acceptance rule, or
+    rule); "bands" runs them and writes quantiles of series ["link.flow:C11"] as CSVs."""
     indicator_args = {
         "reference_point": reference_point,
         "ideal_point": ideal_point,
@@ -161,6 +167,17 @@ async def gym_score(
             _need(job_ids, "job_ids", action),
             _need(indicators, "indicators", action),
             **indicator_args,
+        )
+    if action == "behavioural":
+        return await score_tools.behavioural(ctx, _need(job_id, "job_id", action), rule=rule)
+    if action == "bands":
+        return await score_tools.bands(
+            ctx,
+            _need(job_id, "job_id", action),
+            _need(series, "series", action),
+            rule=rule,
+            quantiles=quantiles,
+            event=event,
         )
     return await score_tools.apply_design(
         ctx, _need(job_id, "job_id", action), session_id=session_id, evaluation=evaluation

@@ -31,6 +31,14 @@ version is now `0.2.0.dev0`.
 
 ### Added
 
+- **Calibration with uncertainty, and searches over storms.** `gym_score(action="behavioural")`
+  keeps a finished calibration's accepted evaluations by the study's acceptance rule (or a
+  given `rule`) and writes `behavioural-set.json`; `gym_score(action="bands")` runs them and
+  writes the 5, 50 and 95 % quantiles of simulated series at every report time under
+  `bands/`. The `calibrate-model` skill now samples a study scored by `fit_to_observed`
+  terms, then takes the behavioural set, its bands and the chosen member;
+  `operational-optimization` searches over an event set. A platform study's `derive`
+  records the values a discrete dimension chose. openswmm.gymnasium `>=0.1.0.dev2`.
 - **`compare` uses openswmm.gymnasium's fit metrics** (`rewards.fit`), the one implementation calibration objectives use, and adds the Kling-Gupta efficiency; its other numbers are unchanged. `openswmm.gymnasium>=0.1.0.dev1` is now a core dependency (its base install adds only gymnasium and numpy).
 - **`platform_model(action="derive")`**: a platform study's evaluation becomes a revision
   that names its base revision, study, evaluation and design. `gym_score(action="apply_design")`

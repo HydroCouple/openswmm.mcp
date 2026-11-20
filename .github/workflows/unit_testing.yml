@@ -55,7 +55,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: HydroCouple/openswmm.gymnasium
-          ref: 6b94006ab19139bd8b2925ee856a48777ba06039
+          ref: 97dd49678eaa5e83223fc869b0299a9a84027870
           path: .ci/openswmm.gymnasium
 
       - name: Checkout vcpkg
@@ -116,7 +116,7 @@ jobs:
         shell: bash
         run: |
           python -m pip install --upgrade pip
-          pip install "./.ci/openswmm.gymnasium[spec]"
+          pip install "./.ci/openswmm.gymnasium[spec,sampling]"
           pip install -e ".[dev]"
           python -m pip check
 

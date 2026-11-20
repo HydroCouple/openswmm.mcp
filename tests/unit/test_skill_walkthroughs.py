@@ -44,8 +44,27 @@ async def _results(tools, session_id: str) -> None:
     assert state["state"] == "ENDED"
 
 
-async def test_calibrate_model(tools, inp_path, output_dir):
-    original = Path(inp_path).read_bytes()
+async def _finished(tools, job_id: str) -> dict:
+    """Poll a gym job until it ends."""
+    for _ in range(1200):
+        status = await tools("gym_job", action="status", job_id=job_id)
+        if status["state"] in ("done", "failed", "cancelled"):
+            break
+        await asyncio.sleep(0.2)
+    assert status["state"] == "done", status
+    return status
+
+
+def _log(status: dict) -> list[dict]:
+    path = Path(status["output_dir"]) / "evaluations.jsonl"
+    return [json.loads(line) for line in path.read_text().splitlines()]
+
+
+async def test_calibrate_model(gym_tools, inp_path, output_dir):
+    pytest.importorskip("scipy.stats")  # Latin hypercube: openswmm.gymnasium[sampling]
+    tools = gym_tools
+    model = Path(inp_path)
+    original = model.read_bytes()
     # 1. Open and snapshot.
     await tools("open_model", path=inp_path, session_id="cal")
     summary = await tools("report", session_id="cal", name="summary")
@@ -56,12 +75,14 @@ async def test_calibrate_model(tools, inp_path, output_dir):
     baseline_width = params["columns"]["width"][0]
     sub = params["ids"][0]
 
-    # 2. Baseline run and fit against observed data (synthetic: baseline flow +10%).
+    # 2. Baseline fit against observations (synthetic: baseline flow +10%) kept in the
+    # model's folder, where a study names them and a revision carries them.
     await tools("run", session_id="cal")
     series = await tools(
         "timeseries", source="cal", kind="link", ids=["C1"], variable="flow", max_points=100000
     )
-    observed = output_dir / "observed.csv"
+    observed = model.parent / "data" / "observed.csv"
+    observed.parent.mkdir()
     with observed.open("w", newline="") as fh:
         writer = csv.writer(fh)
         writer.writerow(["time", "C1"])
@@ -69,42 +90,77 @@ async def test_calibrate_model(tools, inp_path, output_dir):
             writer.writerow([t, 1.1 * v])
     fit = await tools("compare", a=str(observed), b="cal", kind="link", variable="flow")
     baseline = fit["rows"][0]
-    assert {"nse", "rmse"} <= set(baseline)
+    assert {"nse", "kge", "rmse", "volume_a", "volume_b"} <= set(baseline)
     (output_dir / "metrics.json").write_text(json.dumps({"baseline": baseline}, indent=2))
 
-    # 3-4. Adjust sensitive parameters on a clone, re-run, re-score.
-    await tools("session", action="reset", session_id="cal")
-    await tools("session", action="clone", session_id="cal", new_session_id="trial")
-    changes = [{"id": sub, "field": "width", "value": baseline_width * 1.2}]
-    result = await tools("set", session_id="trial", kind="subcatchment", changes=changes)
-    assert all(r["ok"] for r in result["results"]), result
-    await tools(
-        "call",
-        session_id="trial",
-        target=f"subcatchment:{sub}.infiltration",
-        method="set_horton",
-        args={"f0": 4.0, "fmin": 0.2, "decay": 6.5, "dry_time": 7.0},
-    )
-    link = [{"id": "C1", "field": "roughness", "value": 0.014}]
-    result = await tools("set", session_id="trial", kind="link", changes=link)
-    assert all(r["ok"] for r in result["results"]), result
-    await tools(
-        "call",
-        session_id="trial",
-        target="options",
-        method="set_item",
-        args={"key": "INERTIAL_DAMPING", "value": "PARTIAL"},
-    )
-    await tools("run", session_id="trial")
-    tuned = (await tools("compare", a=str(observed), b="trial", kind="link", variable="flow"))[
-        "rows"
-    ][0]
-    assert tuned["nse"] != baseline["nse"]  # the change set moved the fit
+    # 3-4. The parameters as design factories; fit terms as the objective and metrics.
+    fit_term = {"path": "link.flow", "element_id": "C1", "observed": "data/observed.csv"}
+    spec = {
+        "env_type": "cip",
+        "inp_path": inp_path,
+        "observations": {"node_depths": ["J1"]},
+        "design_factories": [
+            {
+                "kind": "field_design",
+                "params": {
+                    "path": "subcatchment.width",
+                    "ids": [sub],
+                    "low": 0.5 * baseline_width,
+                    "high": 2.0 * baseline_width,
+                },
+            }
+        ],
+        "reward_terms": [
+            {"kind": "fit_to_observed", "params": fit_term | {"metric": m}}
+            for m in ("nse", "kge", "rmse")
+        ],
+        "objectives": ["nse_C1"],
+    }
+    await tools("gym_config", action="create", name="calibration", spec=spec)
+    validated = await tools("gym_config", action="validate", name="calibration")
+    assert validated["valid"], validated
 
-    # 6. Write the calibrated model to a new path; the original is untouched.
-    saved = await tools("save", session_id="trial", path="calibrated.inp")
-    assert Path(saved["path"]).is_file()
-    assert Path(inp_path).read_bytes() == original
+    # 5. Sample, with the acceptance rule in the study.
+    rule = {
+        "thresholds": [{"metric": "nse_C1", "at_least": 0.5}, {"metric": "kge_C1", "at_least": 0.5}]
+    }
+    job = await tools(
+        "gym_job",
+        action="start",
+        config="calibration",
+        optimization={"algorithm": "lhs", "budget": 8, "seed": 2, "acceptance": rule},
+    )
+    status = await _finished(tools, job["job_id"])
+    assert all(set(r["metrics"]) == {"nse_C1", "kge_C1", "rmse_C1"} for r in _log(status))
+
+    # 6. Behavioural set.
+    accepted = await tools("gym_score", action="behavioural", job_id=job["job_id"])
+    assert accepted["members"] and Path(accepted["path"]).is_file()
+    assert all(m["metrics"]["nse_C1"] >= 0.5 for m in accepted["members"])
+
+    # 7. Prediction bands.
+    bands = await tools("gym_score", action="bands", job_id=job["job_id"], series=["link.flow:C1"])
+    with Path(bands["files"]["link.flow:C1"]).open() as fh:
+        rows = list(csv.DictReader(fh))
+    assert len(rows) == bands["report_times"] > 0
+    assert all(float(r["q0.05"]) <= float(r["q0.5"]) <= float(r["q0.95"]) for r in rows)
+
+    # 8. Write the chosen member to a new model; its fit is the member's.
+    chosen = max(accepted["members"], key=lambda m: m["metrics"]["nse_C1"])
+    await tools("open_model", path=inp_path, session_id="chosen")
+    await tools(
+        "gym_score",
+        action="apply_design",
+        job_id=job["job_id"],
+        evaluation=chosen["evaluation"],
+        session_id="chosen",
+    )
+    saved = await tools("save", session_id="chosen", path="calibrated.inp")
+    await tools("open_model", path=saved["path"], session_id="check")
+    await tools("run", session_id="check")
+    again = await tools("compare", a=str(observed), b="check", kind="link", variable="flow")
+    assert again["rows"][0]["nse"] == pytest.approx(chosen["metrics"]["nse_C1"], rel=1e-3)
+    assert model.read_bytes() == original
 
 
 async def test_capacity_assessment(tools, inp_path, output_dir):
@@ -170,6 +226,29 @@ async def test_capacity_assessment(tools, inp_path, output_dir):
 
 
 @pytest.mark.integration
+def _storms(folder: Path) -> list[dict]:
+    """Three storms on the twin-tank gage, written beside the model."""
+    (folder / "rain").mkdir()
+    storms = []
+    for day, (name, peak) in enumerate((("short", 6.0), ("long", 3.0), ("burst", 12.0)), start=2):
+        start = f"2024-01-{day:02d}T00:00:00"
+        rows = "".join(
+            f"2024-01-{day:02d}T00:{10 * (i + 1):02d}:00,{peak * f}\n"
+            for i, f in enumerate((0.3, 1.0, 0.6, 0.2))
+        )
+        (folder / "rain" / f"{name}.csv").write_text("time,rain\n" + rows)
+        storms.append(
+            {
+                "name": name,
+                "series": f"rain/{name}.csv",
+                "gage": "RG",
+                "start": start,
+                "end": f"2024-01-{day:02d}T04:00:00",
+            }
+        )
+    return storms
+
+
 async def test_operational_optimization(gym_tools, output_dir):
     pytest.importorskip("platypus")
     from openswmm_gymnasium.benchmarks.b01_twin_tank import SCENARIO_INP
@@ -221,6 +300,9 @@ async def test_operational_optimization(gym_tools, output_dir):
             {"kind": "uncontrolled_discharge", "params": {"link_ids": ["OUT"]}},
             {"kind": "storage_underutilization", "params": {"node_ids": ["T1", "T2"]}},
         ],
+        # Three storms in the model's folder, each run in its own window; the worst counts.
+        "events": _storms(inp.parent),
+        "event_aggregation": "max",
     }
     await tools("gym_config", action="create", name="twin", spec=spec)
     validated = await tools("gym_config", action="validate", name="twin")
@@ -231,12 +313,11 @@ async def test_operational_optimization(gym_tools, output_dir):
         config="twin",
         optimization={"algorithm": "nsga2", "budget": 8, "population_size": 4, "seed": 3},
     )
-    for _ in range(600):
-        status = await tools("gym_job", action="status", job_id=job["job_id"])
-        if status["state"] in ("done", "failed", "cancelled"):
-            break
-        await asyncio.sleep(0.2)
-    assert status["state"] == "done", status
+    status = await _finished(tools, job["job_id"])
+    for record in _log(status):
+        for term in ("uncontrolled_discharge", "storage_underutilization"):
+            per_event = [record["metrics"][f"{term}@{e['name']}"] for e in spec["events"]]
+            assert record["metrics"][term] == max(per_event)
     pareto = await tools("gym_score", action="pareto", job_id=job["job_id"])
     assert pareto["front"]
     front = pareto["front"]

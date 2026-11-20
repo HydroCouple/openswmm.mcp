@@ -45,7 +45,12 @@ from typing import Any
 import numpy as np
 from fastmcp import Context
 from openswmm_gymnasium._engine import SolverAdapter
-from openswmm_gymnasium.optimize import apply_decisions
+from openswmm_gymnasium.optimize import (
+    apply_decisions,
+    behavioural_set,
+    objective_directions,
+    prediction_bands,
+)
 from openswmm_gymnasium.spec.config import (
     JsonFloatMatrix,
     JsonFloatVector,
@@ -467,6 +472,88 @@ def _apply_schedule_policy(
         "objectives": record.get("objectives", {}),
         "schedule": schedule,
     }
+
+
+def _behavioural(manager: Any, job_id: str, rule: dict | None) -> dict[str, Any]:
+    """A finished job's behavioural set, written to C{behavioural-set.json} in its output dir."""
+    results = manager.results(job_id)
+    env_config, opt = manager.get_env_config(job_id), manager.get_opt_config(job_id)
+    log = Path(results["output_dir"]) / "evaluations.jsonl"
+    study = {
+        "definition": {
+            "objectives": [
+                {"name": n, "direction": d} for n, d in objective_directions(env_config).items()
+            ],
+            "optimization": opt.model_dump(mode="json"),
+        },
+        "evaluations": [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()],
+    }
+    accepted = behavioural_set(study, rule)
+    path = Path(results["output_dir"]) / "behavioural-set.json"
+    path.write_text(json.dumps(accepted, indent=2) + "\n", encoding="utf-8")
+    return accepted | {"path": str(path)}
+
+
+@tool_errors
+async def behavioural(ctx: Context, job_id: str, rule: dict | None = None) -> dict:
+    """The evaluations of a finished job that its acceptance rule accepts.
+
+    The rule is the job's own (C{optimization.acceptance}) unless I{rule} is given:
+    C{{"thresholds": [{"metric", "at_least" | "at_most"}], "best_fraction", "by"}}, with
+    metrics as the reward terms report them. The set is written to
+    C{behavioural-set.json} in the job's output dir.
+    """
+    require_gymnasium("gym_score(action='behavioural')")
+    manager = get_job_manager(ctx)
+    return await asyncio.to_thread(_behavioural, manager, job_id, rule)
+
+
+@tool_errors
+async def bands(
+    ctx: Context,
+    job_id: str,
+    series: list[str],
+    rule: dict | None = None,
+    quantiles: list[float] | None = None,
+    event: str | None = None,
+) -> dict:
+    """Prediction bands of a finished job's behavioural set.
+
+    Each member runs again and every series (C{"<catalog path>:<element id>"}, e.g.
+    C{"link.flow:C11"}) is read at the report times; the unweighted 5, 50 and 95 %
+    quantiles (or I{quantiles}) go to one CSV per series under C{bands/} in the job's
+    output dir, with every member's values. I{event} runs one of the config's events
+    instead of the model's own rain.
+    """
+    require_gymnasium("gym_score(action='bands')")
+    manager = get_job_manager(ctx)
+    pairs = []
+    for item in series:
+        path, sep, element = item.rpartition(":")
+        if not sep or not path or not element:
+            raise ToolError(
+                f"[{ErrorCode.VALIDATION_ERROR}] series {item!r} is not '<catalog path>:<id>'."
+            )
+        pairs.append((path, element))
+
+    def _bands() -> dict[str, Any]:
+        accepted = _behavioural(manager, job_id, rule)
+        out = Path(manager.results(job_id)["output_dir"]) / "bands"
+        made = prediction_bands(
+            manager.get_env_config(job_id),
+            accepted["members"],
+            pairs,
+            out,
+            quantiles=quantiles or (0.05, 0.5, 0.95),
+            event=event,
+        )
+        return {
+            "members": [m["evaluation"] for m in accepted["members"]],
+            "report_times": len(made["times"]),
+            "files": {key: s["file"] for key, s in made["series"].items()},
+        }
+
+    return await asyncio.to_thread(_bands)
 
 
 @tool_errors
