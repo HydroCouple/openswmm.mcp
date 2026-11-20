@@ -1,0 +1,220 @@
+<!doctype html><html><head><meta charset="utf-8"><title>OpenSWMM — Capacity Assessment Dashboard</title>
+<style>
+body{font-family:-apple-system,Segoe UI,Arial;margin:0;background:#f5f6f8;color:#222}
+header{padding:14px 20px;background:#fff;border-bottom:1px solid #e4e6eb}
+header h1{font-size:19px;margin:0}header p{margin:4px 0 0;color:#666;font-size:13px}
+.tabs{display:flex;gap:4px;padding:8px 14px 0;background:#fff;border-bottom:1px solid #e4e6eb;flex-wrap:wrap}
+.tab{cursor:pointer;border:1px solid #e4e6eb;border-bottom:none;background:#f1f3f5;border-radius:8px 8px 0 0;padding:8px 14px;font-size:13px;color:#444}
+.tab.active{background:#fff;color:#111;font-weight:600;box-shadow:0 -2px 0 #2b6cb0 inset}
+.panel{padding:14px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:980px){.grid{grid-template-columns:1fr}}
+.card{background:#fff;border:1px solid #e4e6eb;border-radius:10px;padding:10px}
+#map{width:100%;height:470px}#tsGlobal,#tsUtil,#hgl,#sankey,#dur,#vel,#risk{width:100%}
+.controls{display:flex;align-items:center;gap:10px;padding:8px 4px 2px;flex-wrap:wrap}
+.controls label{font-size:12px;color:#555}.controls input[type=range]{flex:1;min-width:120px}
+button{cursor:pointer;border:1px solid #cbd2d9;background:#fff;border-radius:8px;padding:5px 11px;font-size:13px}
+select{padding:5px 8px;border-radius:8px;border:1px solid #cbd2d9;font-size:13px;min-width:160px}
+.banner{font-weight:600;padding:7px 11px;border-radius:8px;font-size:13px}.banner.ok{background:#e6f4ea;color:#1e7e34}.banner.bad{background:#fdecea;color:#b3261e}
+#readout{color:#555;font-size:12px}
+#chips{display:flex;flex-wrap:wrap;gap:6px;padding:8px 4px;min-height:20px}
+.chip{background:#eef2f7;border:1px solid #d4dbe3;border-radius:14px;padding:3px 10px;font-size:12px;cursor:pointer}.chip.clear{background:#fdecea;border-color:#f1b0ab;color:#b3261e}
+.window{background:#f8fafc;border:1px dashed #cbd5e0;border-radius:8px;margin:6px 4px;padding:6px 10px}.window .hd{font-size:12px;color:#444;font-weight:600;margin-bottom:2px}
+#kpiCards{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:12px}@media(max-width:980px){#kpiCards{grid-template-columns:repeat(2,1fr)}}
+.kpi{border:1px solid #e4e6eb;border-radius:10px;padding:10px;text-align:center;background:#fafbfc}.kpi.good{border-color:#b7e1c4}.kpi.bad{border-color:#f1b0ab}
+.kpi .kv{font-size:18px;font-weight:700}.kpi.good .kv{color:#1e7e34}.kpi.bad .kv{color:#b3261e}.kpi .kl{font-size:11px;color:#444;margin-top:2px}.kpi .ks{font-size:10px;color:#888}
+#recs{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}@media(max-width:980px){#recs{grid-template-columns:1fr}}
+.rec{background:#fff;border:1px solid #e4e6eb;border-radius:10px;padding:12px}
+.rh{display:flex;justify-content:space-between;align-items:center}.rt{font-weight:700;font-size:14px}
+.tier{color:#fff;font-weight:700;border-radius:6px;padding:1px 8px;font-size:12px}
+.ra{color:#2b6cb0;font-weight:600;font-size:13px;margin:4px 0}.rr,.rb{font-size:12px;color:#444;margin-top:3px}.rb{color:#1e7e34}
+</style><script>/* __PLOTLY_JS__ : inline plotly.min.js (offline) or a CDN <script> */</script></head><body>
+<header><h1>Capacity Assessment Dashboard</h1>
+<p>Comprehensive temporal capacity &amp; constraint analysis: explore assets, hydraulic grade lines, volume routing, duration/velocity, risk, and recommended improvements. (Synthetic demo data.)</p></header>
+<div class="tabs">
+<div class="tab active" data-tab="explore">Explore</div><div class="tab" data-tab="hgl">HGL profiles</div><div class="tab" data-tab="sankey">Volume &amp; mass</div><div class="tab" data-tab="duration">Duration &amp; velocity</div><div class="tab" data-tab="risk">Risk &amp; KPIs</div><div class="tab" data-tab="recs">Recommendations</div>
+</div>
+
+<div class="panel" id="panel-explore">
+  <div class="grid">
+    <div class="card"><div id="map"></div>
+      <div class="controls"><button id="playBtn">▶ play</button><label>add asset</label><select id="assetDrop"></select></div>
+      <div class="controls"><span id="banner" class="banner ok">system nominal</span><span id="readout"></span></div></div>
+    <div class="card"><div id="tsGlobal"></div><div id="tsUtil"></div>
+      <div class="window"><div class="hd">Window (global ⇄ local) — both charts linked</div>
+        <div class="controls"><label>start</label><input type="range" id="winStart"><label>end</label><input type="range" id="winEnd"><button id="btnFull">Full</button><button id="btnEvent">Event</button></div></div>
+      <div id="chips"></div></div>
+  </div>
+</div>
+
+<div class="panel" id="panel-hgl" style="display:none"><div class="card">
+  <div class="controls"><label>path</label><select id="hglPath"></select><span style="color:#666;font-size:12px">▶ play animates HGL through the storm; slider scrubs time</span></div>
+  <div id="hgl" style="height:520px"></div></div></div>
+
+<div class="panel" id="panel-sankey" style="display:none"><div class="card"><div id="sankey"></div></div></div>
+
+<div class="panel" id="panel-duration" style="display:none"><div class="grid">
+  <div class="card"><div id="dur"></div></div><div class="card"><div id="vel"></div></div></div></div>
+
+<div class="panel" id="panel-risk" style="display:none">
+  <div id="kpiCards"></div><div class="card"><div id="risk"></div></div></div>
+
+<div class="panel" id="panel-recs" style="display:none"><div id="recs"></div></div>
+
+<script>var DATA=/* __DATA_JSON__ : json.dumps(DATA) per DASHBOARD.md */ {};</script><script>/* Capacity dashboard — tabbed analysis suite. Driven by injected DATA. */
+(function () {
+  "use strict";
+  var T = DATA.times.length, times = DATA.times;
+  function $(id){return document.getElementById(id);}
+  function clamp(x,lo,hi){return x<lo?lo:x>hi?hi:x;}
+  function nearestIdx(x){var b=0,bd=1e18;for(var i=0;i<T;i++){var d=Math.abs(times[i]-x);if(d<bd){bd=d;b=i;}}return b;}
+  function getAsset(id){var a=DATA.nodes.concat(DATA.links);for(var i=0;i<a.length;i++)if(a[i].id===id)return a[i];return null;}
+  function inEvent(t){return DATA.event_windows.some(function(w){return t>=w[0]&&t<=w[1];});}
+  function colorFor(u){if(u>=DATA.meta.surcharge_threshold)return"#6e0b14";var f=clamp(u,0,1),r,g;
+    if(f<0.5){r=Math.round(2*f*255);g=170;}else{r=255;g=Math.round(170*(1-(f-0.5)*2));}return"rgb("+r+","+g+",60)";}
+
+  /* ===================== TAB: EXPLORE ===================== */
+  var mapDiv=$("map"),gDiv=$("tsGlobal"),uDiv=$("tsUtil"),play=$("playBtn"),drop=$("assetDrop"),
+      winS=$("winStart"),winE=$("winEnd"),banner=$("banner"),readout=$("readout"),chips=$("chips");
+  var selected=[],cur=0,timer=null,syncing=false,win=[0,T-1],linkIdx=[],nodeTraceIdx=null;
+  function timeSlider(){return [{active:0,x:0,len:1,pad:{t:34,b:6},currentvalue:{prefix:"time: ",suffix:" h",font:{size:12}},
+    steps:times.map(function(t,i){return{label:(i%8===0)?t.toFixed(0):"",method:"skip",args:[]};})}];}
+  function buildMap(){
+    var tr=[];
+    DATA.links.forEach(function(l){linkIdx.push(tr.length);tr.push({x:[l.x0,l.x1],y:[l.y0,l.y1],mode:"lines",type:"scatter",
+      line:{width:6,color:colorFor(l.util[cur])},customdata:[l.id,l.id],hoverinfo:"text",text:l.id+" (conduit)",showlegend:false});});
+    nodeTraceIdx=tr.length;
+    tr.push({x:DATA.nodes.map(function(n){return n.x;}),y:DATA.nodes.map(function(n){return n.y;}),
+      customdata:DATA.nodes.map(function(n){return n.id;}),text:DATA.nodes.map(function(n){return n.id+" ("+n.kind+")";}),
+      mode:"markers",type:"scatter",hoverinfo:"text",
+      marker:{size:13,color:DATA.nodes.map(function(n){return n.util[cur];}),cmin:0,cmax:1.2,colorscale:"YlOrRd",line:{width:1,color:"#333"},colorbar:{title:"utilization",x:1.02,len:0.7}},showlegend:false});
+    Plotly.newPlot(mapDiv,tr,{title:"Network map — click a conduit/node; drag the time slider below",
+      xaxis:{visible:false},yaxis:{visible:false,scaleanchor:"x"},margin:{l:10,r:10,t:40,b:10},sliders:timeSlider(),template:"plotly_white",hovermode:"closest"},{responsive:true});
+    mapDiv.on("plotly_click",function(ev){if(ev.points&&ev.points.length)toggleAsset(ev.points[0].customdata);});
+    mapDiv.on("plotly_sliderchange",function(e){if(e&&e.slider)setTime(e.slider.active);});
+  }
+  function recolorMap(){Plotly.restyle(mapDiv,{"line.color":DATA.links.map(function(l){return colorFor(l.util[cur]);})},linkIdx);
+    Plotly.restyle(mapDiv,{"marker.color":[DATA.nodes.map(function(n){return n.util[cur];})]},[nodeTraceIdx]);}
+  function eventShapes(){return DATA.event_windows.map(function(w){return{type:"rect",xref:"x",yref:"paper",x0:w[0],x1:w[1],y0:0,y1:1,fillcolor:"orange",opacity:0.12,line:{width:0},layer:"below"};});}
+  function curShape(){var x=times[cur];return{type:"line",xref:"x",yref:"paper",x0:x,x1:x,y0:0,y1:1,line:{color:"#2b6cb0",width:2,dash:"dot"}};}
+  function thresholds(){return[DATA.meta.constrained_threshold,DATA.meta.surcharge_threshold].map(function(y,i){return{type:"line",xref:"paper",yref:"y",x0:0,x1:1,y0:y,y1:y,line:{color:i?"#6e0b14":"#cc7a00",width:1,dash:"dot"}};});}
+  function gT(){return[{x:times,y:DATA.global_state.flooding,name:"flooding",fill:"tozeroy",line:{color:"crimson"}},
+    {x:times,y:DATA.global_state.uncontrolled,name:"uncontrolled discharge",line:{color:"purple",dash:"dot"}}];}
+  function gL(){return{title:"Temporal adverse events",xaxis:{title:"hour",range:[times[win[0]],times[win[1]]]},yaxis:{title:"rate (m³/s)"},shapes:eventShapes().concat([curShape()]),margin:{l:55,r:20,t:36,b:40},height:280,template:"plotly_white",hovermode:"x unified",legend:{orientation:"h",y:-0.32}};}
+  function uT(){var tr=[];selected.forEach(function(id){var a=getAsset(id);if(a)tr.push({x:times,y:a.util,name:id+" util",yaxis:"y",mode:"lines"});});
+    if(DATA.available){tr.push({x:times,y:DATA.available.conveyance,name:"conveyance avail %",yaxis:"y2",line:{color:"teal",dash:"dash"},opacity:0.7});
+      tr.push({x:times,y:DATA.available.storage,name:"storage free %",yaxis:"y2",line:{color:"goldenrod",dash:"dash"},opacity:0.7});
+      tr.push({x:times,y:DATA.available.treatment,name:"treatment spare %",yaxis:"y2",line:{color:"seagreen",dash:"dash"},opacity:0.7});}
+    if(!tr.length)tr.push({x:times,y:times.map(function(){return null;}),name:"(add an asset)"});return tr;}
+  function uL(){return{title:"Capacity & constraint utilization",xaxis:{title:"hour",range:[times[win[0]],times[win[1]]]},yaxis:{title:"utilization",range:[0,1.25]},yaxis2:{title:"available %",overlaying:"y",side:"right",range:[0,105],showgrid:false},shapes:eventShapes().concat(thresholds()).concat([curShape()]),margin:{l:55,r:55,t:36,b:40},height:300,template:"plotly_white",hovermode:"x unified",legend:{orientation:"h",y:-0.32}};}
+  function buildExplore(){buildMap();Plotly.newPlot(gDiv,gT(),gL(),{responsive:true});Plotly.newPlot(uDiv,uT(),uL(),{responsive:true});
+    [gDiv,uDiv].forEach(function(d){d.on("plotly_relayout",function(e){onZoom(d,e);});});buildDropdown();setTime(0);renderChips();}
+  function rebuildU(){Plotly.react(uDiv,uT(),uL());}
+  function applyWindow(){if(syncing)return;syncing=true;var r=[times[win[0]],times[win[1]]];Plotly.relayout(gDiv,{"xaxis.range":r});Plotly.relayout(uDiv,{"xaxis.range":r});winS.value=win[0];winE.value=win[1];syncing=false;}
+  function onZoom(src,e){if(syncing)return;if(e["xaxis.autorange"]){win=[0,T-1];applyWindow();return;}
+    if(e["xaxis.range[0]"]!==undefined){win=[clamp(nearestIdx(e["xaxis.range[0]"]),0,T-2),clamp(nearestIdx(e["xaxis.range[1]"]),1,T-1)];var o=src===gDiv?uDiv:gDiv;syncing=true;Plotly.relayout(o,{"xaxis.range":[times[win[0]],times[win[1]]]});winS.value=win[0];winE.value=win[1];syncing=false;}}
+  function toggleAsset(id){if(!id)return;var k=selected.indexOf(id);if(k>=0)selected.splice(k,1);else selected.push(id);rebuildU();renderChips();}
+  function renderChips(){chips.innerHTML="";selected.forEach(function(id){var c=document.createElement("span");c.className="chip";c.textContent=id+" ✕";c.onclick=function(){toggleAsset(id);};chips.appendChild(c);});
+    if(selected.length){var clr=document.createElement("span");clr.className="chip clear";clr.textContent="clear all";clr.onclick=function(){selected=[];rebuildU();renderChips();};chips.appendChild(clr);}}
+  function buildDropdown(){var o0=document.createElement("option");o0.value="";o0.textContent="Add asset…";drop.appendChild(o0);
+    function grp(l,items){var g=document.createElement("optgroup");g.label=l;items.forEach(function(a){var o=document.createElement("option");o.value=a.id;o.textContent=a.id+(a.kind?" ("+a.kind+")":"");g.appendChild(o);});drop.appendChild(g);}
+    grp("Nodes",DATA.nodes);grp("Conduits",DATA.links);drop.addEventListener("change",function(){toggleAsset(drop.value);drop.value="";});}
+  function moveCursor(){Plotly.relayout(gDiv,{shapes:eventShapes().concat([curShape()])});Plotly.relayout(uDiv,{shapes:eventShapes().concat(thresholds()).concat([curShape()])});}
+  function setTime(i){cur=clamp(i,0,T-1);recolorMap();moveCursor();var t=times[cur],adv=inEvent(t);
+    banner.textContent=(adv?"⚠ ADVERSE CONDITIONS":"system nominal")+" — t = "+t.toFixed(2)+" h";banner.className="banner "+(adv?"bad":"ok");
+    readout.textContent="flooding "+DATA.global_state.flooding[cur].toFixed(1)+" · uncontrolled "+DATA.global_state.uncontrolled[cur].toFixed(1)+" m³/s";}
+  function togglePlay(){if(timer){clearInterval(timer);timer=null;play.textContent="▶ play";return;}play.textContent="⏸ pause";timer=setInterval(function(){var i=cur>=T-1?0:cur+1;setTime(i);Plotly.relayout(mapDiv,{"sliders[0].active":i});},150);}
+  play.addEventListener("click",togglePlay);
+  winS.min=0;winS.max=T-2;winS.value=0;winE.min=1;winE.max=T-1;winE.value=T-1;
+  function onWin(ev){var lo=parseInt(winS.value,10),hi=parseInt(winE.value,10);if(hi<=lo){if(ev.target===winS)hi=lo+1;else lo=hi-1;winS.value=lo;winE.value=hi;}win=[lo,hi];applyWindow();}
+  winS.addEventListener("input",onWin);winE.addEventListener("input",onWin);
+  $("btnFull").addEventListener("click",function(){win=[0,T-1];applyWindow();});
+  $("btnEvent").addEventListener("click",function(){if(DATA.event_windows.length){win=[nearestIdx(DATA.event_windows[0][0]),nearestIdx(DATA.event_windows[0][1])];applyWindow();}});
+
+  /* ===================== TAB: HGL ===================== */
+  function buildHGL(){
+    var psel=$("hglPath");DATA.paths.forEach(function(p,i){var o=document.createElement("option");o.value=i;o.textContent=p.name;psel.appendChild(o);});
+    function draw(pi){var p=DATA.paths[pi];
+      var data=[
+        {x:p.dist,y:p.invert,name:"invert",line:{color:"#8a6d3b"},fill:"tozeroy",fillcolor:"rgba(138,109,59,0.15)"},
+        {x:p.dist,y:p.crown,name:"crown",line:{color:"#999",dash:"dot"}},
+        {x:p.dist,y:p.rim,name:"ground / rim",line:{color:"#444"}},
+        {x:p.dist,y:p.hgl_t[0],name:"HGL",line:{color:"#1f77b4",width:3}}];
+      var frames=p.hgl_t.map(function(h,i){return{name:String(i),data:[{y:h}],traces:[3]};});
+      var layout={title:"Hydraulic grade line — "+p.name,xaxis:{title:"distance (m)"},yaxis:{title:"elevation (m)"},
+        margin:{l:55,r:20,t:40,b:60},template:"plotly_white",hovermode:"x unified",legend:{orientation:"h",y:-0.25},
+        updatemenus:[{type:"buttons",showactive:false,x:0,y:-0.18,buttons:[
+          {label:"▶ play",method:"animate",args:[null,{fromcurrent:true,frame:{duration:120,redraw:true},transition:{duration:0}}]},
+          {label:"⏸",method:"animate",args:[[null],{mode:"immediate",frame:{duration:0,redraw:false}}]}]}],
+        sliders:[{active:0,pad:{t:30},currentvalue:{prefix:"time: ",suffix:" h"},
+          steps:times.map(function(t,i){return{label:(i%8===0)?t.toFixed(0):"",method:"animate",args:[[String(i)],{mode:"immediate",frame:{duration:0,redraw:true},transition:{duration:0}}]};})}]};
+      Plotly.newPlot("hgl",data,layout,{responsive:true}).then(function(){Plotly.addFrames("hgl",frames);});}
+    psel.addEventListener("change",function(){draw(parseInt(psel.value,10));});draw(0);
+  }
+
+  /* ===================== TAB: VOLUME (Sankey) ===================== */
+  function buildSankey(){var s=DATA.sankey;
+    Plotly.newPlot("sankey",[{type:"sankey",orientation:"h",
+      node:{label:s.labels,pad:18,thickness:18,color:["#4e79a7","#f28e2b","#59a14f","#76b7b2","#b07aa1","#e15759","#9c755f"]},
+      link:{source:s.source,target:s.target,value:s.value,color:"rgba(120,120,120,0.3)"}}],
+      {title:"System volume routing ("+s.note+") — continuity error "+s.continuity_error_pct+"%",margin:{l:10,r:10,t:50,b:10},height:480,template:"plotly_white"},{responsive:true});
+  }
+
+  /* ===================== TAB: DURATION & VELOCITY ===================== */
+  function exceedance(series){var s=series.slice().sort(function(a,b){return b-a;});return s.map(function(v,i){return{x:100*i/(s.length-1),y:v};});}
+  function buildDuration(){
+    // exceedance curves for top-6 conduits by peak util
+    var ranked=DATA.links.slice().sort(function(a,b){return Math.max.apply(null,b.util)-Math.max.apply(null,a.util);}).slice(0,6);
+    var tr=ranked.map(function(l){var e=exceedance(l.util);return{x:e.map(function(p){return p.x;}),y:e.map(function(p){return p.y;}),name:l.id,mode:"lines"};});
+    Plotly.newPlot("dur",tr,{title:"Utilization exceedance — top conduits (hmax/Hmax vs % of time exceeded)",
+      xaxis:{title:"% of time exceeded"},yaxis:{title:"hmax/Hmax"},shapes:[{type:"line",xref:"paper",x0:0,x1:1,yref:"y",y0:1,y1:1,line:{color:"#6e0b14",dash:"dot"}}],
+      margin:{l:55,r:20,t:40,b:45},height:340,template:"plotly_white",hovermode:"x unified",legend:{orientation:"h",y:-0.3}},{responsive:true});
+    // velocity self-cleansing scatter
+    var mn=DATA.meta.min_velocity,mx=DATA.meta.max_velocity;
+    var vmin=DATA.links.map(function(l){return Math.min.apply(null,l.vel);}),vmax=DATA.links.map(function(l){return Math.max.apply(null,l.vel);}),ids=DATA.links.map(function(l){return l.id;});
+    var col=DATA.links.map(function(l){var lo=Math.min.apply(null,l.vel),hi=Math.max.apply(null,l.vel);return lo<mn?"#e15759":(hi>mx?"#9c27b0":"#59a14f");});
+    Plotly.newPlot("vel",[{x:vmin,y:vmax,text:ids,customdata:col,mode:"markers+text",textposition:"top center",textfont:{size:9},
+      marker:{size:12,color:col,line:{width:1,color:"#333"}},hovertemplate:"%{text}<br>min v=%{x:.2f} max v=%{y:.2f}<extra></extra>"}],
+      {title:"Velocity screening — red: below self-cleansing; purple: above scour",
+       xaxis:{title:"min velocity (m/s)"},yaxis:{title:"max velocity (m/s)"},
+       shapes:[{type:"line",yref:"paper",y0:0,y1:1,xref:"x",x0:mn,x1:mn,line:{color:"#e15759",dash:"dot"}},
+               {type:"line",xref:"paper",x0:0,x1:1,yref:"y",y0:mx,y1:mx,line:{color:"#9c27b0",dash:"dot"}}],
+       margin:{l:55,r:20,t:40,b:45},height:340,template:"plotly_white"},{responsive:true});
+  }
+
+  /* ===================== TAB: RISK & KPIs ===================== */
+  function buildRisk(){
+    var kc=$("kpiCards");kc.innerHTML="";
+    DATA.kpis.forEach(function(k){var d=document.createElement("div");d.className="kpi "+(k.pass_?"good":"bad");
+      d.innerHTML="<div class='kv'>"+k.value+" <span style='font-size:11px;color:#888'>"+k.unit+"</span></div><div class='kl'>"+k.name+"</div><div class='ks'>"+(k.pass_?"✓ meets":"✗ target "+k.target+" "+k.unit)+"</div>";kc.appendChild(d);});
+    var assets=DATA.nodes.concat(DATA.links).map(function(a){var peak=Math.max.apply(null,a.util);
+      var dur=a.util.reduce(function(s,v){return s+(v>0.9?1:0);},0)/T;var score=peak*(0.5+dur)*(a.consequence||1);return{id:a.id,score:score,peak:peak,cons:a.consequence};});
+    assets.sort(function(a,b){return b.score-a.score;});assets=assets.slice(0,15).reverse();
+    Plotly.newPlot("risk",[{type:"bar",orientation:"h",x:assets.map(function(a){return a.score;}),y:assets.map(function(a){return a.id;}),
+      marker:{color:assets.map(function(a){return a.score;}),colorscale:"YlOrRd"},
+      customdata:assets.map(function(a){return[a.peak,a.cons];}),hovertemplate:"%{y}<br>risk %{x:.2f}<br>peak util %{customdata[0]:.2f} · consequence %{customdata[1]}<extra></extra>"}],
+      {title:"Asset criticality — risk = peak util × duration × consequence (top 15)",xaxis:{title:"risk score"},margin:{l:90,r:20,t:40,b:40},height:480,template:"plotly_white"},{responsive:true});
+  }
+
+  /* ===================== TAB: RECOMMENDATIONS ===================== */
+  function buildRecs(){var w=$("recs");w.innerHTML="";
+    var tierColor={"$":"#59a14f","$$":"#f28e2b","$$$":"#e15759"};
+    DATA.recommendations.forEach(function(r){var d=document.createElement("div");d.className="rec";
+      d.innerHTML="<div class='rh'><span class='rt'>"+r.type+"</span><span class='tier' style='background:"+(tierColor[r.cost_tier]||"#888")+"'>"+r.cost_tier+"</span></div>"+
+        "<div class='ra'>"+r.asset+"</div><div class='rr'><b>Why:</b> "+r.rationale+"</div>"+
+        "<div class='rr'><b>Sizing:</b> "+r.sizing+"</div><div class='rb'><b>Benefit:</b> "+r.benefit+"</div>";w.appendChild(d);});
+  }
+
+  /* ===================== TABS ===================== */
+  var built={explore:true};
+  var builders={hgl:buildHGL,sankey:buildSankey,duration:buildDuration,risk:buildRisk,recs:buildRecs};
+  function showTab(id){
+    document.querySelectorAll(".tab").forEach(function(b){b.classList.toggle("active",b.dataset.tab===id);});
+    document.querySelectorAll(".panel").forEach(function(p){p.style.display=p.id==="panel-"+id?"block":"none";});
+    if(!built[id]&&builders[id]){builders[id]();built[id]=true;}
+    setTimeout(function(){document.querySelectorAll("#panel-"+id+" .js-plotly-plot").forEach(function(d){Plotly.Plots.resize(d);});},30);
+  }
+  document.querySelectorAll(".tab").forEach(function(b){b.addEventListener("click",function(){showTab(b.dataset.tab);});});
+
+  buildExplore();
+})();
+</script></body></html>

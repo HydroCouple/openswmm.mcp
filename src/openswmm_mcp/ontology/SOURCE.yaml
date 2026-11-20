@@ -1,0 +1,5 @@
+repo: HydroCouple/water-ontology
+branch: feature/governed-swmm-sqlite
+commit: 04098c1fd4a7b7526873fe18e0169735a7b9e632
+path: docs/agent-context.md
+# Generated there by `make prompt` (generators/linkml_to_prompt.py). Refresh by copying it again.
