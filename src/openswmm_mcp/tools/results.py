@@ -22,6 +22,7 @@ from openswmm.engine import (
     Results,
     get_report_snapshot,
 )
+from openswmm_gymnasium.rewards.fit import FIT_METRICS, fit_metrics, read_observed_csv
 
 from openswmm_mcp import catalog as cat
 from openswmm_mcp._util.validation import resolve_path
@@ -44,7 +45,7 @@ _SNAPSHOT_TABLES = {
     "pumps": ("pump_summary", "total_volume"),
     "subcatchments": ("subcatchment_summary", "total_runoff_vol"),
 }
-_METRICS = ("peak", "volume", "rmse", "nse", "bias")
+_METRICS = FIT_METRICS  # one implementation: openswmm_gymnasium.rewards.fit
 T = TypeVar("T")
 
 
@@ -420,47 +421,12 @@ async def report(
 def _observed_csv(path: Path) -> dict[str, tuple[np.ndarray, np.ndarray]]:
     """Wide CSV: first column ISO datetimes, one column per element id."""
     try:
-        with path.open(newline="", encoding="utf-8") as fh:
-            rows = list(csv.reader(fh))
-        header, body = rows[0], [r for r in rows[1:] if r]
-        times = np.array([np.datetime64(datetime.fromisoformat(r[0].strip())) for r in body])
-        return {
-            name.strip(): (
-                times,
-                np.array([float(r[i]) if i < len(r) and r[i].strip() else np.nan for r in body]),
-            )
-            for i, name in enumerate(header[1:], start=1)
-        }
+        return read_observed_csv(path)
     except (OSError, IndexError, ValueError) as exc:
         raise ToolError(
             f"[{ErrorCode.VALIDATION_ERROR}] Cannot read observed CSV '{path}': {exc}. Expected "
             "a header row, ISO datetimes in the first column and one numeric column per id."
         ) from None
-
-
-def _metrics(ta, a, tb, b) -> dict[str, float | None]:
-    """Metrics of b against a (a = baseline / observed), with b interpolated onto a's times."""
-    xa, xb = ta.astype("datetime64[s]").astype(float), tb.astype("datetime64[s]").astype(float)
-    ok = ~np.isnan(a)
-    bi = np.interp(xa[ok], xb, b)
-    av = a[ok]
-    err = bi - av
-    denom = float(np.sum((av - av.mean()) ** 2)) if len(av) else 0.0
-    dt = np.diff(xa[ok]) if len(av) > 1 else np.array([0.0])
-
-    def vol(v: np.ndarray) -> float:
-        return float(np.sum((v[1:] + v[:-1]) / 2 * dt)) if len(v) > 1 else 0.0
-
-    return {
-        "peak_a": float(av.max()) if len(av) else None,
-        "peak_b": float(bi.max()) if len(bi) else None,
-        "peak_diff": float(bi.max() - av.max()) if len(av) else None,
-        "volume_a": vol(av),
-        "volume_b": vol(bi),
-        "rmse": float(np.sqrt(np.mean(err**2))) if len(err) else None,
-        "nse": 1.0 - float(np.sum(err**2)) / denom if denom > 0 else None,
-        "bias": float(np.mean(err)) if len(err) else None,
-    }
 
 
 async def compare(
@@ -474,7 +440,7 @@ async def compare(
 ) -> dict:
     """Compare two result sources: session IDs, .out paths, or observed data (a wide .csv with
     an ISO datetime column then one column per element id). Returns per-object differences
-    and fit metrics of b against a (peak, volume, RMSE, NSE, bias)."""
+    and fit metrics of b against a (peak, volume, RMSE, NSE, bias, KGE)."""
     wanted = set(metrics or _METRICS)
     base = str(get_session_manager(ctx).working_dir)
 
@@ -494,7 +460,7 @@ async def compare(
         rows = []
         for key, (tb, vb) in pairs:
             ta, va = series_a[key]
-            m = _metrics(ta, va, tb, vb)
+            m = fit_metrics(ta, va, tb, vb)
             rows.append(
                 {"id": key}
                 | {k: v for k, v in m.items() if k.split("_")[0] in wanted or k in wanted}

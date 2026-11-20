@@ -30,6 +30,9 @@ dependencies = [
     "numpy>=1.21",
     # The handle-based v6 engine with its API catalog (openswmm.engine.catalog).
     "openswmm>=6.0.0a4.dev2",
+    # Fit metrics for compare (openswmm_gymnasium.rewards.fit); its base install needs only
+    # gymnasium and numpy beyond the engine.
+    "openswmm.gymnasium>=0.1.0.dev1",
 ]
 
 [project.optional-dependencies]

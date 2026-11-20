@@ -31,6 +31,7 @@ version is now `0.2.0.dev0`.
 
 ### Added
 
+- **`compare` uses openswmm.gymnasium's fit metrics** (`rewards.fit`), the one implementation calibration objectives use, and adds the Kling-Gupta efficiency; its other numbers are unchanged. `openswmm.gymnasium>=0.1.0.dev1` is now a core dependency (its base install adds only gymnasium and numpy).
 - **`platform_model(action="derive")`**: a platform study's evaluation becomes a revision
   that names its base revision, study, evaluation and design. `gym_score(action="apply_design")`
   now writes every design kind through the job's own factories with the values the evaluation

@@ -28,7 +28,7 @@ features still have explicit boundaries (see below).
 | `edit(session_id, action, kind, ids, ...)` | Structural edits: `add`, `delete`, `preview_delete`, `rename`, `convert`. |
 | `timeseries(source, kind, ids, variable)` | Result series from a finished session or an `.out` file, peak-preserving downsampling; `variable="quality:TSS"` for pollutants. |
 | `report(session_id, name)` | `summary`, `mass_balance`, `flooding`, `capacity`, `storage`, `pumps`, `subcatchments`, `statistics`, `quality`, `2d`, `groundwater`. |
-| `compare(a, b, kind, variable)` | Two sessions, `.out` files or an observed CSV: per-element peak, volume, RMSE, NSE and bias. |
+| `compare(a, b, kind, variable)` | Two sessions, `.out` files or an observed CSV: per-element peak, volume, RMSE, NSE, bias and Kling-Gupta efficiency (openswmm.gymnasium's `rewards.fit`, the same code calibration objectives use). |
 | `export(session_id, path, kind, fields \| variable)` | Write a field table or a result series to CSV or JSON. |
 
 ### Addressing
