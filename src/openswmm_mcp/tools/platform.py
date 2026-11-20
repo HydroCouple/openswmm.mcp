@@ -156,7 +156,7 @@ def _derive(
     try:
         from openswmm_gymnasium._engine import SolverAdapter
         from openswmm_gymnasium.optimize import apply_decisions, decision_values, design_dimensions
-        from openswmm_gymnasium.optimize.manifest import model_inputs
+        from openswmm_gymnasium.optimize.manifest import model_inputs, sidecar_files
         from openswmm_gymnasium.spec.config import EnvConfig
         from openswmm_gymnasium.spec.envs import json_safe
     except ImportError:
@@ -181,16 +181,18 @@ def _derive(
     if record.get("failed"):
         raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] Evaluation {evaluation} failed.")
     folder = _folder(settings, "derived", f"{study_id}-{evaluation}")
-    check = package_swmm_model(model, folder / "base-check")
+    payload = dict(lineage["workload"]["parameters"]["env_config"])  # what the pool evaluated
+    payload.update(inp_path=str(model), rpt_path=None, out_path=None)
+    env_config = EnvConfig.model_validate(payload)
+    # The rain and observation files the study names travel with the model, as in its base.
+    sidecars = sidecar_files(env_config) or None
+    check = package_swmm_model(model, folder / "base-check", extra_files=sidecars)
     local = model_inputs(check.manifest.model_dump(mode="json", by_alias=True)["files"])
     if local != model_inputs(base["manifest"]["files"]):
         raise ToolError(
             f"[{ErrorCode.VALIDATION_ERROR}] {model} is not the model of revision "
             f"{base['revision_id']}, which study {study_id} evaluated."
         )
-    payload = dict(lineage["workload"]["parameters"]["env_config"])  # what the pool evaluated
-    payload.update(inp_path=str(model), rpt_path=None, out_path=None)
-    env_config = EnvConfig.model_validate(payload)
     dims = design_dimensions(env_config)
     decisions = json_safe(decision_values(dims, np.asarray(record["decisions"], dtype=float)))
     adapter = SolverAdapter(model, os.devnull, os.devnull)
@@ -200,7 +202,7 @@ def _derive(
         adapter.solver.write(str(folder / "model.inp"))
     finally:
         adapter.close()
-    package = package_swmm_model(folder / "model.inp", folder / "package")
+    package = package_swmm_model(folder / "model.inp", folder / "package", extra_files=sidecars)
     package.manifest = package.manifest.model_copy(
         update={
             "derived_from": DerivedFrom(
@@ -234,12 +236,14 @@ async def platform_model(
     session_id: str | None = None,
     study_id: str | None = None,
     evaluation: int | None = None,
+    files: list[str] | None = None,
 ) -> dict:
     """Register a model with the platform, or inspect a registered one.
 
     "upload" packages the SWMM model at path (a .inp under the working directory, with the
-    files it references) and uploads it to target_id's storage as an immutable revision;
-    the result carries revision_id, its state and the manifest hash. "get" returns a
+    files it references, and files: paths in its folder the model does not reference, such
+    as observations or storm rain) and uploads it to target_id's storage as an immutable
+    revision; the result carries revision_id, its state and the manifest hash. "get" returns a
     revision by revision_id. "derive" writes evaluation (a number) of study_id onto the
     study's base model at path and uploads the result as a new revision whose manifest
     names the base revision, the study and the design (target_id defaults to the base's).
@@ -279,7 +283,8 @@ async def platform_model(
 
         model = _local_model(settings, path)
         staging = _folder(settings, "packages", f"{model.stem}-{uuid.uuid4().hex[:8]}")
-        package = package_swmm_model(model, staging)
+        sidecars = {rel: model.parent / rel for rel in files or []}
+        package = package_swmm_model(model, staging, extra_files=sidecars or None)
         revision = client.upload_revision(
             package,
             project_id=_project(settings, project_id),
