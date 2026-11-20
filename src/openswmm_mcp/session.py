@@ -37,6 +37,8 @@ class SimSession:
     # Set by structural edits (add/delete/convert); ``run`` then writes and reopens
     # the model so the engine rebuilds its derived data before initializing.
     structure_edited: bool = False
+    # The local run being recorded (openswmm_mcp.provenance), from start to end.
+    local_run: dict[str, Any] | None = None
     lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
     readers: dict[str, Any] = field(default_factory=dict, repr=False)
 

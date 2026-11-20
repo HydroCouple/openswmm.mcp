@@ -6,7 +6,8 @@ as canonical JSON (never their content), when it started and ended, and its tool
 ``platform_run`` passes that id to the platform, which writes it into the attempt manifest's
 actor, so a run can be traced back to the call that submitted it. With the platform toolset,
 each line also names the platform agent session and the person it acts for, the identity the
-water ontology's ``ToolCall`` and ``AgentSession`` rows are built from.
+water ontology's ``ToolCall`` and ``AgentSession`` rows are built from. Without it, the
+journal is the session and the operating-system login is the person.
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ from typing import Any
 from fastmcp.server.middleware import Middleware, MiddlewareContext
 
 from openswmm_mcp import __version__
+from openswmm_mcp.provenance import local_identity
 
 #: The tool call id of the call being answered; ``platform_run`` sends it to the platform.
 CURRENT_CALL: ContextVar[str | None] = ContextVar("openswmm_mcp_tool_call", default=None)
@@ -121,8 +123,8 @@ class Journal(Middleware):
             return self._identity
         ctx = context.fastmcp_context
         client = (ctx.lifespan_context or {}).get("platform") if ctx is not None else None
-        if client is None:
-            self._identity = {}
+        if client is None:  # a local session: this journal, for the operating-system login
+            self._identity = {"agent_session_id": self.journal_id, "acting_for": local_identity()}
             return self._identity
         try:
             me = await asyncio.to_thread(client.me)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import getpass
 import json
 
 import pytest
@@ -53,7 +54,9 @@ async def test_every_call_is_one_line_with_its_effect_and_checksums(tools, inp_p
     assert lines[1]["result_sha256"] == sha256(coords)
     assert "node_coords" not in json.dumps(lines)
     assert all(x["started_at"] <= x["ended_at"] for x in lines)
-    assert "agent_session_id" not in lines[0]  # no platform toolset, no platform session
+    # No platform: the journal is the session, for the operating-system login.
+    assert all(x["agent_session_id"] == x["journal_id"] for x in lines)
+    assert lines[0]["acting_for"] == getpass.getuser()
 
 
 def test_effects_follow_the_catalog_and_default_to_write():
