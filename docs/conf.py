@@ -77,13 +77,15 @@ suppress_warnings = ["ref.python", "duplicate"]
 autodoc_mock_imports = ["openswmm", "fastmcp", "openswmm_gymnasium"]
 
 # The server checks catalog compatibility at import time. Keep the engine mock
-# alive across autodoc imports and give it the minimum revision expected by
-# openswmm_mcp.catalog.MIN_CATALOG_REVISION; no engine methods run in this build.
+# alive across autodoc imports and give it the minimum revision and schema expected by
+# openswmm_mcp.catalog (MIN_CATALOG_REVISION, MIN_CATALOG_SCHEMA); no engine methods run in
+# this build.
 _docs_mocks = ExitStack()
 _docs_mocks.enter_context(mock(["openswmm"]))
 _engine = import_module("openswmm.engine")
 _catalog = _engine.catalog
 _catalog.revision = lambda: 2
+_catalog.load = lambda: {"schema": 2}  # openswmm_mcp.catalog.MIN_CATALOG_SCHEMA
 _engine.catalog = _catalog
 
 

@@ -40,11 +40,13 @@ jobs:
 
       # The required engine is not on PyPI yet. Build a pinned source version
       # with the real 2D/HDF5 and GeoPackage features exercised by this suite.
+      # It must carry catalog schema 2 (every method has an effect), which
+      # openswmm_mcp.catalog requires.
       - name: Checkout engine
         uses: actions/checkout@v5
         with:
           repository: HydroCouple/openswmm.engine
-          ref: 76c032fb4a2f510b59071051585949afa076422a
+          ref: ba66903c4c925a4036a4cde324097f510d859418
           path: .ci/openswmm.engine
 
       - name: Checkout vcpkg
@@ -107,6 +109,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
           python -m pip check
+
+      - name: Install optional ledger spatial dependencies
+        if: matrix.python-version == '3.12'
+        run: python -m pip install -e ".[ledger]"
 
       - name: Run unit tests
         shell: bash
