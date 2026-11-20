@@ -31,6 +31,9 @@ version is now `0.2.0.dev0`.
 
 ### Added
 
+- **`platform_finding`** (extra `ontology`): records an answer as a water-ontology
+  `AgentFinding` over rows built from the cited runs' manifests and this session's journal,
+  and returns the verifier's verdict for every number it cites.
 - **Tool-call journal**: one JSON line per tool call under `<working_dir>/journal/`, with the
   call's effect, argument and result checksums, times and tool call id; `platform_run` sends
   that id to the platform. **Resource** `swmm://ontology/context`: the water ontology's

@@ -40,6 +40,10 @@ gym = [
 platform = [
     "hydrocouple.platform>=0.1.0.dev0",
 ]
+# platform_finding: the water ontology's loader and verifier (an editable checkout for now).
+ontology = [
+    "water-ontology>=0.2.0",
+]
 dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21",

@@ -42,8 +42,9 @@ new tool code.
   `gym_env`, `gym_job`, `gym_score`
 - **Platform** (`OPENSWMM_MCP_TOOLSETS=core,platform`) -- `platform_targets`,
   `platform_session`, `platform_model`, `platform_estimate`, `platform_run`,
-  `platform_job`, `platform_results`: submit runs to hydrocouple.platform under an agent
-  session's budget and read their results, provenance first
+  `platform_job`, `platform_results`, `platform_finding`: submit runs to
+  hydrocouple.platform under an agent session's budget, read their results provenance
+  first, and record an answer whose every number is checked against the run summary
 
 See the [tools guide](docs/user-guide/tools.md) for details and the v1-to-v2
 mapping.

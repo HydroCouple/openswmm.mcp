@@ -13,7 +13,7 @@ file, or in the Claude Code MCP server configuration.
 | `OPENSWMM_MCP_TRANSPORT` | `str` | `"stdio"` | Transport mode: `"stdio"`, `"http"`, or `"sse"`. |
 | `OPENSWMM_MCP_HTTP_PORT` | `int` | `8080` | Port for HTTP/SSE transport (ignored for stdio). |
 | `OPENSWMM_MCP_LOG_LEVEL` | `str` | `"INFO"` | Logging level: `DEBUG`, `INFO`, `WARNING`, `ERROR`. |
-| `OPENSWMM_MCP_TOOLSETS` | `str` | `"core"` | Tool sets to register: `core` (15 tools), `gym` (5 tools) and `platform` (7 tools), comma-separated. |
+| `OPENSWMM_MCP_TOOLSETS` | `str` | `"core"` | Tool sets to register: `core` (15 tools), `gym` (5 tools) and `platform` (8 tools), comma-separated. |
 | `OPENSWMM_MCP_PLATFORM_URL` | `str` | `None` | The hydrocouple.platform control plane (platform toolset). |
 | `OPENSWMM_MCP_PLATFORM_TOKEN` | `str` | `None` | An agent session credential (`hcps_...`) for the platform toolset. |
 | `OPENSWMM_MCP_PLATFORM_PROJECT_ID` | `str` | `None` | The platform project used when a tool call names none. |
@@ -29,7 +29,8 @@ The default `core` set is 15 tools, about 12k characters of definitions.
 the `gym` extra (`pip install 'openswmm.mcp[gym]'`); if the extra is missing,
 the server refuses to start and names it.
 
-`core,platform` adds the seven `platform_*` tools and needs the `platform` extra
+`core,platform` adds the eight `platform_*` tools (`platform_finding` also needs the
+`ontology` extra) and needs the `platform` extra
 (`pip install 'openswmm.mcp[platform]'`) with `OPENSWMM_MCP_PLATFORM_URL`,
 `OPENSWMM_MCP_PLATFORM_TOKEN` (an agent session credential, `hcps_...`, never a person's
 sign-in token) and optionally `OPENSWMM_MCP_PLATFORM_PROJECT_ID`.

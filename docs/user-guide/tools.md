@@ -107,8 +107,9 @@ writable one through the `field_setpoint` runtime factory.
 
 ## Platform tools (`OPENSWMM_MCP_TOOLSETS=core,platform`)
 
-Seven tools submit runs to [hydrocouple.platform](https://github.com/HydroCouple/hydrocouple.platform)
-and read their results. A platform run executes in the compute target's runner, not in the
+Eight tools: seven submit runs to [hydrocouple.platform](https://github.com/HydroCouple/hydrocouple.platform)
+and read their results, and `platform_finding` records and verifies an answer drawn from
+them. A platform run executes in the compute target's runner, not in the
 server process; platform ids are never local session ids. The toolset needs the `platform`
 extra and three settings: `OPENSWMM_MCP_PLATFORM_URL`, `OPENSWMM_MCP_PLATFORM_TOKEN` and,
 optionally, `OPENSWMM_MCP_PLATFORM_PROJECT_ID`. The token is an agent session credential
@@ -124,6 +125,16 @@ sign-in token. The platform checks every submission against that session's budge
 | `platform_run(revision_id, target_id, workflow, parameters, idempotency_key)` | Submit a run. Returns `ACCEPTED`, or `PENDING_APPROVAL` when the request is outside the session's budget; a person approves it. |
 | `platform_job(action, job_id, project_id, state)` | `status` (state, progress, attempts, failure), `list`, or `cancel`. |
 | `platform_results(run_id, table)` | Provenance first, then continuity quality, the artifact list, and the run summary: its tables with row counts, or one table's columns (engine catalog path and unit) and rows. Only `summary.json` is fetched, and it is checked against its published sha256. Read-only. |
+
+`platform_finding(statement, claims, question, assumptions)` records an answer and checks
+every number it cites. Each claim is `{"quoted", "unit", "run_id", "locator"}`: the number as
+the statement writes it, the unit the run summary gives, the run, and `table/element id/column`
+in the summary (for example `node_flooding/J10/total_flood_volume`). The tool fetches each
+cited run's revision manifest, attempt manifest and summary by checksum, loads them with this
+session's journal into water-ontology rows under `<working_dir>/platform/findings/`, and adds
+the finding there. It returns `verifier_passed` and what was found for each claim; a changed
+number fails and names the value the summary holds. It needs the `ontology` extra
+(water-ontology).
 
 A platform error keeps its code, its `retryable` flag and its `next_action` in the refusal.
 

@@ -1,4 +1,5 @@
-"""Platform toolset: seven tools over ``hydrocouple_platform.client.PlatformClient``.
+"""Platform toolset: seven tools over ``hydrocouple_platform.client.PlatformClient``, and
+``platform_finding``, which records and verifies what an agent concludes from platform runs.
 
 Registered when ``OPENSWMM_MCP_TOOLSETS`` includes ``platform``. A run submitted here executes
 in the compute target's runner, not in this process: nothing in this module opens a local
@@ -24,7 +25,7 @@ from fastmcp import Context
 
 from openswmm_mcp.config import ServerSettings
 from openswmm_mcp.errors import ErrorCode, ToolError
-from openswmm_mcp.journal import CURRENT_CALL
+from openswmm_mcp.journal import ACTIVE, CURRENT_CALL, canonical
 
 T = TypeVar("T")
 SESSION_CREDENTIAL_PREFIX = "hcps_"
@@ -346,6 +347,134 @@ async def platform_results(ctx: Context, run_id: str, table: str | None = None) 
     return await _platform(ctx, _run)
 
 
+def _sources(client: Any, run_id: str, folder: Path) -> None:
+    """The revision manifest, attempt manifest and run summary of a run, as the files the
+    ontology loader reads, each checked against the checksum the platform publishes."""
+    from hydrocouple_platform.contracts.manifests import sha256_of
+
+    published = client.attempt_manifest(run_id)
+    manifest = published["attempt_manifest"]
+    revision = client.get_revision(manifest["provenance"]["revision_id"])
+    for document, digest, name in (
+        (manifest, published["attempt_manifest_sha256"], "attempt manifest"),
+        (revision["manifest"], manifest["provenance"]["revision_manifest_sha256"], "revision"),
+    ):
+        if sha256_of(document) != digest:
+            raise ToolError(
+                f"[{ErrorCode.VALIDATION_ERROR}] The {name} of run {run_id} does not match its "
+                "published sha256."
+            )
+    attempt = folder / "attempt"
+    attempt.mkdir(parents=True, exist_ok=True)
+    (folder / "revision-manifest.json").write_bytes(canonical(revision["manifest"]))
+    (attempt / "attempt.json").write_bytes(canonical(manifest))
+    summaries = [a["path"] for a in manifest["artifacts"] if a["kind"] == "summary"]
+    if not summaries:
+        raise ToolError(f"[{ErrorCode.NOT_SUPPORTED}] Run {run_id} published no run summary.")
+    client.download(run_id, summaries, attempt)
+
+
+async def platform_finding(
+    ctx: Context,
+    statement: str,
+    claims: list[dict[str, Any]],
+    question: str | None = None,
+    assumptions: list[str] | None = None,
+) -> dict:
+    """Record what you conclude from platform runs, and have every number in it checked.
+
+    statement is the answer as you give it to the person. Each claim cites one number in it:
+    {"quoted": "1.73", "unit": "10^6 gal"?, "run_id": "run_...", "locator": "<table>/<row id>/
+    <column>"} where quoted is the number exactly as written, unit is the unit the run summary
+    gives for the column (platform_results with table shows columns and units), and locator
+    names a run summary table, element id and column, e.g. "node_flooding/J10/
+    total_flood_volume". The runs' manifests and summaries are fetched by checksum and loaded
+    with this session's tool calls into knowledge-graph rows under the working directory; the
+    finding is added to them. Returns verifier_passed and, for each claim, what was found.
+    A finding with a number that does not match its run summary is recorded and fails.
+    """
+    journal, call_id = ACTIVE.get(), CURRENT_CALL.get()
+
+    def _run(client: Any, settings: ServerSettings) -> dict:
+        try:
+            from loaders import findings
+            from loaders.platform_to_rows import PlatformLoader
+        except ImportError:
+            raise ToolError(
+                f"[{ErrorCode.DEPENDENCY_MISSING}] platform_finding needs water-ontology: "
+                "pip install 'openswmm.mcp[ontology]'"
+            ) from None
+        if not claims:
+            raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] A finding cites at least one number.")
+        missing = [c for c in claims if not {"quoted", "run_id", "locator"} <= set(c)]
+        if missing:
+            raise ToolError(
+                f"[{ErrorCode.VALIDATION_ERROR}] Each claim needs quoted, run_id and locator: "
+                f"{json.dumps(missing)}"
+            )
+        session = client.me()["agent_session_id"]
+        folder = _folder(settings, "findings", f"{datetime_stamp()}-{uuid.uuid4().hex[:8]}")
+        loader = PlatformLoader("hydrocouple.platform", _project(settings, None))
+        attempts = {}
+        for run_id in dict.fromkeys(c["run_id"] for c in claims):
+            source = folder / "sources" / run_id
+            _sources(client, run_id, source)
+            loader.add_revision(source / "revision-manifest.json")
+            attempts[run_id] = loader.add_attempt(source / "attempt")
+        calls = []
+        if journal is not None and journal.path.is_file():
+            mine = [
+                line
+                for line in journal.path.read_text(encoding="utf-8").splitlines()
+                if json.loads(line).get("agent_session_id") == session
+            ]
+            (folder / "journal.jsonl").write_text("".join(f"{x}\n" for x in mine))
+            calls = loader.add_journal(folder / "journal.jsonl")
+        session_iri = f"wsys:session/{part(session)}"
+        calls.append(f"{session_iri}/call/{part(call_id or 'tc_' + uuid.uuid4().hex)}")
+        rows = folder / "rows"
+        loader.write(rows)
+        cited = [
+            {k: c[k] for k in ("quoted", "unit", "locator") if c.get(k) is not None}
+            | {"evidence": f"{attempts[c['run_id']]}/artifact/summary.json"}
+            for c in claims
+        ]
+        row = findings.record_finding(
+            rows,
+            statement=statement,
+            claims=cited,
+            trace_id=journal.journal_id if journal else call_id or "",
+            attributed_to=f"wsys:agent/ai/{part(session)}",
+            tool_calls=calls,
+            question=question,
+            assumptions=assumptions,
+        )
+        report = row["verifier_report"]
+        return {
+            "finding": row["iri"],
+            "verifier_passed": row["verifier_passed"],
+            "claims": report["claims"],
+            "uncited": report.get("uncited", []),
+            "tool_calls": len(calls),
+            "rows": str(rows),
+        }
+
+    return await _platform(ctx, _run)
+
+
+def datetime_stamp() -> str:
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def part(value: str) -> str:
+    """An identifier as one IRI path segment, as the ontology's loader encodes it."""
+    from urllib.parse import quote
+
+    return quote(str(value), safe="")
+
+
 TOOLS = (
     platform_targets,
     platform_session,
@@ -354,6 +483,7 @@ TOOLS = (
     platform_run,
     platform_job,
     platform_results,
+    platform_finding,
 )
 #: Tools that change nothing on the platform (platform_results writes only its own copy
 #: of the summary under the working directory).

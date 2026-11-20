@@ -79,6 +79,15 @@ async def test_reads_can_be_approved_without_writes():
         assert hints[name] == {"readOnlyHint": False, "destructiveHint": True}, name
 
 
+async def test_every_toolset_together_fits_the_budget():
+    """core, gym and platform: 15 + 5 + 8 tools, with nothing left in reserve."""
+    pytest.importorskip("hydrocouple_platform")
+    definitions = await _definitions(ServerSettings(toolsets="core,gym,platform"))
+    names = [d["name"] for d in definitions]
+    assert len(names) == 15 + 5 + 8 <= MAX_TOOLS, names
+    assert len(json.dumps(definitions)) <= MAX_CHARS
+
+
 async def test_gym_toolset_adds_five_tools():
     names = {d["name"] for d in await _definitions(ServerSettings(toolsets="core,gym"))}
     assert names == CORE | GYM

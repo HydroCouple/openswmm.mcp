@@ -27,6 +27,8 @@ from openswmm_mcp import __version__
 
 #: The tool call id of the call being answered; ``platform_run`` sends it to the platform.
 CURRENT_CALL: ContextVar[str | None] = ContextVar("openswmm_mcp_tool_call", default=None)
+#: The journal recording the call being answered; ``platform_finding`` cites its calls.
+ACTIVE: ContextVar[Journal | None] = ContextVar("openswmm_mcp_journal", default=None)
 
 _READ = frozenset(
     {
@@ -148,7 +150,7 @@ class Journal(Middleware):
             "server_version": __version__,
             "started_at": datetime.now(timezone.utc).isoformat(),
         }
-        token = CURRENT_CALL.set(line["tool_call_id"])
+        token, active = CURRENT_CALL.set(line["tool_call_id"]), ACTIVE.set(self)
         try:
             result = await call_next(context)
         except Exception as exc:
@@ -164,6 +166,7 @@ class Journal(Middleware):
             return result
         finally:
             CURRENT_CALL.reset(token)
+            ACTIVE.reset(active)
             line["ended_at"] = datetime.now(timezone.utc).isoformat()
             line |= await self._platform_identity(context)
             self.path.parent.mkdir(parents=True, exist_ok=True)

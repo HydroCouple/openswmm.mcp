@@ -91,6 +91,32 @@ async def test_upload_estimate_run_and_read_results(mcp_server):
         # The rougher conduit runs fuller and slower: the two revisions gave two results.
         assert peaks["base"]["C1"]["max_velocity"] > peaks["rough"]["C1"]["max_velocity"]
 
+        # A finding with the real number verifies; the same finding with it changed does not.
+        value = f"{peaks['base']['C1']['max_flow']:.2f}"
+        claim = {
+            "quoted": value,
+            "unit": summary["flow_units"],
+            "run_id": runs["base"]["run_id"],
+            "locator": "link_flow_summary/C1/max_flow",
+        }
+        good = await tools(
+            "platform_finding",
+            statement=f"In the base model C1 peaks at {value} {claim['unit']}.",
+            claims=[claim],
+            question="How high does C1 peak?",
+        )
+        assert good["verifier_passed"] is True, good
+        assert good["tool_calls"] > 10  # this session's calls, the finding's own call last
+        changed = f"{float(value) + 1:.2f}"
+        bad = await tools(
+            "platform_finding",
+            statement=f"In the base model C1 peaks at {changed} {claim['unit']}.",
+            claims=[claim | {"quoted": changed}],
+        )
+        assert bad["verifier_passed"] is False
+        assert bad["claims"][0]["reason"].startswith("the artifact has 15.")
+        assert Path(bad["rows"], "analysis.agent_finding.jsonl").is_file()
+
         # The journal names each submission by the id the attempt manifest carries.
         journal = [
             json.loads(line)
@@ -141,7 +167,7 @@ async def test_platform_sessions_and_typed_refusals(mcp_server):
             await tools("platform_model", action="upload", path="absent.inp", target_id="tgt_x")
 
 
-async def test_the_toolset_is_seven_tools_with_three_read_only(mcp_server):
+async def test_the_toolset_is_eight_tools_with_three_read_only(mcp_server):
     async with mcp_server() as tools:
         listed = await tools.client.list_tools()
         platform = {t.name: t for t in listed if t.name.startswith("platform_")}
@@ -153,6 +179,7 @@ async def test_the_toolset_is_seven_tools_with_three_read_only(mcp_server):
             "platform_run",
             "platform_job",
             "platform_results",
+            "platform_finding",
         }
         read_only = {n for n, t in platform.items() if t.annotations and t.annotations.readOnlyHint}
         assert read_only == {"platform_targets", "platform_estimate", "platform_results"}
