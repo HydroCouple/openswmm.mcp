@@ -136,21 +136,114 @@ async def platform_session(
     return await _platform(ctx, _run)
 
 
+def _local_model(settings: ServerSettings, path: str) -> Path:
+    model = Path(path).expanduser()
+    if not model.is_absolute():
+        model = Path(settings.working_dir).expanduser().resolve() / model
+    if not model.is_file():
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] No model file at {model}.")
+    return model
+
+
+def _derive(
+    client: Any,
+    settings: ServerSettings,
+    model: Path,
+    study_id: str,
+    evaluation: int,
+) -> tuple[Any, dict[str, Any]]:
+    """Write a study evaluation's design onto the base model and package it with its lineage."""
+    try:
+        from openswmm_gymnasium._engine import SolverAdapter
+        from openswmm_gymnasium.optimize import apply_decisions, design_dimensions, split_vector
+        from openswmm_gymnasium.optimize.manifest import model_inputs
+        from openswmm_gymnasium.spec.config import EnvConfig
+        from openswmm_gymnasium.spec.envs import json_safe
+    except ImportError:
+        raise ToolError(
+            f"[{ErrorCode.DEPENDENCY_MISSING}] derive needs openswmm.gymnasium: "
+            "pip install 'openswmm.mcp[gym]'"
+        ) from None
+    import os
+
+    import numpy as np
+    from hydrocouple_platform.contracts.manifests import DerivedFrom
+    from hydrocouple_platform.packaging import package_swmm_model
+
+    lineage = client.study_manifest(study_id)
+    base = client.get_revision(lineage["revision_id"])
+    page = client.study_evaluations(study_id, after=evaluation - 1, limit=1)["evaluations"]
+    if not page or page[0]["evaluation"] != evaluation:
+        raise ToolError(
+            f"[{ErrorCode.VALIDATION_ERROR}] Study {study_id} has no evaluation {evaluation} yet."
+        )
+    record = page[0]
+    if record.get("failed"):
+        raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] Evaluation {evaluation} failed.")
+    folder = _folder(settings, "derived", f"{study_id}-{evaluation}")
+    check = package_swmm_model(model, folder / "base-check")
+    local = model_inputs(check.manifest.model_dump(mode="json", by_alias=True)["files"])
+    if local != model_inputs(base["manifest"]["files"]):
+        raise ToolError(
+            f"[{ErrorCode.VALIDATION_ERROR}] {model} is not the model of revision "
+            f"{base['revision_id']}, which study {study_id} evaluated."
+        )
+    payload = dict(lineage["workload"]["parameters"]["env_config"])  # what the pool evaluated
+    payload.update(inp_path=str(model), rpt_path=None, out_path=None)
+    env_config = EnvConfig.model_validate(payload)
+    dims = design_dimensions(env_config)
+    decisions = json_safe(split_vector(dims, np.asarray(record["decisions"], dtype=float)))
+    adapter = SolverAdapter(model, os.devnull, os.devnull)
+    adapter.open()
+    try:
+        applied = apply_decisions(env_config, decisions, adapter)
+        adapter.solver.write(str(folder / "model.inp"))
+    finally:
+        adapter.close()
+    package = package_swmm_model(folder / "model.inp", folder / "package")
+    package.manifest = package.manifest.model_copy(
+        update={
+            "derived_from": DerivedFrom(
+                revision_id=base["revision_id"],
+                revision_manifest_sha256=base["manifest_sha256"],
+                study_id=study_id,
+                evaluation=evaluation,
+                decisions=decisions,
+            )
+        }
+    )
+    (folder / "package" / "revision-manifest.json").write_bytes(
+        canonical(package.manifest.model_dump(mode="json", by_alias=True))
+    )
+    return package, {
+        "base_revision_id": base["revision_id"],
+        "decisions": decisions,
+        "objectives": record.get("objectives") or record.get("costs"),
+        "applied": applied,
+        "target_id": base["target_id"],
+    }
+
+
 async def platform_model(
     ctx: Context,
-    action: Literal["upload", "get"],
+    action: Literal["upload", "get", "derive"],
     path: str | None = None,
     target_id: str | None = None,
     revision_id: str | None = None,
     project_id: str | None = None,
     session_id: str | None = None,
+    study_id: str | None = None,
+    evaluation: int | None = None,
 ) -> dict:
     """Register a model with the platform, or inspect a registered one.
 
     "upload" packages the SWMM model at path (a .inp under the working directory, with the
     files it references) and uploads it to target_id's storage as an immutable revision;
     the result carries revision_id, its state and the manifest hash. "get" returns a
-    revision by revision_id. The original files are not modified.
+    revision by revision_id. "derive" writes evaluation (a number) of study_id onto the
+    study's base model at path and uploads the result as a new revision whose manifest
+    names the base revision, the study and the design (target_id defaults to the base's).
+    The original files are not modified.
     """
 
     def _run(client: Any, settings: ServerSettings) -> dict:
@@ -158,15 +251,33 @@ async def platform_model(
             if not revision_id:
                 raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] get needs revision_id.")
             return client.get_revision(revision_id)
+        if action == "derive":
+            if not path or not study_id or not evaluation:
+                raise ToolError(
+                    f"[{ErrorCode.VALIDATION_ERROR}] derive needs path, study_id and evaluation."
+                )
+            package, derived = _derive(
+                client, settings, _local_model(settings, path), study_id, evaluation
+            )
+            revision = client.upload_revision(
+                package,
+                project_id=_project(settings, project_id),
+                target_id=target_id or derived["target_id"],
+                session_id=session_id,
+            )
+            return {
+                "revision_id": revision["revision_id"],
+                "state": revision["state"],
+                "manifest_sha256": revision["manifest_sha256"],
+                "derived_from": revision["manifest"]["derived_from"],
+                "applied": derived["applied"],
+                "package_folder": str(package.staging_dir),
+            }
         if not path or not target_id:
             raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] upload needs path and target_id.")
         from hydrocouple_platform.packaging import package_swmm_model
 
-        model = Path(path).expanduser()
-        if not model.is_absolute():
-            model = Path(settings.working_dir).expanduser().resolve() / model
-        if not model.is_file():
-            raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] No model file at {model}.")
+        model = _local_model(settings, path)
         staging = _folder(settings, "packages", f"{model.stem}-{uuid.uuid4().hex[:8]}")
         package = package_swmm_model(model, staging)
         revision = client.upload_revision(

@@ -44,6 +44,8 @@ from typing import Any
 
 import numpy as np
 from fastmcp import Context
+from openswmm_gymnasium._engine import SolverAdapter
+from openswmm_gymnasium.optimize import apply_decisions
 from openswmm_gymnasium.spec.config import (
     JsonFloatMatrix,
     JsonFloatVector,
@@ -55,7 +57,6 @@ from openswmm_gymnasium.spec.envs import json_safe
 from openswmm_mcp.dependencies import get_job_manager, get_session_manager, require_gymnasium
 from openswmm_mcp.errors import ErrorCode, ToolError
 from openswmm_mcp.gym_support import tool_errors
-from openswmm_mcp.gym_support.jobs import design_dimensions
 from openswmm_mcp.tools.model import _reopen
 
 #: Indicator name -> required keyword arguments (beyond the front itself).
@@ -479,10 +480,9 @@ async def apply_design(
 
     Picks I{evaluation} (C{"best"} by default, or a 1-based evaluation
     number from the job log) and writes its decision values onto the
-    session's model elements through the same engine surface the design
-    factories use: link roughness, link length, conduit diameter
-    (xsect geom1), and node maximum depth, each clipped to the factory's
-    [low, high] design range.
+    session's model through the job's own design factories, with the values
+    the evaluation used (C{openswmm_gymnasium.optimize.apply_decisions}), so
+    every design kind is written as it was scored.
 
     The session must be open or initialized on the new engine. The
     change is in-memory — call C{save} to persist a new
@@ -525,43 +525,13 @@ async def apply_design(
 
     await session.call(_editable, context="reopening for edits")
 
-    dims = design_dimensions(env_config)
-    applied: list[dict[str, Any]] = []
+    def _apply_all() -> list[dict[str, Any]]:
+        # The env config's own factories, with the values the evaluation used, so the model
+        # holds the design that was scored (a diameter rescales the whole section).
+        adapter = SolverAdapter(session.inp_path, solver=session.require_solver())
+        return apply_decisions(env_config, decisions, adapter)
 
-    def _apply_all() -> None:
-        links = session.solver.links
-        nodes = session.solver.nodes
-        for spec, dim in zip(env_config.design_factories, dims):
-            values = np.clip(np.asarray(decisions[dim.key], dtype=np.float64), dim.low, dim.high)
-            ids = spec.params.get("link_ids") or spec.params.get("node_ids") or []
-            for element_id, value in zip(ids, values):
-                value = float(value)
-                if spec.kind in ("link_roughness", "link_length", "link_diameter"):
-                    idx = links.get_index(element_id)
-                    if idx < 0:
-                        raise ToolError(
-                            f"[{ErrorCode.ELEMENT_NOT_FOUND}] Link "
-                            f"'{element_id}' not found in session '{session_id}'."
-                        )
-                    link = links[idx]
-                    if spec.kind == "link_roughness":
-                        link.roughness = value
-                    elif spec.kind == "link_length":
-                        link.length = value
-                    else:  # link_diameter: overwrite xsect geom1, keep the rest
-                        shape, _g1, g2, g3, g4 = tuple(link.xsect)
-                        link.xsect = (shape, value, g2, g3, g4)
-                else:  # node_max_depth
-                    idx = nodes.get_index(element_id)
-                    if idx < 0:
-                        raise ToolError(
-                            f"[{ErrorCode.ELEMENT_NOT_FOUND}] Node "
-                            f"'{element_id}' not found in session '{session_id}'."
-                        )
-                    nodes[idx].max_depth = value
-                applied.append({"kind": spec.kind, "element_id": element_id, "value": value})
-
-    await session.call(_apply_all, context="applying design")
+    applied = await session.call(_apply_all, context="applying design")
     return {
         "job_id": job_id,
         "session_id": session_id,

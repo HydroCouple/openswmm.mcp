@@ -31,6 +31,11 @@ version is now `0.2.0.dev0`.
 
 ### Added
 
+- **`platform_model(action="derive")`**: a platform study's evaluation becomes a revision
+  that names its base revision, study, evaluation and design. `gym_score(action="apply_design")`
+  now writes every design kind through the job's own factories with the values the evaluation
+  used (a `link_diameter` rescales the whole section, as it was scored, instead of setting
+  `geom1`).
 - **Local runs leave platform-format manifests** (with the `platform` extra): a `run` that
   starts from an opened model writes `<session>/local/<run id>/` with the model as it ran
   (edits included) packaged with its revision manifest, and an `attempt/` folder

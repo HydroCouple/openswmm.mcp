@@ -120,7 +120,7 @@ sign-in token. The platform checks every submission against that session's budge
 |---|---|
 | `platform_targets()` | The person the session acts for, each organization's compute targets, and the approved workflows with their parameter schemas. Read-only. |
 | `platform_session(action, project_id, name)` | `list` or `create` persistent platform sessions in a project. |
-| `platform_model(action, path, target_id, revision_id)` | `upload` packages a local `.inp` with the files it references and registers it as an immutable revision; `get` returns a revision. |
+| `platform_model(action, path, target_id, revision_id, study_id, evaluation)` | `upload` packages a local `.inp` with the files it references and registers it as an immutable revision; `get` returns a revision; `derive` writes a study evaluation's design onto the study's base model at `path` (checked against the base revision's files) through the study's own design factories and uploads it as a revision whose manifest names the base revision, the study, the evaluation and the design. |
 | `platform_estimate(revision_id, target_id, workflow, parameters)` | Validate a would-be run: findings, job class, cost band and whether approval would be required. Read-only. |
 | `platform_run(revision_id, target_id, workflow, parameters, idempotency_key)` | Submit a run. Returns `ACCEPTED`, or `PENDING_APPROVAL` when the request is outside the session's budget; a person approves it. |
 | `platform_job(action, job_id, project_id, state)` | `status` (state, progress, attempts, failure), `list`, or `cancel`. |
