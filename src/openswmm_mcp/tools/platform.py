@@ -155,7 +155,7 @@ def _derive(
     """Write a study evaluation's design onto the base model and package it with its lineage."""
     try:
         from openswmm_gymnasium._engine import SolverAdapter
-        from openswmm_gymnasium.optimize import apply_decisions, design_dimensions, split_vector
+        from openswmm_gymnasium.optimize import apply_decisions, decision_values, design_dimensions
         from openswmm_gymnasium.optimize.manifest import model_inputs
         from openswmm_gymnasium.spec.config import EnvConfig
         from openswmm_gymnasium.spec.envs import json_safe
@@ -192,7 +192,7 @@ def _derive(
     payload.update(inp_path=str(model), rpt_path=None, out_path=None)
     env_config = EnvConfig.model_validate(payload)
     dims = design_dimensions(env_config)
-    decisions = json_safe(split_vector(dims, np.asarray(record["decisions"], dtype=float)))
+    decisions = json_safe(decision_values(dims, np.asarray(record["decisions"], dtype=float)))
     adapter = SolverAdapter(model, os.devnull, os.devnull)
     adapter.open()
     try:
