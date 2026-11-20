@@ -41,6 +41,7 @@ _READ = frozenset(
         "timeseries",
         "report",
         "compare",
+        "locate",
         "gym_describe",
         "platform_targets",
         "platform_estimate",
@@ -49,6 +50,15 @@ _READ = frozenset(
 )
 _FILE = frozenset({"open_model", "save", "export"})
 _BY_ACTION = {
+    "tally": {
+        "list": "read",
+        "root": "read",
+        "verify": "read",
+        "facts": "file",
+        "commit": "file",
+        "prove": "file",
+    },
+    "sources": {"list": "read", "lineage": "read", "mentions": "read", "register": "file"},
     "session": {"list": "read", "state": "read"},
     "platform_session": {"list": "read"},
     "platform_model": {"get": "read", "upload": "file"},

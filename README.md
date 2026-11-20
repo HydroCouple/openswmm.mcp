@@ -24,10 +24,7 @@
 
 ## Features
 
-The server exposes **15 core tools**, **5 optional gym tools** and an opt-in
-`run_python` tool. Together their definitions take about 17k characters (under
-5k tokens), so the server loads in any MCP client, including Claude Desktop.
-v1 registered 663 tools and could not.
+The server exposes **15 core tools**. Operators can enable the gym (5 tools), platform (8 tools) and ledger (3 tools) independently, plus `run_python` over stdio.
 
 Six generic tools (`describe`, `find`, `get`, `set`, `inspect`, `call`) reach every
 property and method of the engine through its machine-readable catalog
@@ -45,6 +42,15 @@ new tool code.
   `platform_job`, `platform_results`, `platform_finding`: submit runs to
   hydrocouple.platform under an agent session's budget, read their results provenance
   first, and record an answer whose every number is checked against the run summary
+- **Ledger** (`OPENSWMM_MCP_TOOLSETS=core,ledger`) -- `tally` commits a finished run's
+  facts to a salted hash tree and checks narratives claim by claim; `sources` and `locate`
+  record and query the files a model was built from and what they say about each element
+
+> **Ledger limitation (SI models):** `tally` commits the system volume facts
+> (`total_flooding`, `total_outflow`) only after checking their unit against the
+> `.rpt` "Flow Routing Continuity" block. That check has been tested on US-unit
+> models only. It still needs an SI test model; until one is added, SI models may
+> have these two facts listed under `dropped` instead of committed.
 
 See the [tools guide](docs/user-guide/tools.md) for details and the v1-to-v2
 mapping.
@@ -53,8 +59,7 @@ mapping.
 
 - **Resources** for the engine catalog (`swmm://catalog`, `swmm://catalog/{target}`),
   sessions and bundled skills
-- **7 prompt templates** and **3 bundled skills** (capacity assessment,
-  calibration, operational optimisation)
+- **Workflow prompts and bundled skills** for capacity assessment, calibration, operational optimisation, verified narratives and model provenance
 - **OAuth/JWT authentication** for HTTP transport via `fastmcp[auth]`
 - **Progress reporting** for long runs and **multi-session management**
 
@@ -72,6 +77,8 @@ pip install "openswmm-mcp[dev,docs]"
 
 The gym tools need the `gym` extra (`pip install "openswmm-mcp[gym]"`) and
 `OPENSWMM_MCP_TOOLSETS=core,gym`.
+
+Spatial queries for the ledger (`locate` with a point or buffer, `sources` with `rule="nearest"`) need the `ledger` extra: `pip install 'openswmm.mcp[ledger]'`. Use it with `OPENSWMM_MCP_TOOLSETS=core,ledger`.
 
 ### Requirements
 
@@ -188,7 +195,7 @@ All settings are controlled via environment variables with the `OPENSWMM_MCP_` p
 | `OPENSWMM_MCP_TRANSPORT` | `"stdio"` | Transport protocol: `stdio`, `http`, or `sse` |
 | `OPENSWMM_MCP_HTTP_PORT` | `8080` | Port for HTTP/SSE transport |
 | `OPENSWMM_MCP_LOG_LEVEL` | `"INFO"` | Logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
-| `OPENSWMM_MCP_TOOLSETS` | `"core"` | Tool sets to register: `core`, or `core,gym` for the gym tools |
+| `OPENSWMM_MCP_TOOLSETS` | `"core"` | Tool sets to register: `core`, `core,gym` for the gym tools, or `core,ledger` for the `tally`, `sources` and `locate` tools (combinable: `core,gym,ledger`) |
 | `OPENSWMM_MCP_ENABLE_PYTHON` | `false` | Register `run_python` (stdio transport only; runs code with the server's permissions) |
 | `OPENSWMM_MCP_OAUTH_ISSUER` | `None` | OAuth issuer URL for JWT validation |
 | `OPENSWMM_MCP_OAUTH_AUDIENCE` | `None` | Expected OAuth audience claim |
