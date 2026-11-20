@@ -71,6 +71,8 @@ async def test_resources_and_prompts(tools, inp_path, output_dir, monkeypatch):
         assert {s["name"] for s in skills} >= {"capacity-assessment", "calibrate-model"}
         prompts = {p.name for p in await client.list_prompts()}
         assert {"analyze_model", "diagnose_flooding", "use_skill"} <= prompts
+        ontology = (await client.read_resource("swmm://ontology/context"))[0].text
+        assert ontology.startswith("# Ontology context for agents") and "ToolCall" in ontology
 
 
 @pytest.mark.parametrize(

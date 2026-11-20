@@ -7,6 +7,7 @@ and the real engine. The MCP server holds only an agent session credential.
 from __future__ import annotations
 
 import ast
+import json
 import re
 import shutil
 from pathlib import Path
@@ -90,6 +91,21 @@ async def test_upload_estimate_run_and_read_results(mcp_server):
         # The rougher conduit runs fuller and slower: the two revisions gave two results.
         assert peaks["base"]["C1"]["max_velocity"] > peaks["rough"]["C1"]["max_velocity"]
 
+        # The journal names each submission by the id the attempt manifest carries.
+        journal = [
+            json.loads(line)
+            for path in (tools.working_dir / "journal").glob("*.jsonl")
+            for line in path.read_text(encoding="utf-8").splitlines()
+        ]
+        submitted = {x["tool_call_id"]: x for x in journal if x["tool"] == "platform_run"}
+        assert set(submitted) == {r["tool_call_id"] for r in runs.values()}
+        session = tools.agent_session["agent_session_id"]
+        assert all(x["agent_session_id"] == session for x in journal)
+        assert all(
+            x["acting_for"] == "alice" and x["effect"] == "write" for x in submitted.values()
+        )
+        assert {x["tool"]: x["effect"] for x in journal}["platform_results"] == "read"
+
         listed = await tools("platform_job", action="list")
         assert {j["job_id"] for j in listed["jobs"]} == {r["job_id"] for r in runs.values()}
 
@@ -160,4 +176,4 @@ def test_the_module_owns_no_local_solver_or_job_pool():
         elif isinstance(node, ast.Import):
             imported.update(alias.name for alias in node.names)
     ours = {m for m in imported if m.startswith("openswmm_mcp")}
-    assert ours == {"openswmm_mcp.config", "openswmm_mcp.errors"}
+    assert ours == {"openswmm_mcp.config", "openswmm_mcp.errors", "openswmm_mcp.journal"}

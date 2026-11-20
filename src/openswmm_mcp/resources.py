@@ -1,8 +1,10 @@
-"""MCP resources: the engine catalog and live session summaries (``swmm://`` URIs)."""
+"""MCP resources: the engine catalog, live session summaries and the water ontology's agent
+context (``swmm://`` URIs)."""
 
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from fastmcp import Context, FastMCP
 
@@ -44,9 +46,20 @@ async def session_summary(session_id: str, ctx: Context) -> str:
     return json.dumps(await session.call(summary, session), indent=1)
 
 
+ONTOLOGY_CONTEXT = Path(__file__).with_name("ontology") / "agent-context.md"
+
+
+async def ontology_context() -> str:
+    """The water ontology's agent context: its classes, relations and enumerations in brief,
+    for grounding element and result names. Vendored from water-ontology (ontology/SOURCE.yaml).
+    """
+    return ONTOLOGY_CONTEXT.read_text(encoding="utf-8")
+
+
 def register_resources(server: FastMCP) -> None:
     """Register on the root server so resources share the tools' session manager."""
     server.resource("swmm://catalog")(catalog_index)
     server.resource("swmm://catalog/{target}")(catalog_target)
     server.resource("swmm://sessions")(sessions)
     server.resource("swmm://session/{session_id}/summary")(session_summary)
+    server.resource("swmm://ontology/context", mime_type="text/markdown")(ontology_context)

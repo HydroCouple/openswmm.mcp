@@ -127,6 +127,19 @@ sign-in token. The platform checks every submission against that session's budge
 
 A platform error keeps its code, its `retryable` flag and its `next_action` in the refusal.
 
+## The tool-call journal
+
+The server appends one JSON line per tool call to `<working_dir>/journal/<journal id>.jsonl`,
+one file per server process: the tool, the effect the call was allowed to have (`read`,
+`write`, `structural` or `file`; `call` takes the method's effect from the engine catalog,
+and a tool no rule places is `write`), whether the tool is declared read-only, the SHA-256 of
+its arguments and of its result as canonical JSON (never their content), its start and end
+times, whether it succeeded, and its tool call id. `platform_run` sends that id to the
+platform, which writes it into the run's provenance, so a run leads back to the call that
+submitted it. With the platform toolset each line also names the platform agent session and
+the person it acts for; the water ontology's `platform_to_rows --journal` loads the lines as
+`ToolCall` rows.
+
 ## `run_python` (opt-in)
 
 `OPENSWMM_MCP_ENABLE_PYTHON=true` registers `run_python(session_id, code)` on

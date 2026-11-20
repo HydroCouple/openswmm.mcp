@@ -24,6 +24,7 @@ from fastmcp import Context
 
 from openswmm_mcp.config import ServerSettings
 from openswmm_mcp.errors import ErrorCode, ToolError
+from openswmm_mcp.journal import CURRENT_CALL
 
 T = TypeVar("T")
 SESSION_CREDENTIAL_PREFIX = "hcps_"
@@ -253,7 +254,9 @@ async def platform_run(
     claimed by the target) or PENDING_APPROVAL when the request is outside this agent
     session's budget; a person approves it, never the agent. Retrying with the same
     idempotency_key returns the same run. Follow with platform_job, then platform_results.
+    The run's provenance names this call by the tool_call_id the result returns.
     """
+    tool_call_id = CURRENT_CALL.get() or f"tc_{uuid.uuid4().hex}"  # the journal's id
 
     def _run(client: Any, settings: ServerSettings) -> dict:
         request = _request(
@@ -266,7 +269,7 @@ async def platform_run(
             project_id,
             session_id,
         )
-        request["tool_call_id"] = f"tc_{uuid.uuid4().hex}"
+        request["tool_call_id"] = tool_call_id
         accepted = client.submit_run(request, idempotency_key)
         return accepted | {"tool_call_id": request["tool_call_id"]}
 

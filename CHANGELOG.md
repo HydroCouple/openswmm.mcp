@@ -31,6 +31,10 @@ version is now `0.2.0.dev0`.
 
 ### Added
 
+- **Tool-call journal**: one JSON line per tool call under `<working_dir>/journal/`, with the
+  call's effect, argument and result checksums, times and tool call id; `platform_run` sends
+  that id to the platform. **Resource** `swmm://ontology/context`: the water ontology's
+  agent context, vendored.
 - **Platform toolset** (`OPENSWMM_MCP_TOOLSETS=core,platform`, extra `platform`): seven
   tools over `hydrocouple_platform.client.PlatformClient` that list targets and workflows,
   package and upload a model as a revision, estimate, submit, follow and read runs.

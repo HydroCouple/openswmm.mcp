@@ -15,6 +15,7 @@ from fastmcp import FastMCP
 from openswmm_mcp.auth import create_auth
 from openswmm_mcp.config import ServerSettings
 from openswmm_mcp.dependencies import server_lifespan, toolsets
+from openswmm_mcp.journal import Journal
 from openswmm_mcp.prompts.workflows import prompts_mcp
 from openswmm_mcp.resources import register_resources
 from openswmm_mcp.skills import skills_mcp
@@ -77,6 +78,7 @@ def _annotations(fn) -> dict[str, bool] | None:
 
 def build_server(settings: ServerSettings | None = None) -> FastMCP:
     settings = settings or ServerSettings()
+    read_only = {fn.__name__ for fn in READ_ONLY}
     server = FastMCP(
         "OpenSWMM",
         instructions=INSTRUCTIONS,
@@ -114,10 +116,13 @@ def build_server(settings: ServerSettings | None = None) -> FastMCP:
             server.tool(
                 fn, annotations={"readOnlyHint": True} if fn in platform.READ_ONLY else None
             )
+        read_only |= {fn.__name__ for fn in platform.READ_ONLY}
     if settings.enable_python and settings.transport == "stdio":
         from openswmm_mcp.tools.code import run_python
 
         server.tool(run_python)
+    # One line per tool call, under <working_dir>/journal/ (openswmm_mcp.journal).
+    server.add_middleware(Journal(settings.working_dir, frozenset(read_only)))
     register_resources(server)
     server.mount(prompts_mcp)
     server.mount(skills_mcp)

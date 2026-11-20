@@ -12,6 +12,7 @@ tool definition.
 | `swmm://session/{session_id}/summary` | Object counts, key options, simulation window and file paths for one session |
 | `swmm://skills` | Index of the bundled skills (`name`, `description`) |
 | `swmm://skills/{skill_name}` | A skill's full `SKILL.md` body |
+| `swmm://ontology/context` | The water ontology's agent context: classes, relations and enumerations in brief, for grounding names. Vendored from water-ontology; `src/openswmm_mcp/ontology/SOURCE.yaml` names the commit |
 
 The `describe` tool returns the same catalog information, filtered and with
 units resolved to a session's unit system.
