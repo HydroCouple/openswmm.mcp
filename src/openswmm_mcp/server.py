@@ -2,7 +2,7 @@
 
 Tool sets (``OPENSWMM_MCP_TOOLSETS``):
 
-* ``core`` (always) -- 14 tools: sessions and runs, catalog access, results.
+* ``core`` (always) -- 15 tools: sessions and runs, catalog access, results.
 * ``gym`` -- 5 tools for openswmm.gymnasium environments and optimisation jobs.
 * ``run_python`` -- registered only with ``OPENSWMM_MCP_ENABLE_PYTHON=true`` on stdio.
 """
@@ -21,9 +21,10 @@ from openswmm_mcp.tools import access, model, results
 
 INSTRUCTIONS = (
     "Tools for the OpenSWMM stormwater engine. Typical flow: open_model -> run -> report / "
-    "timeseries / compare. Everything the engine exposes is reachable through five generic "
+    "timeseries / compare. Everything the engine exposes is reachable through six generic "
     "tools driven by its catalog: describe() to discover element kinds, services, fields and "
-    "methods; find/get/set to read and write fields; call to run any listed method. Values "
+    "methods; find/get/set to read and write fields; inspect to run a listed method that "
+    "only reads, call to run one that changes something or names a file. Values "
     "are in the model's units (describe with session_id resolves them); enums are passed by "
     "name. Bundled skills (swmm://skills; load with the use_skill prompt): "
     "capacity-assessment, calibrate-model, operational-optimization. Text read from model "
@@ -40,6 +41,7 @@ CORE_TOOLS = (
     access.find,
     access.get,
     access.set_fields,
+    access.inspect,
     access.call,
     model.edit,
     results.timeseries,
@@ -47,6 +49,29 @@ CORE_TOOLS = (
     results.compare,
     results.export,
 )
+
+#: Tools that change nothing, so a client can approve them without approving the rest.
+READ_ONLY = frozenset(
+    {
+        access.describe,
+        access.find,
+        access.get,
+        access.inspect,
+        results.timeseries,
+        results.report,
+        results.compare,
+    }
+)
+#: Tools that change model values, model structure or engine state.
+DESTRUCTIVE = frozenset({access.set_fields, access.call, model.edit})
+
+
+def _annotations(fn) -> dict[str, bool] | None:
+    if fn in READ_ONLY:
+        return {"readOnlyHint": True}
+    if fn in DESTRUCTIVE:
+        return {"readOnlyHint": False, "destructiveHint": True}
+    return None
 
 
 def build_server(settings: ServerSettings | None = None) -> FastMCP:
@@ -58,7 +83,11 @@ def build_server(settings: ServerSettings | None = None) -> FastMCP:
         auth=create_auth(settings),  # None on stdio
     )
     for fn in CORE_TOOLS:
-        server.tool(fn, name="set" if fn is access.set_fields else fn.__name__)
+        server.tool(
+            fn,
+            name="set" if fn is access.set_fields else fn.__name__,
+            annotations=_annotations(fn),
+        )
     if "gym" in toolsets(settings):
         try:
             from openswmm_mcp.tools import gym

@@ -40,6 +40,14 @@ if getattr(_engine_catalog, "revision", lambda: 1)() < MIN_CATALOG_REVISION:  # 
         "installed openswmm is older. Upgrade or rebuild the openswmm package."
     )
 
+#: Catalog schema that gives every method an ``effect``; ``inspect`` and ``call`` divide on it.
+MIN_CATALOG_SCHEMA = 2
+if _engine_catalog.load().get("schema", 1) < MIN_CATALOG_SCHEMA:  # pragma: no cover
+    raise ImportError(
+        f"openswmm.mcp needs engine catalog schema {MIN_CATALOG_SCHEMA} or newer (methods with "
+        "an effect); the installed openswmm is older. Upgrade or rebuild the openswmm package."
+    )
+
 # Lifecycle and handle-level Solver members are driven by the session tools;
 # dispatching them through ``call`` would desynchronise session state.
 SOLVER_DENY = frozenset(
@@ -282,8 +290,19 @@ def coerce(value: Any, type_str: str, name: str = "", working_dir: Path | None =
     return value
 
 
-def to_json(value: Any, limit: int = MAX_ARRAY, _depth: int = 0) -> Any:
-    """Convert an engine value to plain JSON (enums by name, arrays capped)."""
+def to_json(
+    value: Any, limit: int = MAX_ARRAY, _depth: int = 0, cut: list[int] | None = None
+) -> Any:
+    """Convert an engine value to plain JSON (enums by name, arrays capped).
+
+    The full length of every array, mapping or sequence cut at *limit* is appended to *cut*.
+    """
+    if cut is not None and (
+        isinstance(value, (dict, list, tuple, set))
+        or (isinstance(value, np.ndarray) and value.ndim > 0)
+    ):
+        if len(value) > limit:
+            cut.append(len(value))
     if value is None or isinstance(value, str):
         return value
     if isinstance(value, (np.dtype, type)):
@@ -307,27 +326,27 @@ def to_json(value: Any, limit: int = MAX_ARRAY, _depth: int = 0) -> Any:
         return value.total_seconds()
     if isinstance(value, np.ndarray):
         if value.ndim == 0:
-            return to_json(value.item(), limit, _depth + 1)
+            return to_json(value.item(), limit, _depth + 1, cut)
         if value.dtype.names:
             value = [dict(zip(value.dtype.names, row)) for row in value[:limit]]
-            return [to_json(v, limit, _depth + 1) for v in value]
+            return [to_json(v, limit, _depth + 1, cut) for v in value]
         flat = value if value.ndim <= 1 else value.reshape(len(value), -1)
-        out = [to_json(v, limit, _depth + 1) for v in flat[:limit].tolist()]
+        out = [to_json(v, limit, _depth + 1, cut) for v in flat[:limit].tolist()]
         return out
     if hasattr(value, "_asdict"):
-        return {k: to_json(v, limit, _depth + 1) for k, v in value._asdict().items()}
+        return {k: to_json(v, limit, _depth + 1, cut) for k, v in value._asdict().items()}
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
         return {
-            f.name: to_json(getattr(value, f.name), limit, _depth + 1)
+            f.name: to_json(getattr(value, f.name), limit, _depth + 1, cut)
             for f in dataclasses.fields(value)
         }
     if isinstance(value, dict):
         return {
-            str(to_json(k, limit, _depth + 1)): to_json(v, limit, _depth + 1)
+            str(to_json(k, limit, _depth + 1, cut)): to_json(v, limit, _depth + 1, cut)
             for k, v in list(value.items())[:limit]
         }
     if isinstance(value, (list, tuple, set)):
-        return [to_json(v, limit, _depth + 1) for v in list(value)[:limit]]
+        return [to_json(v, limit, _depth + 1, cut) for v in list(value)[:limit]]
     if hasattr(value, "id") and hasattr(value, "index"):
         return value.id  # an element wrapper: report it by id
     fields = {}
@@ -341,5 +360,5 @@ def to_json(value: Any, limit: int = MAX_ARRAY, _depth: int = 0) -> Any:
         if not callable(v):
             fields[k] = v
     if fields:
-        return {k: to_json(v, limit, _depth + 1) for k, v in fields.items()}
+        return {k: to_json(v, limit, _depth + 1, cut) for k, v in fields.items()}
     return repr(value)

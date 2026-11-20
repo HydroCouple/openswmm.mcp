@@ -5,8 +5,9 @@ tokens) and could not be loaded by Claude Desktop. These budgets fail the
 build before that can happen again.
 
 The budgets cover every toolset together, including the seven ``platform_*``
-tools the cloud execution platform plan (2026-10-15, §1A) adds later, so room
-for them is reserved now.
+tools the cloud execution platform plan (2026-10-15, §1A) and the one finding
+tool the ecosystem plan (2026-11-20, work package 1.8) add later, so room for
+them is reserved now.
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ CORE = {
     "find",
     "get",
     "set",
+    "inspect",
     "call",
     "edit",
     "timeseries",
@@ -35,10 +37,11 @@ CORE = {
     "export",
 }
 GYM = {"gym_describe", "gym_config", "gym_env", "gym_job", "gym_score"}
-#: platform_targets/session/model/estimate/run/job/results (platform plan §1A).
-PLATFORM_TOOLS_RESERVED = 7
-PLATFORM_CHARS_RESERVED = 7 * 1_500
-MAX_TOOLS = 26  # 14 core + 5 gym + 7 reserved platform tools (review plan §10, P4)
+#: platform_targets/session/model/estimate/run/job/results (platform plan §1A) and the
+#: finding tool (ecosystem plan, work package 1.8).
+PLATFORM_TOOLS_RESERVED = 8
+PLATFORM_CHARS_RESERVED = 8 * 1_500
+MAX_TOOLS = 28  # 15 core + 5 gym + 8 reserved (7 platform tools and the finding tool)
 MAX_CHARS = 40_000  # ~11k tokens for every tool definition together
 
 
@@ -62,6 +65,18 @@ async def test_tool_definitions_fit_the_budget(toolsets):
     counted = [n for n in names if n != "run_python"]  # opt-in, stdio only
     assert len(counted) + PLATFORM_TOOLS_RESERVED <= MAX_TOOLS, names
     assert size + PLATFORM_CHARS_RESERVED <= MAX_CHARS, f"{size} characters of tool definitions"
+
+
+async def test_reads_can_be_approved_without_writes():
+    """Read-only tools carry the read-only hint; the tools that change a model do not."""
+    hints = {
+        d["name"]: d.get("annotations", {})
+        for d in await _definitions(ServerSettings(toolsets="core"))
+    }
+    read_only = {name for name, a in hints.items() if a.get("readOnlyHint")}
+    assert read_only == {"describe", "find", "get", "inspect", "timeseries", "report", "compare"}
+    for name in ("set", "call", "edit"):
+        assert hints[name] == {"readOnlyHint": False, "destructiveHint": True}, name
 
 
 async def test_gym_toolset_adds_five_tools():

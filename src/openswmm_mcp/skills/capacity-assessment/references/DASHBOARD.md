@@ -78,5 +78,5 @@ computed from each asset's `util`, and the velocity screening from `vel` vs the
 
 Source the series from the temporal step: per-element `timeseries`
 for `util`, and the system-wide available-capacity series for context. Coordinates
-come from `call(target="spatial", method="node_coords")` and per-link
+come from `inspect(target="spatial", method="node_coords")` and per-link
 `link_vertices`.

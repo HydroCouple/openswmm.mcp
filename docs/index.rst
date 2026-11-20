@@ -6,7 +6,7 @@ the `Model Context Protocol <https://modelcontextprotocol.io/>`_ (MCP),
 allowing large-language models and AI assistants to open, run, query, and
 modify EPA-SWMM hydraulic and hydrologic models.
 
-Built on `FastMCP 3.x <https://gofastmcp.com/>`_, the server provides 14 core
+Built on `FastMCP 3.x <https://gofastmcp.com/>`_, the server provides 15 core
 tools (plus five optional gym tools) for catalog-driven engine access, with
 explicit lifecycle and JSON-argument boundaries, ``swmm://`` resources for the
 catalog and sessions, seven guided-workflow prompts and three bundled skills.

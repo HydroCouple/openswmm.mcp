@@ -13,7 +13,7 @@ file, or in the Claude Code MCP server configuration.
 | `OPENSWMM_MCP_TRANSPORT` | `str` | `"stdio"` | Transport mode: `"stdio"`, `"http"`, or `"sse"`. |
 | `OPENSWMM_MCP_HTTP_PORT` | `int` | `8080` | Port for HTTP/SSE transport (ignored for stdio). |
 | `OPENSWMM_MCP_LOG_LEVEL` | `str` | `"INFO"` | Logging level: `DEBUG`, `INFO`, `WARNING`, `ERROR`. |
-| `OPENSWMM_MCP_TOOLSETS` | `str` | `"core"` | Tool sets to register: `core` (14 tools), or `core,gym` to add the 5 gym tools. |
+| `OPENSWMM_MCP_TOOLSETS` | `str` | `"core"` | Tool sets to register: `core` (15 tools), or `core,gym` to add the 5 gym tools. |
 | `OPENSWMM_MCP_ENABLE_PYTHON` | `bool` | `false` | Register `run_python` (stdio transport only). |
 | `OPENSWMM_MCP_OAUTH_ISSUER` | `str` | `None` | OAuth token issuer URL (HTTP transport only). |
 | `OPENSWMM_MCP_OAUTH_AUDIENCE` | `str` | `None` | OAuth audience identifier (HTTP transport only). |
@@ -21,7 +21,7 @@ file, or in the Claude Code MCP server configuration.
 
 ## Tool sets
 
-The default `core` set is 14 tools, about 12k characters of definitions.
+The default `core` set is 15 tools, about 12k characters of definitions.
 `core,gym` adds the five `gym_*` tools (about 17k characters in all) and needs
 the `gym` extra (`pip install 'openswmm.mcp[gym]'`); if the extra is missing,
 the server refuses to start and names it.

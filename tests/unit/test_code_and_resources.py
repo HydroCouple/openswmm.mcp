@@ -24,6 +24,7 @@ TOOLS = {
     "find",
     "get",
     "set",
+    "inspect",
     "call",
     "edit",
     "timeseries",

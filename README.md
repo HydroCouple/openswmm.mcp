@@ -24,18 +24,19 @@
 
 ## Features
 
-The server exposes **14 core tools**, **5 optional gym tools** and an opt-in
+The server exposes **15 core tools**, **5 optional gym tools** and an opt-in
 `run_python` tool. Together their definitions take about 17k characters (under
 5k tokens), so the server loads in any MCP client, including Claude Desktop.
 v1 registered 663 tools and could not.
 
-Five generic tools (`describe`, `find`, `get`, `set`, `call`) reach every
+Six generic tools (`describe`, `find`, `get`, `set`, `inspect`, `call`) reach every
 property and method of the engine through its machine-readable catalog
 (`openswmm.engine.catalog`). New engine capabilities reach the server without
 new tool code.
 
 - **Sessions and runs** -- `open_model`, `run`, `session`, `save`
-- **Catalog access** -- `describe`, `find`, `get`, `set`, `call`, `edit`
+- **Catalog access** -- `describe`, `find`, `get`, `set`, `inspect` (methods that only
+  read), `call` (methods that change something), `edit`
 - **Results** -- `timeseries`, `report`, `compare`, `export`
 - **Gym** (`OPENSWMM_MCP_TOOLSETS=core,gym`) -- `gym_describe`, `gym_config`,
   `gym_env`, `gym_job`, `gym_score`

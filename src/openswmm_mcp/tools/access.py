@@ -1,7 +1,9 @@
-"""Catalog-driven access tools: ``describe``, ``find``, ``get``, ``set``, ``call``.
+"""Catalog-driven access tools: ``describe``, ``find``, ``get``, ``set``, ``inspect``, ``call``.
 
 Every engine property and method listed in ``openswmm.engine.catalog`` is reachable
-through these five tools, so new engine capabilities need no new tool code.
+through these six tools, so new engine capabilities need no new tool code. A method runs
+through ``inspect`` when the catalog gives it the effect ``read`` and through ``call``
+otherwise, so a client can approve reading without approving changes.
 """
 
 from __future__ import annotations
@@ -56,6 +58,11 @@ _OPS = {
 _DOC_CHARS = 160
 
 
+def _tool_for(member: dict) -> str:
+    """The tool a method runs through: ``inspect`` for a read, ``call`` for anything else."""
+    return "inspect" if member["effect"] == "read" else "call"
+
+
 # ---------------------------------------------------------------------------
 # describe
 # ---------------------------------------------------------------------------
@@ -98,7 +105,14 @@ def _describe_target(name: str, solver: Any) -> dict[str, Any]:
                 f["phases"] = m["phases"]
             fields.append(f)
         else:
-            methods.append({"name": m["name"], "signature": _signature(m), "doc": _short(m["doc"])})
+            methods.append(
+                {
+                    "name": m["name"],
+                    "tool": _tool_for(m),
+                    "signature": _signature(m),
+                    "doc": _short(m["doc"]),
+                }
+            )
     out: dict[str, Any] = {
         "target": name,
         "doc": _short(entry["doc"]),
@@ -119,11 +133,11 @@ def _describe_target(name: str, solver: Any) -> dict[str, Any]:
         out["subviews"] = subs
     if "collection" in entry:
         out["address"] = (
-            f"get(kind='{name}', fields=[...]); call(target='{name}:<id>', ...); "
+            f"get(kind='{name}', fields=[...]); inspect or call(target='{name}:<id>', ...); "
             f"sub-view fields as '<subview>.<field>'"
         )
     elif "construct" not in entry:
-        out["address"] = f"get(kind='{name}', fields=[...]) or call(target='{name}', ...)"
+        out["address"] = f"get(kind='{name}', fields=[...]); inspect or call(target='{name}', ...)"
     return out
 
 
@@ -152,8 +166,9 @@ def _describe_overview(solver: Any) -> dict[str, Any]:
         "how_to": (
             "describe('<kind or service>') lists fields and methods; get/set read and "
             "write fields of an element kind (sub-view fields as 'stats.max_depth') or "
-            "of a service; call runs any listed method on a service ('forcing'), an "
-            "element ('node:J1', 'node:OUT1.outfall') or a standalone target; enum "
+            "of a service; inspect runs a listed method that only reads and call one that "
+            "changes something or names a file (each method lists its tool), on a service "
+            "('forcing'), an element ('node:J1', 'node:OUT1.outfall') or a standalone target; enum "
             "values are passed by name; describe('output') lists time-series variables."
         ),
     }
@@ -437,7 +452,7 @@ async def set_fields(
 
 
 # ---------------------------------------------------------------------------
-# call
+# inspect / call
 # ---------------------------------------------------------------------------
 def _bind(member: dict, args: dict[str, Any], session: SimSession, base: Path) -> tuple[list, dict]:
     """Coerce JSON *args* to the catalog signature: positional up to the first gap."""
@@ -669,23 +684,28 @@ class _ClosingHandle:
             handle.close()
 
 
-async def call(
-    ctx: Context, session_id: str, target: str, method: str, args: dict[str, Any] | None = None
-) -> dict:
-    """Invoke any engine method listed by `describe`.
+def _require_tool(tool: str, member: dict) -> None:
+    """Refuse a method sent to the tool its effect does not belong to, naming the other."""
+    right = _tool_for(member)
+    if right != tool:
+        why = "only reads" if right == "inspect" else f"has the effect '{member['effect']}'"
+        raise ToolError(f"[{ErrorCode.NOT_SUPPORTED}] {member['path']} {why}: use {right}.")
 
-    target is a service ("forcing", "tables", "controls", "surface2d", "reactions", ...),
-    an element "<kind>:<id>[.<subview>]" such as "node:OUT1.outfall", a standalone target
-    ("output", "xsect", "geopackage", "hotstart" with their constructor args; "builder" for a
-    model authored from scratch, then write it and open_model it; "surface_output" for 2D
-    results, args.file defaulting to the session's; "trace" for flow tracing over the
-    session's network; "heat_snapshot") or a function module ("datetime"). args are
-    keyword arguments matching the catalog signature,
-    e.g. call("s", "forcing", "node_lat_inflow", {"node": "J1", "value": 2.5, "persist": true}).
-    """
+
+def _result(target: str, method: str, result: Any, cut: list[int]) -> dict:
+    out = {"target": target, "method": method, "result": result}
+    if cut:
+        out["truncated"] = True  # an array longer than cat.MAX_ARRAY was cut
+    return out
+
+
+async def _dispatch(
+    ctx: Context, tool: str, session_id: str, target: str, method: str, args: dict[str, Any] | None
+) -> dict:
     session = await get_session(ctx, session_id)
     base = get_session_manager(ctx).working_dir
     args = dict(args or {})
+    cut: list[int] = []
     if target in _FUNCTION_MODULES:
         functions = cat.catalog()["functions"].get(f"_{target}", {})
         if method not in functions:
@@ -694,9 +714,10 @@ async def call(
                 f"{cat.suggest(method, functions)}"
             )
         member = dict(functions[method], path=f"{target}.{method}")
+        _require_tool(tool, member)
         positional, keywords = _bind(member, args, session, base)
         result = getattr(_FUNCTION_MODULES[target], method)(*positional, **keywords)
-        return {"target": target, "method": method, "result": cat.to_json(result)}
+        return _result(target, method, cat.to_json(result, cut=cut), cut)
 
     name, key = cat.parse_target(target)
     entry = cat.require_target(name)
@@ -711,6 +732,7 @@ async def call(
         raise ToolError(
             f"[{ErrorCode.VALIDATION_ERROR}] '{method}' is not a method of '{name}'.{hint}"
         )
+    _require_tool(tool, member)
 
     def _run() -> Any:
         if "construct" in entry:
@@ -719,16 +741,48 @@ async def call(
             solver = session.require_solver()
             make = lambda: cat.resolve(solver, name, key)  # noqa: E731
         if member["form"] == "item":
-            return cat.to_json(_item(make(), method, member, args))
+            return cat.to_json(_item(make(), method, member, args), cut=cut)
         positional, keywords = _bind(member, args, session, base)
         obj = make()
         try:
             if name == "editor" or _STRUCTURAL.match(method):
                 session.structure_edited = True  # before mutating
-            return cat.to_json(getattr(obj, method)(*positional, **keywords))
+            return cat.to_json(getattr(obj, method)(*positional, **keywords), cut=cut)
         finally:
             if name == "hotstart" and not member.get("static"):
                 obj.close()
 
     result = await session.call(_run, context=f"{target}.{method}")
-    return {"target": target, "method": method, "result": result}
+    return _result(target, method, result, cut)
+
+
+async def inspect(
+    ctx: Context, session_id: str, target: str, method: str, args: dict[str, Any] | None = None
+) -> dict:
+    """Invoke an engine method that only reads: one `describe` lists with tool "inspect".
+
+    It changes neither the model, the engine state nor any file. target and args are as for
+    `call`, e.g. inspect("s", "spatial", "node_coords") or
+    inspect("s", "xsect", "area", {"shape": "CIRCULAR", "geom1": 1.0, "units": "US", "depth": 0.5}).
+    A method that changes something is refused and names `call`. "truncated": true marks a
+    result whose arrays were cut at 2,000 entries.
+    """
+    return await _dispatch(ctx, "inspect", session_id, target, method, args)
+
+
+async def call(
+    ctx: Context, session_id: str, target: str, method: str, args: dict[str, Any] | None = None
+) -> dict:
+    """Invoke an engine method that changes the model or engine state, or reads or writes a
+    file: one `describe` lists with tool "call". A method that only reads runs through `inspect`.
+
+    target is a service ("forcing", "tables", "controls", "surface2d", "reactions", ...),
+    an element "<kind>:<id>[.<subview>]" such as "node:OUT1.outfall", a standalone target
+    ("output", "xsect", "geopackage", "hotstart" with their constructor args; "builder" for a
+    model authored from scratch, then write it and open_model it; "surface_output" for 2D
+    results, args.file defaulting to the session's; "trace" for flow tracing over the
+    session's network; "heat_snapshot") or a function module ("datetime"). args are
+    keyword arguments matching the catalog signature,
+    e.g. call("s", "forcing", "node_lat_inflow", {"node": "J1", "value": 2.5, "persist": true}).
+    """
+    return await _dispatch(ctx, "call", session_id, target, method, args)

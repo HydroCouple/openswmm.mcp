@@ -53,7 +53,9 @@ set `structure_edited`; the next `run` from `OPENED` writes the model to
   catalog target and property, obtain the live object with
   `openswmm.engine.catalog.resolve`, and read or write it. Whole-collection
   reads use the engine's bulk arrays when the catalog links one.
-- `call` accepts only catalogued methods (and the synthetic `items`,
+- `inspect` and `call` share one dispatcher. A method runs through `inspect` when the
+  catalog gives it the effect `read` and through `call` otherwise; each refuses the
+  other's methods. Together they accept only catalogued methods (and the synthetic `items`,
   `get_item`, `set_item`, `delete_item` for mapping-like targets). Lifecycle
   and callback members of the solver are refused. Arguments are coerced from
   JSON by their catalog types: enum names, datetimes, tuples, arrays, and

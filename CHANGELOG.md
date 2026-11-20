@@ -31,6 +31,15 @@ version is now `0.2.0.dev0`.
 
 ### Added
 
+- **`inspect` beside `call`** (15 core tools). A catalogued method runs through `inspect`
+  when the engine catalog gives it the effect `read`, and through `call` otherwise; each
+  refuses the other's methods and names the right tool. `describe` lists the tool of every
+  method. Read calls that used `call` (for example `spatial.node_coords`) move to `inspect`.
+- **Tool annotations**: `describe`, `find`, `get`, `inspect`, `timeseries`, `report` and
+  `compare` carry the MCP read-only hint; `set`, `call` and `edit` the destructive hint, so a
+  client can approve reads without approving changes.
+- `inspect` and `call` add `"truncated": true` when an array was cut at 2,000 entries.
+- The server requires engine catalog schema 2 (every method carries an effect).
 - **14 core tools**: `open_model`, `run`, `session`, `save`, `describe`,
   `find`, `get`, `set`, `call`, `edit`, `timeseries`, `report`, `compare`,
   `export`. `describe`, `find`, `get`, `set` and `call` are driven by the

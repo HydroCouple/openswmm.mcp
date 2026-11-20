@@ -1,6 +1,7 @@
-"""Every catalogued method is callable through ``call`` with the catalog's signature.
+"""Every catalogued method is callable through ``inspect`` or ``call`` with the catalog's
+signature: ``inspect`` when its effect is ``read``, ``call`` otherwise, and never both.
 
-For each method in the engine catalog, ``call`` either binds the arguments and
+For each method in the engine catalog, its tool either binds the arguments and
 reaches the engine, or refuses with a typed error. It never leaks a Python
 ``TypeError`` from a signature the catalog got wrong, and no target lacks a
 handler:
@@ -28,7 +29,7 @@ from fastmcp.exceptions import ToolError
 from openswmm.engine import Solver
 
 from openswmm_mcp import catalog as cat
-from openswmm_mcp.tools.access import _ids
+from openswmm_mcp.tools.access import _ids, _tool_for
 
 DATA = Path(__file__).parent / "data"
 MODELS = {"1d": "site_drainage_model.inp", "2d": "twod_example.inp"}
@@ -122,14 +123,41 @@ async def _save_hotstart(tools, output_dir: Path) -> None:
     await tools("session", action="close", session_id="hs")
 
 
-async def _call(tools, session_id: str, target: str, method: str, args: dict) -> str | None:
-    """The refusal message, or None when the call returned JSON."""
+async def _call(
+    tools, session_id: str, target: str, method: str, args: dict, member: dict
+) -> str | None:
+    """The refusal message, or None when the method's own tool returned JSON."""
+    tool = _tool_for(member)
     try:
-        result = await tools("call", session_id=session_id, target=target, method=method, args=args)
+        result = await tools(tool, session_id=session_id, target=target, method=method, args=args)
     except ToolError as exc:
         return str(exc)
     json.dumps(result)
     return None
+
+
+async def test_each_method_runs_through_exactly_one_tool(tools, output_dir):
+    """The other tool refuses before anything is bound, and names the right one."""
+    strings = {}
+    for model in MODELS:
+        strings[model] = _target_strings(await _open(tools, output_dir, model, model), output_dir)
+    checked, problems = {"inspect": 0, "call": 0}, []
+    for name, method, member in _methods():
+        target = strings[_model(name)].get(name, name)
+        if target is None:
+            continue
+        right = _tool_for(member)
+        assert right == ("inspect" if member["effect"] == "read" else "call")
+        wrong = "call" if right == "inspect" else "inspect"
+        try:
+            await tools(wrong, session_id=_model(name), target=target, method=method, args={})
+            problems.append(f"{name}.{method}: {wrong} accepted a method of {right}")
+        except ToolError as exc:
+            if f": use {right}." not in str(exc):
+                problems.append(f"{name}.{method}: {exc}")
+        checked[right] += 1
+    assert problems == []
+    assert checked["inspect"] > 200 and checked["call"] > 500, checked
 
 
 async def test_required_arguments_are_named(tools, output_dir):
@@ -145,7 +173,7 @@ async def test_required_arguments_are_named(tools, output_dir):
         target = strings[_model(name)].get(name, name)
         if not required or target is None:
             continue
-        message = await _call(tools, _model(name), target, method, _args(name, member))
+        message = await _call(tools, _model(name), target, method, _args(name, member), member)
         checked += 1
         if message is None or f"Missing argument '{required[0]}'" not in message:
             problems.append(f"{name}.{method}: {message}")
@@ -169,7 +197,7 @@ async def test_zero_argument_methods_run_on_a_fresh_session(tools, output_dir):
         if target is None:
             await tools("session", action="close", session_id=session_id)
             continue
-        message = await _call(tools, session_id, target, method, _args(name, member))
+        message = await _call(tools, session_id, target, method, _args(name, member), member)
         await tools("session", action="close", session_id=session_id)
         if message is None:
             ran += 1

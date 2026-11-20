@@ -70,7 +70,7 @@ async def test_xsect_from_link_matches_constructor(tools, inp_path):
     xs = await tools("get", session_id="default", kind="link", fields=fields, ids=["C1"])
     shape, *geoms = (xs["columns"][f][0] for f in fields)
     built = await tools(
-        "call",
+        "inspect",
         session_id="default",
         target="xsect",
         method="area",
@@ -78,7 +78,7 @@ async def test_xsect_from_link_matches_constructor(tools, inp_path):
         | {f"geom{i}": g for i, g in enumerate(geoms, start=1)},
     )
     linked = await tools(
-        "call",
+        "inspect",
         session_id="default",
         target="xsect",
         method="area",
@@ -176,3 +176,40 @@ def test_refusals_are_logged_as_one_line():
     assert record.getMessage() == (
         "Error calling tool 'call': [VALIDATION_ERROR] Missing argument 'node'"
     )
+
+
+async def test_inspect_refuses_a_method_that_changes_something(tools, inp_path):
+    await tools("open_model", path=inp_path)
+    inflow = {"node": "J1", "value": 2.5}
+    with pytest.raises(
+        ToolError, match=r"forcing.node_lat_inflow has the effect 'write': use call"
+    ):
+        await tools(
+            "inspect", session_id="default", target="forcing", method="node_lat_inflow", args=inflow
+        )
+    with pytest.raises(ToolError, match=r"spatial.node_coords only reads: use inspect"):
+        await tools("call", session_id="default", target="spatial", method="node_coords")
+    coords = await tools("inspect", session_id="default", target="spatial", method="node_coords")
+    assert coords["result"] and "truncated" not in coords
+
+
+async def test_an_array_past_the_limit_is_reported_as_truncated(tools, inp_path):
+    from openswmm_mcp import catalog as cat
+
+    await tools("open_model", path=inp_path)
+    section = {"shape": "CIRCULAR", "geom1": 1.0, "units": "US"}
+
+    async def areas(count: int) -> dict:
+        depths = [0.5 * i / count for i in range(count)]
+        return await tools(
+            "inspect",
+            session_id="default",
+            target="xsect",
+            method="area",
+            args=section | {"depth": depths},
+        )
+
+    whole = await areas(cat.MAX_ARRAY)
+    assert len(whole["result"]) == cat.MAX_ARRAY and "truncated" not in whole
+    cut = await areas(cat.MAX_ARRAY + 1)
+    assert len(cut["result"]) == cat.MAX_ARRAY and cut["truncated"] is True

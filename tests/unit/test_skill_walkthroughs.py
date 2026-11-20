@@ -125,15 +125,19 @@ async def test_capacity_assessment(tools, inp_path, output_dir):
     assert "max_filling" in json.dumps(capacity)
     flooding = await tools("report", session_id="cap", name="flooding", top=n_nodes)
     assert flooding is not None
-    coords = await tools("call", session_id="cap", target="spatial", method="node_coords")
+    coords = await tools("inspect", session_id="cap", target="spatial", method="node_coords")
     assert coords["result"]
     spatial = await tools("describe", topic="spatial")
     assert {"link_vertices", "subcatchment_polygon"} <= set(json.dumps(spatial).split('"'))
     await tools(
-        "call", session_id="cap", target="spatial", method="link_vertices", args={"link": "C1"}
+        "inspect", session_id="cap", target="spatial", method="link_vertices", args={"link": "C1"}
     )
     await tools(
-        "call", session_id="cap", target="spatial", method="subcatchment_polygon", args={"sub": 0}
+        "inspect",
+        session_id="cap",
+        target="spatial",
+        method="subcatchment_polygon",
+        args={"sub": 0},
     )
     xsect = await tools("get", session_id="cap", kind="link", fields=["xsect.shape", "xsect.g1"])
     assert len(xsect["ids"]) == n_links

@@ -89,7 +89,7 @@ constrained at isolated bottlenecks. → verify: macro KPIs written to the repor
    the governing metric, its value, and constrained/critical status.
 
 Then map it. Geometry comes from the `spatial` service:
-`call(target="spatial", method="node_coords")` for all node coordinates, and
+`inspect(target="spatial", method="node_coords")` for all node coordinates, and
 `link_vertices` / `subcatchment_polygon` per element (`describe("spatial")`
 lists them); cross-section context from
 `get(kind="link", fields=["xsect.shape", "xsect.g1"])`. Produce **interactive Plotly figures** (Plotly only — no

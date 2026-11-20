@@ -1,11 +1,11 @@
 # Tools
 
-The server registers **14 core tools**, **5 optional gym tools** and one opt-in
+The server registers **15 core tools**, **5 optional gym tools** and one opt-in
 `run_python` tool. Together their definitions are about 17k characters (under
 5k tokens), so every MCP client, including Claude Desktop, can load them.
 
 The engine exposes over a thousand functions. Instead of one tool per function,
-five generic tools (`describe`, `find`, `get`, `set`, `call`) read the engine's
+six generic tools (`describe`, `find`, `get`, `set`, `inspect`, `call`) read the engine's
 machine-readable catalog (`openswmm.engine.catalog`) and dispatch supported fields and methods by their catalog paths. New scalar
 fields and JSON-compatible method arguments often need no new tool code;
 lifecycle operations, callbacks, standalone construction and optional native
@@ -23,7 +23,8 @@ features still have explicit boundaries (see below).
 | `find(session_id, kind, pattern, type, where)` | List element IDs filtered by regex, subtype (`"STORAGE"`) and a field predicate (`"stats.max_depth > 2"`). |
 | `get(session_id, kind, fields, ids)` | Read fields as a table. All elements use the engine's bulk arrays where they exist. Works for services too (`kind="mass_balance"`). |
 | `set(session_id, kind, changes)` | Write fields: `[{"id": "C1", "field": "roughness", "value": 0.015}]`. Each change is validated and reported individually. |
-| `call(session_id, target, method, args)` | Run any catalogued method on a service (`"forcing"`), an element (`"node:OUT1.outfall"`), a standalone target (`"xsect"`, `"output"`, `"geopackage"`, `"hotstart"`, `"builder"`) or a function module (`"datetime"`). |
+| `inspect(session_id, target, method, args)` | Run a catalogued method that only reads (the engine catalog gives it the effect `read`), with the same targets as `call`. Marked read-only, so a client can approve it without approving changes. A method that changes something is refused and names `call`. |
+| `call(session_id, target, method, args)` | Run a catalogued method that changes the model or engine state, or reads or writes a file (effect `write`, `structural` or `file`), on a service (`"forcing"`), an element (`"node:OUT1.outfall"`), a standalone target (`"xsect"`, `"output"`, `"geopackage"`, `"hotstart"`, `"builder"`) or a function module (`"datetime"`). |
 | `edit(session_id, action, kind, ids, ...)` | Structural edits: `add`, `delete`, `preview_delete`, `rename`, `convert`. |
 | `timeseries(source, kind, ids, variable)` | Result series from a finished session or an `.out` file, peak-preserving downsampling; `variable="quality:TSS"` for pollutants. |
 | `report(session_id, name)` | `summary`, `mass_balance`, `flooding`, `capacity`, `storage`, `pumps`, `subcatchments`, `statistics`, `quality`, `2d`, `groundwater`. |
@@ -39,7 +40,14 @@ features still have explicit boundaries (see below).
 - **Services** are everything else reachable from a model: `forcing`,
   `options`, `climate`, `controls`, `inflows`, `infrastructure.lids`,
   `surface2d.groundwater.transport`, and so on. `describe()` lists them.
-- **Elements** in `call` are `<kind>:<id>[.<subview>]`; IDs may contain dots
+- **`inspect` or `call`**: `describe` lists each method with its `tool`. Methods the
+  engine catalog marks `read` run through `inspect`; every other method runs through
+  `call`. Each tool refuses the other's methods and names the right one. The read-only
+  tools (`describe`, `find`, `get`, `inspect`, `timeseries`, `report`, `compare`) carry the
+  MCP read-only hint; `set`, `call` and `edit` carry the destructive hint.
+- **Long arrays**: `inspect` and `call` return at most 2,000 entries of an array and add
+  `"truncated": true` when one was cut.
+- **Elements** in `inspect` and `call` are `<kind>:<id>[.<subview>]`; IDs may contain dots
   (`node:MH.1.outfall`).
 - **Standalone targets** take their constructor arguments in `args`: `xsect`
   takes `shape`, `geom1`..`geom4` and `units` (or a `from` spec such as
@@ -120,9 +128,9 @@ v1 registered 663 tools. Each maps to one of the tools above:
 | `hotstart_*` | `save(format="hotstart")`, `session(action="clone")`, `call(target="hotstart", ...)` |
 | `analysis_*` | `report`, `timeseries`, `compare`, `export`; raw output via `call(target="output", ...)` |
 | `geopackage_*` | `save(format="gpkg")`, `call(target="geopackage", ...)`, `compare` with an observed CSV |
-| `spatial_*` | `call(target="spatial", ...)` |
-| `xsect_*` | `call(target="xsect", method=..., args={"shape": ..., "geom1": ..., "units": "US", ...})` |
-| `datetime_*` | `call(target="datetime", ...)` |
+| `spatial_*` | `inspect(target="spatial", ...)` |
+| `xsect_*` | `inspect(target="xsect", method=..., args={"shape": ..., "geom1": ..., "units": "US", ...})` |
+| `datetime_*` | `inspect(target="datetime", ...)` |
 | `gym_*` (23 tools) | `gym_describe`, `gym_config`, `gym_env`, `gym_job`, `gym_score` |
 
 The SWMM 5 (legacy) backend is gone: every session uses the handle-based

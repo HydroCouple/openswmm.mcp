@@ -75,7 +75,8 @@ def what_if(session_id: str, description: str) -> str:
         "1. session(action='clone', session_id=..., new_session_id='what_if') to keep the "
         "baseline, or open_model the same file into a new session.\n"
         "2. Apply the change with set (fields), edit (structure) or call (e.g. "
-        "call(target='forcing', ...) for runtime forcing); describe() shows what exists.\n"
+        "call(target='forcing', ...) for runtime forcing); describe() shows what exists "
+        "(inspect runs the methods that only read).\n"
         "3. Run both to the end and compare(...) them; report the effect in plain terms."
     )
 
