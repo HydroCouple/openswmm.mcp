@@ -266,6 +266,31 @@ async def list_envs(ctx: Context) -> dict:
 
 
 @tool_errors
+async def evaluate_design(
+    ctx: Context,
+    name: str | None = None,
+    config: JsonObject = None,
+    decisions: JsonObject = None,
+    config_dir: str | None = None,
+) -> dict:
+    """Score one design or policy now: one episode, as a study would evaluate it.
+
+    I{decisions} maps each dimension key to its values (an evaluation record's
+    C{decisions}); omitted, the model's own values are read from the engine, which
+    scores the unchanged model (fields that a design kind sets directly only).
+    Requires the gym extra.
+    """
+    require_gymnasium("gym_job(action='evaluate')")
+    from openswmm_gymnasium.optimize import baseline_decisions, evaluate_decisions
+
+    decisions = coerce_json_param(decisions, "decisions")
+    env_config = await _resolve_config(ctx, name, config, config_dir)
+    chosen = decisions or await asyncio.to_thread(baseline_decisions, env_config)
+    record = await asyncio.to_thread(evaluate_decisions, env_config, chosen)
+    return record | {"baseline": decisions is None}
+
+
+@tool_errors
 async def start_optimization(
     ctx: Context,
     name: str | None = None,

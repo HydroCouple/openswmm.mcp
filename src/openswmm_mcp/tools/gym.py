@@ -92,18 +92,23 @@ async def gym_env(
 
 async def gym_job(
     ctx: Context,
-    action: Literal["start", "status", "results", "cancel", "list", "decode_policy"],
+    action: Literal["start", "status", "results", "cancel", "list", "decode_policy", "evaluate"],
     job_id: str | None = None,
     config: str | None = None,
     spec: JsonObject = None,
     optimization: JsonObject = None,
     index: str = "best",
+    decisions: JsonObject = None,
 ) -> dict:
     """Run optimisation jobs (e.g. NSGA-II design or control search) in the background:
     start from a named config or inline spec with optimization settings, then poll
-    status, fetch results (Pareto front), cancel, list, or decode a policy."""
+    status, fetch results (Pareto front), cancel, list, or decode a policy. "evaluate"
+    scores one design now ({dimension key: values}; omitted, the model's own values).
+    Alternatives: start with {"algorithm": "alternatives", "candidates": [...]}."""
     if action == "list":
         return await run_tools.list_jobs(ctx)
+    if action == "evaluate":
+        return await run_tools.evaluate_design(ctx, name=config, config=spec, decisions=decisions)
     if action == "start":
         return await run_tools.start_optimization(
             ctx, name=config, config=spec, optimization=optimization
