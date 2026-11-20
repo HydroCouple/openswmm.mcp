@@ -39,6 +39,10 @@ version is now `0.2.0.dev0`.
   terms, then takes the behavioural set, its bands and the chosen member;
   `operational-optimization` searches over an event set. A platform study's `derive`
   records the values a discrete dimension chose. openswmm.gymnasium `>=0.1.0.dev2`.
+- **Sidecar files on the platform.** `platform_model(action="upload", files=[...])` packages
+  files in the model's folder that the model does not reference (observations, storm rain)
+  with the revision; `derive` carries the ones the study's env config names into the
+  derived revision.
 - **`compare` uses openswmm.gymnasium's fit metrics** (`rewards.fit`), the one implementation calibration objectives use, and adds the Kling-Gupta efficiency; its other numbers are unchanged. `openswmm.gymnasium>=0.1.0.dev1` is now a core dependency (its base install adds only gymnasium and numpy).
 - **`platform_model(action="derive")`**: a platform study's evaluation becomes a revision
   that names its base revision, study, evaluation and design. `gym_score(action="apply_design")`
