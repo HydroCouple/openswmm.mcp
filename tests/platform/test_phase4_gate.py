@@ -68,10 +68,9 @@ POLICY = {
 
 @pytest.fixture(scope="module", autouse=True)
 def engine_continues():
-    pytest.importorskip("openswmm.engine")
-    from openswmm.engine import capabilities
-
-    if "continue_extended_forcing" not in capabilities()["checkpoints"]:
+    engine = pytest.importorskip("openswmm.engine")
+    capabilities = getattr(engine, "capabilities", None)  # the published 6.0.0a4.dev1 has none
+    if capabilities is None or "continue_extended_forcing" not in capabilities()["checkpoints"]:
         pytest.skip("the installed openswmm engine cannot continue into extended forcing")
 
 
