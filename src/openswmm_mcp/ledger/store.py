@@ -293,7 +293,7 @@ class LedgerStore:
             if version < SCHEMA_VERSION:
                 self._migrate(conn)
             self._setup_index(conn)
-            self._last = self._max_stamp(conn)
+            self._last = max(self._last, self._max_stamp(conn))
         except BaseException:
             conn.close()
             raise
@@ -378,8 +378,16 @@ class LedgerStore:
         )
 
     def current_time(self) -> str:
-        """A query bound that includes committed writes even on a coarse system clock."""
-        return max(utc_now(), self._read(self._max_stamp, ""))
+        """A query bound that includes committed writes even on a coarse system clock.
+
+        Later writes through this store are stamped after it, so a caller holding it keeps
+        seeing the ledger as it was, even when the clock has not ticked since.
+        """
+        with self._lock:
+            conn = self._connect(create=False)
+            stamp = max(utc_now(), self._max_stamp(conn) if conn is not None else "")
+            self._last = max(self._last, stamp)
+            return stamp
 
     def _bounds(self, as_of: str | None, as_known: str | None) -> dict[str, str]:
         valid_at, known_at = _tn(as_of), _tn(as_known)

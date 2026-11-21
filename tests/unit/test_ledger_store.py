@@ -152,6 +152,30 @@ def test_read_after_write_with_a_coarse_clock(output_dir, monkeypatch):
         second.close()
 
 
+def test_a_write_in_the_same_clock_tick_comes_after_a_read_time(output_dir, monkeypatch):
+    # Windows' clock advances in ~15.6 ms ticks: the clock moves on after the last write, a
+    # caller takes current_time(), and the next write reads the same tick. That write must
+    # still be stamped after the time the caller holds.
+    clock = ["2026-04-01T00:00:00.000000Z"]
+    monkeypatch.setattr(store_mod, "utc_now", lambda: clock[0])
+    s = _store(output_dir)
+    try:
+        _reg(s, acquired="2026-01-01")
+        edge = {
+            "element_kind": "node", "element_id": "J2", "model_sha256": MODEL,
+            "source_id": "pipes", "source_sha256": SHA_A, "feature_key": "J2",
+            "rule": "id_match", "params": {"key": "ID"},
+        }  # fmt: skip
+        s.add_edges([edge])
+        clock[0] = "2026-04-01T00:00:00.015600Z"
+        before = s.current_time()
+        s.retire_source("pipes", "2026-03-01")
+        assert len(s.sources_for_model(MODEL, before)) == 1
+        assert s.sources_for_model(MODEL) == []
+    finally:
+        s.close()
+
+
 def test_recommit_keeps_history(output_dir):
     s = _store(output_dir)
     a = _tally(
