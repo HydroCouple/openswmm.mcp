@@ -3,7 +3,7 @@
 Tool sets (``OPENSWMM_MCP_TOOLSETS``):
 
 * ``core`` (always) -- 15 tools: sessions and runs, catalog access, results.
-* ``gym`` -- 5 tools for openswmm.gymnasium environments and optimisation jobs.
+* ``gym`` -- 5 tools for openswmm.gymnasium environments and optimization jobs.
 * ``platform`` -- 8 tools that submit runs to hydrocouple.platform and read their results.
 * ``ledger`` -- 3 tools: ``tally``, ``sources``, ``locate`` (verifiable facts and provenance).
 * ``run_python`` -- registered only with ``OPENSWMM_MCP_ENABLE_PYTHON=true`` on stdio.

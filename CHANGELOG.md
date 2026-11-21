@@ -36,7 +36,7 @@ version is now `0.2.0.dev0`.
   given `rule`) and writes `behavioural-set.json`; `gym_score(action="bands")` runs them and
   writes the 5, 50 and 95 % quantiles of simulated series at every report time under
   `bands/`. The `calibrate-model` skill now samples a study scored by `fit_to_observed`
-  terms, then takes the behavioural set, its bands and the chosen member;
+  terms, then takes the behavioral set, its bands and the chosen member;
   `operational-optimization` searches over an event set. A platform study's `derive`
   records the values a discrete dimension chose. openswmm.gymnasium `>=0.1.0.dev2`.
 - **Sidecar files on the platform.** `platform_model(action="upload", files=[...])` packages
@@ -69,7 +69,7 @@ version is now `0.2.0.dev0`.
   `platform_results` returns provenance first and reads the run summary by checksum,
   without downloading the report or the binary output. The server signs in with an agent
   session credential and refuses a person's token.
-- **`inspect` beside `call`** (15 core tools). A catalogued method runs through `inspect`
+- **`inspect` beside `call`** (15 core tools). A cataloged method runs through `inspect`
   when the engine catalog gives it the effect `read`, and through `call` otherwise; each
   refuses the other's methods and names the right tool. `describe` lists the tool of every
   method. Read calls that used `call` (for example `spatial.node_coords`) move to `inspect`.
@@ -118,8 +118,8 @@ version is now `0.2.0.dev0`.
   reopened, so a model the engine refuses leaves the session unchanged.
 - `session(action="clone")` continues from the source's time and hydraulic
   state; `session(action="reset")` keeps earlier edits.
-- CI tests every catalogued field and service against real models
-  (`test_catalog_contract.py`), calls every catalogued method with the
+- CI tests every cataloged field and service against real models
+  (`test_catalog_contract.py`), calls every cataloged method with the
   catalog's signature (`test_method_contract.py`), walks each bundled skill's
   tool sequence end to end (`test_skill_walkthroughs.py`), launches the server
   over stdio the way Claude Desktop does, and caps the tool count and
@@ -137,7 +137,7 @@ version is now `0.2.0.dev0`.
 - **`call` reaches flow tracing (`trace`), the 2D results reader
   (`surface_output`) and heat snapshots.** Methods that take a Python callback
   are refused, naming the method.
-- **Optimisation jobs run on `openswmm_gymnasium.optimize`.** `gym_job` evaluates
+- **Optimization jobs run on `openswmm_gymnasium.optimize`.** `gym_job` evaluates
   each population in parallel on local worker processes
   (`optimization.workers`, default all but one CPU, at most 8). An engine
   crash fails only its candidate (`optimization.on_failure`: `"fail"` or
@@ -159,7 +159,7 @@ version is now `0.2.0.dev0`.
   or `value` instead of failing inside the engine.
 - A refused tool call (a missing argument, a lifecycle phase) is logged as one
   line. FastMCP logged each refusal with a full traceback, about 0.1 s apiece.
-- `python -m openswmm_mcp` (and the `openswmm.mcp` script) now honour
+- `python -m openswmm_mcp` (and the `openswmm.mcp` script) now honor
   `OPENSWMM_MCP_TRANSPORT` and `OPENSWMM_MCP_HTTP_PORT`, and the HTTP/SSE
   transports apply the configured JWT/OAuth verifier (`create_auth` was never
   wired into the server).

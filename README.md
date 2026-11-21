@@ -59,7 +59,7 @@ mapping.
 
 - **Resources** for the engine catalog (`swmm://catalog`, `swmm://catalog/{target}`),
   sessions and bundled skills
-- **Workflow prompts and bundled skills** for capacity assessment, calibration, operational optimisation, verified narratives and model provenance
+- **Workflow prompts and bundled skills** for capacity assessment, calibration, operational optimization, verified narratives and model provenance
 - **OAuth/JWT authentication** for HTTP transport via `fastmcp[auth]`
 - **Progress reporting** for long runs and **multi-session management**
 
@@ -315,7 +315,7 @@ See [AUTHORS.md](AUTHORS.md) for the full list of contributors to this project.
 
 Apache License, Version 2.0 -- see [LICENSE](LICENSE) for the full text and [NOTICE](NOTICE) for required attribution.
 
-## Acknowledgements
+## Acknowledgments
 
 - [OpenSWMM Engine](https://github.com/HydroCouple/OpenSWMMCore) -- the next-generation SWMM computational engine
 - [FastMCP](https://gofastmcp.com/) -- the Python framework for building MCP servers

@@ -76,7 +76,7 @@ openswmm_mcp.auth
 openswmm_mcp.catalog
 ~~~~~~~~~~~~~~~~~~~~
 
-Addressing, value coercion and JSON serialisation over ``openswmm.engine.catalog``.
+Addressing, value coercion and JSON serialization over ``openswmm.engine.catalog``.
 
 .. automodule:: openswmm_mcp.catalog
    :members:

@@ -22,7 +22,7 @@ Arguments:
   session_id: "demo"
 ```
 
-The server parses the `.inp` file, initialises the engine, and returns a
+The server parses the `.inp` file, initializes the engine, and returns a
 `ModelSummary` with element counts, flow units, and simulation time range:
 
 ```json

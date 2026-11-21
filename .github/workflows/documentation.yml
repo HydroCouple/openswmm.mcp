@@ -104,7 +104,7 @@ jobs:
       - name: Upload Pages artefact
         uses: actions/upload-pages-artifact@v4
         with:
-          # The artefact download lands the Sphinx site directly in site/ —
+          # The artifact download lands the Sphinx site directly in site/ —
           # there is no site/openswmm.mcp/ subdirectory. The project's path
           # segment comes from the repository name under the org's custom
           # domain, not from the uploaded tree.

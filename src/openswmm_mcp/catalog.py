@@ -49,7 +49,7 @@ if _engine_catalog.load().get("schema", 1) < MIN_CATALOG_SCHEMA:  # pragma: no c
     )
 
 # Lifecycle and handle-level Solver members are driven by the session tools;
-# dispatching them through ``call`` would desynchronise session state.
+# dispatching them through ``call`` would desynchronize session state.
 SOLVER_DENY = frozenset(
     {
         "create",

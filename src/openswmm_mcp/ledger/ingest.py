@@ -408,7 +408,7 @@ def manual_edges(
     Returns
     -------
     tuple
-        ``(accepted, errors)``: accepted edges are normalised and de-duplicated; each error is
+        ``(accepted, errors)``: accepted edges are normalized and de-duplicated; each error is
         ``{index, reason}`` for an edge that is malformed or names an unknown element/feature.
     """
     known_elements = {(e["kind"], str(e["id"])) for e in elements}

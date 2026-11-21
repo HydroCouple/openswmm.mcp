@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Gym actions: episode rollouts, the interactive env loop and optimisation jobs.
+"""Gym actions: episode rollouts, the interactive env loop and optimization jobs.
 
 Implementations behind the C{gym_env} and C{gym_job} tools
 (L{openswmm_mcp.tools.gym}).
@@ -28,7 +28,7 @@ Two execution styles:
     L{list_envs} — a live env held server-side so the LLM itself acts
     as the control policy, one C{gym_env(action='step')} per control interval.
 
-All engine work runs in worker threads; per-env locks serialise
+All engine work runs in worker threads; per-env locks serialize
 concurrent access to the same C{env_id}.
 
 @author: Caleb Buahin

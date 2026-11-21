@@ -1,10 +1,10 @@
 """The Phase 3 gate of the ecosystem plan, scripted end to end.
 
-1. A calibration returns a behavioural parameter set and prediction bands. A Latin hypercube
+1. A calibration returns a behavioral parameter set and prediction bands. A Latin hypercube
    over C11's roughness and S1's imperviousness (a discrete choice) of the site drainage
    example is scored, through this MCP's gym tools, by fit_to_observed terms against a
    synthetic twin: observations a known parameter set wrote, with 3 % noise. The true
-   parameters fall inside the behavioural set, and its 5 to 95 % bands hold the noise-free
+   parameters fall inside the behavioral set, and its 5 to 95 % bands hold the noise-free
    series.
 2. A joint design and operations study (env_type joint) of the twin-tank benchmark scores every
    candidate over three storms on an evaluator pool (a local-pool target), their rain

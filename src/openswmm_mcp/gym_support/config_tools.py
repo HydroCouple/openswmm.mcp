@@ -173,7 +173,7 @@ def _parse_config(config: dict[str, Any]) -> EnvConfig:
 
 
 def _describe_space(space: Any) -> dict[str, Any]:
-    """Recursively summarise a Gymnasium space as plain JSON.
+    """Recursively summarize a Gymnasium space as plain JSON.
 
     Box leaves report shape and scalar low/high bounds; Dict spaces
     recurse per key; anything else falls back to C{repr}.
@@ -202,7 +202,7 @@ def _describe_space(space: Any) -> dict[str, Any]:
 def _summarize(config: EnvConfig) -> dict[str, Any]:
     """Return a compact JSON summary of *config* for tool responses.
 
-    @param config: The config to summarise.
+    @param config: The config to summarize.
     @type config: L{EnvConfig}
     @return: Summary dict (env type, inp path, kind names).
     @rtype: dict

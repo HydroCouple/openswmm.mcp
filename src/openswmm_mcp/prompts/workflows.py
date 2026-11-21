@@ -1,4 +1,4 @@
-"""Guided workflow prompts for common SWMM modelling tasks."""
+"""Guided workflow prompts for common SWMM modeling tasks."""
 
 from __future__ import annotations
 
@@ -50,7 +50,7 @@ def compare_scenarios(session_a: str, session_b: str) -> str:
         f"2. compare('{session_a}', '{session_b}', 'node', 'depth') and "
         f"compare('{session_a}', '{session_b}', 'link', 'flow').\n"
         "3. report(..., 'flooding') and report(..., 'mass_balance') for each session.\n"
-        "Summarise where and how much the scenarios differ and whether the change helps."
+        "Summarize where and how much the scenarios differ and whether the change helps."
     )
 
 

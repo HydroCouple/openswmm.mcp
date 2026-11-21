@@ -32,7 +32,7 @@ class ServerSettings(BaseSettings):
     local_manifests: bool = False
 
     # Register the ``run_python`` tool (Python with the session's Solver in
-    # scope). Honoured only on the stdio transport; never enable it on a
+    # scope). Honored only on the stdio transport; never enable it on a
     # server reachable by others.
     enable_python: bool = False
 

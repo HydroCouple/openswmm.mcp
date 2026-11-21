@@ -475,7 +475,7 @@ def _apply_schedule_policy(
 
 
 def _behavioural(manager: Any, job_id: str, rule: dict | None) -> dict[str, Any]:
-    """A finished job's behavioural set, written to C{behavioural-set.json} in its output dir."""
+    """A finished job's behavioral set, written to C{behavioural-set.json} in its output dir."""
     results = manager.results(job_id)
     env_config, opt = manager.get_env_config(job_id), manager.get_opt_config(job_id)
     log = Path(results["output_dir"]) / "evaluations.jsonl"
@@ -517,7 +517,7 @@ async def bands(
     quantiles: list[float] | None = None,
     event: str | None = None,
 ) -> dict:
-    """Prediction bands of a finished job's behavioural set.
+    """Prediction bands of a finished job's behavioral set.
 
     Each member runs again and every series (C{"<catalog path>:<element id>"}, e.g.
     C{"link.flow:C11"}) is read at the report times; the unweighted 5, 50 and 95 %

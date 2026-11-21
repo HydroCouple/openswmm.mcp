@@ -556,7 +556,7 @@ def _surface_reader(session: SimSession, file: Any, base: Path) -> Output2DReade
 
 
 def _tracer(session: SimSession) -> FlowTracer:
-    """A flow tracer over the session model's network (link lengths in metres)."""
+    """A flow tracer over the session model's network (link lengths in meters)."""
     if "trace" not in session.readers:
         solver = session.require_solver()
         scale = _US_FT_TO_M if solver.unit_system == "US" else 1.0

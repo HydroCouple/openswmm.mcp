@@ -106,7 +106,7 @@ def test_corrupt_json_raises_actionable_error(store: GymStore):
     worse.write_text(json.dumps({"config": {"env_type": "nope"}}), encoding="utf-8")
     with pytest.raises(ToolError, match="corrupt or invalid"):
         store.get_config("wrong")
-    # Healthy neighbours are unaffected.
+    # Healthy neighbors are unaffected.
     assert store.get_config("ok") == _config()
 
 

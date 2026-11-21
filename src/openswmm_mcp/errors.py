@@ -1,4 +1,4 @@
-"""Standardised error codes and engine-exception translation."""
+"""Standardized error codes and engine-exception translation."""
 
 from __future__ import annotations
 

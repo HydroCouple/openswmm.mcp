@@ -145,7 +145,7 @@ async def test_calibrate_model(gym_tools, inp_path, output_dir):
     status = await _finished(tools, job["job_id"])
     assert all(set(r["metrics"]) == {"nse_C1", "kge_C1", "rmse_C1"} for r in _log(status))
 
-    # 6. Behavioural set.
+    # 6. Behavioral set.
     accepted = await tools("gym_score", action="behavioural", job_id=job["job_id"])
     assert accepted["members"] and Path(accepted["path"]).is_file()
     assert all(m["metrics"]["nse_C1"] >= 0.5 for m in accepted["members"])

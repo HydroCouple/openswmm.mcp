@@ -75,7 +75,7 @@ def canonical_time(value: Any) -> str | None:
     Raises
     ------
     ValueError
-        If the value is not a recognisable date or datetime.
+        If the value is not a recognizable date or datetime.
     """
     if value is None:
         return None
@@ -124,7 +124,7 @@ class CrsRefusal(Exception):
 
 
 def crs_label(text: str | None, map_units: str | None = None) -> str:
-    """Normalise a CRS description to a ledger label.
+    """Normalize a CRS description to a ledger label.
 
     ``EPSG:<n>`` for EPSG codes and OGC URNs; ``local:<feet|meters|degrees|none>``;
     ``unknown``; ``none`` (non-spatial); any other text (WKT, PROJ) is kept, stripped.

@@ -62,7 +62,7 @@ class SimSession:
     async def call(self, fn: Callable[..., T], *args: Any, context: str = "", **kw: Any) -> T:
         """Run *fn* in a worker thread under the session lock, translating engine errors.
 
-        A cancelled request still waits for the worker to finish before the lock
+        A canceled request still waits for the worker to finish before the lock
         is released, so no other call can touch the engine while it is busy.
         """
         async with self.lock:

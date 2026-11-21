@@ -1,4 +1,4 @@
-"""Every catalogued method is callable through ``inspect`` or ``call`` with the catalog's
+"""Every cataloged method is callable through ``inspect`` or ``call`` with the catalog's
 signature: ``inspect`` when its effect is ``read``, ``call`` otherwise, and never both.
 
 For each method in the engine catalog, its tool either binds the arguments and

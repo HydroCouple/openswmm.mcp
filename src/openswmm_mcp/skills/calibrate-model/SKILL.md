@@ -10,14 +10,14 @@ description: "Use this skill when the user wants to calibrate a SWMM model again
 Calibration finds the parameter values for which the model reproduces what was
 measured, and says how uncertain they are. This skill runs it as a **study**: a
 sampling design scores many parameter sets against the observations, an
-acceptance rule keeps the behavioural ones (generalized likelihood uncertainty
+acceptance rule keeps the behavioral ones (generalized likelihood uncertainty
 estimation), and their runs give prediction bands. The answer is a set of
 parameter sets and the spread of what they predict, never one tuned value.
 
 Every step writes to the job's output folder, and the study's manifest lets it be
 run again, by seed, to the same evaluations.
 
-Follow the steps in order. Do not skip the baseline: every later judgement is
+Follow the steps in order. Do not skip the baseline: every later judgment is
 relative to it.
 
 ## Inputs you must confirm before starting
@@ -70,7 +70,7 @@ If any of these is unknown, ask before running anything.
    → verify: the job is `done` and every evaluation has its metrics
    (`gym_job(action="results")`).
 
-6. **Behavioural set.** `gym_score(action="behavioural", job_id=...)` applies
+6. **Behavioral set.** `gym_score(action="behavioural", job_id=...)` applies
    the study's rule (or `rule` to try another) and writes
    `behavioural-set.json`. If no member passes, report it: do not loosen the
    rule silently.
@@ -95,7 +95,7 @@ If any of these is unknown, ask before running anything.
 All outputs (the job folder with `evaluations.jsonl`, `study-manifest.json`,
 `behavioural-set.json` and `bands/`, plus the calibrated `.inp`) go to a
 user-reviewable location, never a temp directory. The report gives: the
-parameter ranges searched and the ranges the behavioural set spans; baseline
+parameter ranges searched and the ranges the behavioral set spans; baseline
 and chosen-member NSE, KGE and PBIAS; the bands against the observations; and
 the acceptance rule used.
 

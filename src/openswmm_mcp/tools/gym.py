@@ -100,7 +100,7 @@ async def gym_job(
     index: str = "best",
     decisions: JsonObject = None,
 ) -> dict:
-    """Run optimisation jobs (e.g. NSGA-II design or control search) in the background:
+    """Run optimization jobs (e.g. NSGA-II design or control search) in the background:
     start from a named config or inline spec with optimization settings, then poll
     status, fetch results (Pareto front), cancel, list, or decode a policy. "evaluate"
     scores one design now ({dimension key: values}; omitted, the model's own values).
@@ -141,7 +141,7 @@ async def gym_score(
     quantiles: JsonFloatVector = None,
     event: str | None = None,
 ) -> dict:
-    """Score optimisation results: Pareto-filter a front, compute indicators (hypervolume,
+    """Score optimization results: Pareto-filter a front, compute indicators (hypervolume,
     IGD, epsilon, R2, spread), compare jobs, or apply a job's chosen design to a session.
     "behavioural" keeps a calibration's accepted evaluations (the job's acceptance rule, or
     rule); "bands" runs them and writes quantiles of series ["link.flow:C11"] as CSVs."""

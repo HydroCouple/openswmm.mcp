@@ -39,7 +39,7 @@ def resolve_path(path: str, working_dir: str) -> Path:
 
 
 def validate_element_type(element_type: str) -> str:
-    """Validate that *element_type* is a recognised SWMM element category.
+    """Validate that *element_type* is a recognized SWMM element category.
 
     The comparison is case-insensitive; the returned value is always lowercase.
 
@@ -51,7 +51,7 @@ def validate_element_type(element_type: str) -> str:
     Returns
     -------
     str
-        The normalised (lowercase) element type.
+        The normalized (lowercase) element type.
 
     Raises
     ------

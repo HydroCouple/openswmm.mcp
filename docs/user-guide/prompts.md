@@ -2,7 +2,7 @@
 
 The OpenSWMM MCP Server includes seven guided-workflow prompts. Prompts
 are pre-written instruction templates that tell the LLM how to combine tools
-and resources to accomplish common stormwater modelling tasks. They are
+and resources to accomplish common stormwater modeling tasks. They are
 invoked through the MCP `get_prompt` method.
 
 ## Available Prompts
@@ -13,7 +13,7 @@ Perform a comprehensive review of a SWMM model.
 
 | Parameter | Type | Description |
 |---|---|---|
-| `inp_path` | `str` | Path to the `.inp` file to analyse. |
+| `inp_path` | `str` | Path to the `.inp` file to analyze. |
 
 **Workflow:** Opens the model, reads summary/options/elements resources, and
 produces a structured report covering model overview, network topology,
@@ -65,7 +65,7 @@ Evaluate a model against design standards.
 
 **Workflow:** Reads model summary and options, checks capacity and flooding
 summaries, examines hydraulic parameters and subcatchment settings, and
-produces a pass/fail report with prioritised recommendations.
+produces a pass/fail report with prioritized recommendations.
 
 ---
 

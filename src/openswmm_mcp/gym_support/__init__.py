@@ -21,7 +21,7 @@ L{openswmm_gymnasium.spec}; this package adds what only the server needs:
 
   - L{store<openswmm_mcp.gym_support.store>} -- JSON-on-disk persistence
     of named configs.
-  - L{jobs<openswmm_mcp.gym_support.jobs>} -- background optimisation jobs.
+  - L{jobs<openswmm_mcp.gym_support.jobs>} -- background optimization jobs.
   - C{config_tools}, C{run_tools}, C{score_tools} -- the bodies of the
     C{gym_*} tools.
 

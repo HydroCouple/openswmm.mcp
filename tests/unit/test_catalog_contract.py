@@ -3,7 +3,7 @@
 ``get`` must read every property of every element kind present in the model,
 and every service property, returning JSON or a typed engine refusal (a
 lifecycle phase or a subtype the element does not have) -- never a crash or an
-unserialisable value. Writable scalar fields must accept their own value back.
+unserializable value. Writable scalar fields must accept their own value back.
 """
 
 from __future__ import annotations

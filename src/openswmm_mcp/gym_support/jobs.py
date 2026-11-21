@@ -18,7 +18,7 @@
 
 A L{JobManager} owns a small thread pool (default C{max_workers=2}) of job
 runners. Each job runs L{openswmm_gymnasium.optimize.run_study}, which
-asks its optimiser for batches of candidate designs and evaluates each
+asks its optimizer for batches of candidate designs and evaluates each
 batch in parallel on worker processes (C{OptimizationConfig.workers};
 the engine is loaded once per worker and a crashing evaluation cannot take
 this server down). Algorithms:
@@ -68,7 +68,7 @@ JobState = Literal["pending", "running", "done", "failed", "cancelled"]
 
 
 def design_dimensions(env_config: EnvConfig) -> list[DesignDimension]:
-    """Labelled search-space dimensions of a config (see L{openswmm_gymnasium.optimize}).
+    """Labeled search-space dimensions of a config (see L{openswmm_gymnasium.optimize}).
 
     @raise ToolError: C{VALIDATION_ERROR} when the config has nothing to search.
     """
@@ -217,7 +217,7 @@ class JobManager:
     def _run(self, job: Job) -> None:
         """Execute *job* on a pool thread (internal)."""
         with job.lock:
-            if job.cancel_event.is_set():  # cancelled while pending
+            if job.cancel_event.is_set():  # canceled while pending
                 job.state = "cancelled"
                 job.finished_at = time.time()
                 return

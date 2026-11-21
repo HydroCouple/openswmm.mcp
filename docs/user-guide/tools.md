@@ -21,8 +21,8 @@ features still have explicit boundaries (see below).
 | `find(session_id, kind, pattern, type, where)` | List element IDs filtered by regex, subtype (`"STORAGE"`) and a field predicate (`"stats.max_depth > 2"`). |
 | `get(session_id, kind, fields, ids)` | Read fields as a table. All elements use the engine's bulk arrays where they exist. Works for services too (`kind="mass_balance"`). |
 | `set(session_id, kind, changes)` | Write fields: `[{"id": "C1", "field": "roughness", "value": 0.015}]`. Each change is validated and reported individually. |
-| `inspect(session_id, target, method, args)` | Run a catalogued method that only reads (the engine catalog gives it the effect `read`), with the same targets as `call`. Marked read-only, so a client can approve it without approving changes. A method that changes something is refused and names `call`. |
-| `call(session_id, target, method, args)` | Run a catalogued method that changes the model or engine state, or reads or writes a file (effect `write`, `structural` or `file`), on a service (`"forcing"`), an element (`"node:OUT1.outfall"`), a standalone target (`"xsect"`, `"output"`, `"geopackage"`, `"hotstart"`, `"builder"`) or a function module (`"datetime"`). |
+| `inspect(session_id, target, method, args)` | Run a cataloged method that only reads (the engine catalog gives it the effect `read`), with the same targets as `call`. Marked read-only, so a client can approve it without approving changes. A method that changes something is refused and names `call`. |
+| `call(session_id, target, method, args)` | Run a cataloged method that changes the model or engine state, or reads or writes a file (effect `write`, `structural` or `file`), on a service (`"forcing"`), an element (`"node:OUT1.outfall"`), a standalone target (`"xsect"`, `"output"`, `"geopackage"`, `"hotstart"`, `"builder"`) or a function module (`"datetime"`). |
 | `edit(session_id, action, kind, ids, ...)` | Structural edits: `add`, `delete`, `preview_delete`, `rename`, `convert`. |
 | `timeseries(source, kind, ids, variable)` | Result series from a finished session or an `.out` file, peak-preserving downsampling; `variable="quality:TSS"` for pollutants. |
 | `report(session_id, name)` | `summary`, `mass_balance`, `flooding`, `capacity`, `storage`, `pumps`, `subcatchments`, `statistics`, `quality`, `2d`, `groundwater`. |
@@ -87,7 +87,7 @@ after it is written and opened.
 
 Adding, deleting or converting elements changes the engine's arrays. The next
 `run` therefore writes the edited model to `<name>_edited.inp` in the session
-folder and reopens it before initialising, so derived data is rebuilt.
+folder and reopens it before initializing, so derived data is rebuilt.
 
 ## Gym tools (`OPENSWMM_MCP_TOOLSETS=core,gym`)
 
@@ -96,7 +96,7 @@ folder and reopens it before initialising, so derived data is rebuilt.
 | `gym_describe(topic)` | Capabilities, observation features, reward terms, design factories, runtime actuators; `benchmark[:<id>]`. |
 | `gym_config(action, name, spec)` | `create`, `get`, `list`, `validate`, `delete` named environment specs. |
 | `gym_env(action, env_id, ...)` | `open`, `reset`, `step`, `close`, `list`, `run_episode`. |
-| `gym_job(action, job_id, ...)` | `start` (NSGA-II and other optimisers), `status`, `results`, `cancel`, `list`, `decode_policy`. |
+| `gym_job(action, job_id, ...)` | `start` (NSGA-II and other optimizers), `status`, `results`, `cancel`, `list`, `decode_policy`. |
 | `gym_score(action, ...)` | `pareto`, `score` (hypervolume, IGD, epsilon, R2, spread), `compare`, `apply_design`. |
 
 Environment specs can observe any numeric engine field through
