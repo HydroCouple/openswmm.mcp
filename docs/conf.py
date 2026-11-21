@@ -18,6 +18,7 @@ extensions = [
     "sphinx.ext.intersphinx",
     "sphinx.ext.viewcode",
     "myst_parser",
+    "sphinxcontrib.mermaid",
     "sphinx_epytext",  # Gym support API docstrings use epytext.
 ]
 
@@ -34,6 +35,8 @@ exclude_patterns = [
 ]
 
 html_theme = "pydata_sphinx_theme"
+html_static_path = ["_static"]
+html_css_files = ['hydrocouple-palette.css']
 html_theme_options = {
     "github_url": "https://github.com/HydroCouple/openswmm.mcp",
     "show_toc_level": 2,
@@ -61,6 +64,7 @@ intersphinx_mapping = {
 }
 
 # MyST
+myst_fence_as_directive = ["mermaid"]
 myst_enable_extensions = ["colon_fence", "deflist"]
 source_suffix = {".rst": "restructuredtext", ".md": "markdown"}
 

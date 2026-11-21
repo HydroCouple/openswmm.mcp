@@ -16,3 +16,17 @@ tool definition.
 
 The `describe` tool returns the same catalog information, filtered and with
 units resolved to a session's unit system.
+
+## Inspecting a session
+
+```mermaid
+flowchart TD
+    accTitle: Choosing a session resource or a catalog lookup
+    task["Choose a resource"] --> scope{"What do you need?"}
+    scope -->|Field definitions| catalog["Read swmm://catalog/node"]
+    scope -->|Model inventory| sessions["Read swmm://sessions"]
+    sessions --> summary["Read the selected session summary"]
+    scope -->|Session units| describe["Call describe for the session"]
+```
+
+For field types and lifecycle phases, read the catalog directly. For an open model, use its session identifier in the summary URI. Use the session-aware tool for quantities in model units.

@@ -5,6 +5,7 @@ pydata-sphinx-theme>=0.15
 myst-parser>=3.0
 sphinx-autodoc-typehints
 sphinx-epytext>=0.0.4
+sphinxcontrib-mermaid>=2.0.2
 
 # Other dependencies needed to import the MCP modules for autodoc.
 pydantic>=2.0
