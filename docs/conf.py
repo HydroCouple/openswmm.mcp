@@ -1,5 +1,7 @@
 """Sphinx configuration for the OpenSWMM MCP Server documentation."""
 
+import os
+import sys
 from contextlib import ExitStack
 from importlib import import_module
 
@@ -18,7 +20,6 @@ extensions = [
     "sphinx.ext.intersphinx",
     "sphinx.ext.viewcode",
     "myst_parser",
-    "sphinxcontrib.mermaid",
     "sphinx_epytext",  # Gym support API docstrings use epytext.
 ]
 
@@ -35,10 +36,7 @@ exclude_patterns = [
 ]
 
 html_theme = "pydata_sphinx_theme"
-html_static_path = ["_static"]
-html_css_files = ['hydrocouple-palette.css']
 html_theme_options = {
-    "github_url": "https://github.com/HydroCouple/openswmm.mcp",
     "show_toc_level": 2,
     "logo": {
         "image_light": "../images/hydrocouplecomposer.png",
@@ -95,3 +93,26 @@ _engine.catalog = _catalog
 
 def setup(app):
     app.connect("build-finished", lambda app, exception: _docs_mocks.close())
+
+
+# -- HydroCouple documentation theme ---------------------------------------
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "_hydrocouple"))
+import hydrocouple_theme  # noqa: E402
+
+hydrocouple_theme.configure(
+    globals(),
+    manual_id="openswmm.mcp",
+    project_label="OpenSWMM MCP",
+    repository="https://github.com/HydroCouple/openswmm.mcp",
+    hero={
+        "kicker": "OpenSWMM MCP Server",
+        "title": "Storm water modeling for AI assistants",
+        "lede": "The server exposes the OpenSWMM engine through the Model Context Protocol, so "
+                "an MCP client can open, run, query and edit SWMM models and read their results.",
+        "actions": [
+            {"label": "Get started", "url": "getting-started/quickstart", "style": "solid"},
+            {"label": "API reference", "url": "api/index", "style": "ghost"},
+            {"label": "Engine Python manual", "url": "https://www.hydrocouple.org/openswmm.engine/python/", "style": "ghost"},
+        ],
+    },
+)

@@ -67,7 +67,6 @@ docs = [
     "myst-parser>=3.0",
     "sphinx-autodoc-typehints",
     "sphinx-epytext>=0.0.4",
-    "sphinxcontrib-mermaid>=2.0.2",
 ]
 
 [project.scripts]
