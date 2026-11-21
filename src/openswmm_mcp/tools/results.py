@@ -369,13 +369,9 @@ async def report(
                 )
             target = f"{kind}.stats"
             fields = sorted(cat.members(target))
-            keys = (
-                ids
-                or [
-                    str(i)
-                    for i in cat.resolve(solver, cat.require_kind(kind)["collection"], None).ids
-                ][:top]
-            )
+            collection = cat.resolve(solver, cat.require_kind(kind)["collection"], None)
+            # The engine's bulk id getter refuses a zero count (openswmm <= 6.0.0a4.dev1).
+            keys = ids or ([str(i) for i in collection.ids][:top] if len(collection) else [])
             rows = []
             for key in keys:
                 obj = cat.resolve(solver, target, key)

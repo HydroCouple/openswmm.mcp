@@ -41,7 +41,8 @@ GYM = {"gym_describe", "gym_config", "gym_env", "gym_job", "gym_score"}
 #: finding tool (ecosystem plan, work package 1.8).
 PLATFORM_TOOLS_RESERVED = 8
 PLATFORM_CHARS_RESERVED = 8 * 1_500
-MAX_TOOLS = 28  # 15 core + 5 gym + 8 reserved (7 platform tools and the finding tool)
+LEDGER = {"tally", "sources", "locate"}
+MAX_TOOLS = 32  # 15 core + 5 gym + 8 platform + 3 ledger + run_python
 MAX_CHARS = 40_000  # ~11k tokens for every tool definition together
 
 
@@ -57,13 +58,12 @@ async def test_core_tool_set():
     assert names == CORE
 
 
-@pytest.mark.parametrize("toolsets", ["core", "core,gym"])
+@pytest.mark.parametrize("toolsets", ["core", "core,gym", "core,ledger", "core,gym,ledger"])
 async def test_tool_definitions_fit_the_budget(toolsets):
     definitions = await _definitions(ServerSettings(toolsets=toolsets, enable_python=True))
     size = len(json.dumps(definitions))
     names = [d["name"] for d in definitions]
-    counted = [n for n in names if n != "run_python"]  # opt-in, stdio only
-    assert len(counted) + PLATFORM_TOOLS_RESERVED <= MAX_TOOLS, names
+    assert len(names) + PLATFORM_TOOLS_RESERVED <= MAX_TOOLS, names
     assert size + PLATFORM_CHARS_RESERVED <= MAX_CHARS, f"{size} characters of tool definitions"
 
 
@@ -80,17 +80,29 @@ async def test_reads_can_be_approved_without_writes():
 
 
 async def test_every_toolset_together_fits_the_budget():
-    """core, gym and platform: 15 + 5 + 8 tools, with nothing left in reserve."""
+    """Exercise the actual combined tool surface, including the opt-in Python tool."""
     pytest.importorskip("hydrocouple_platform")
-    definitions = await _definitions(ServerSettings(toolsets="core,gym,platform"))
+    definitions = await _definitions(
+        ServerSettings(toolsets="core,gym,platform,ledger", enable_python=True)
+    )
     names = [d["name"] for d in definitions]
-    assert len(names) == 15 + 5 + 8 <= MAX_TOOLS, names
+    assert len(names) == 15 + 5 + 8 + 3 + 1 <= MAX_TOOLS, names
     assert len(json.dumps(definitions)) <= MAX_CHARS
 
 
 async def test_gym_toolset_adds_five_tools():
     names = {d["name"] for d in await _definitions(ServerSettings(toolsets="core,gym"))}
     assert names == CORE | GYM
+
+
+async def test_ledger_toolset_adds_three_tools():
+    names = {d["name"] for d in await _definitions(ServerSettings(toolsets="core,ledger"))}
+    assert names == CORE | LEDGER
+
+
+async def test_ledger_is_off_by_default():
+    names = {d["name"] for d in await _definitions(ServerSettings(toolsets="core"))}
+    assert not names & LEDGER
 
 
 async def test_run_python_is_opt_in_and_stdio_only():
