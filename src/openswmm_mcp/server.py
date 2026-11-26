@@ -113,9 +113,9 @@ def build_server(settings: ServerSettings | None = None) -> FastMCP:
                 "OPENSWMM_MCP_TOOLSETS includes 'platform', which needs hydrocouple.platform: "
                 "pip install 'openswmm.mcp[platform]'"
             ) from exc
-        from openswmm_mcp.tools import platform
+        from openswmm_mcp.tools import platform, platform_study
 
-        for fn in platform.TOOLS:
+        for fn in (*platform.TOOLS, platform_study.platform_study):
             server.tool(
                 fn, annotations={"readOnlyHint": True} if fn in platform.READ_ONLY else None
             )

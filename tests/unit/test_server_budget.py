@@ -37,12 +37,13 @@ CORE = {
     "export",
 }
 GYM = {"gym_describe", "gym_config", "gym_env", "gym_job", "gym_score"}
-#: platform_targets/session/model/estimate/run/job/results (platform plan §1A) and the
-#: finding tool (ecosystem plan, work package 1.8).
-PLATFORM_TOOLS_RESERVED = 8
-PLATFORM_CHARS_RESERVED = 8 * 1_500
+#: platform_targets/session/model/estimate/run/job/results (platform plan §1A), the
+#: finding tool (ecosystem plan, work package 1.8) and platform_study (M7, decision A,
+#: which raised the budget by one tool).
+PLATFORM_TOOLS_RESERVED = 9
+PLATFORM_CHARS_RESERVED = 9 * 1_500
 LEDGER = {"tally", "sources", "locate"}
-MAX_TOOLS = 32  # 15 core + 5 gym + 8 platform + 3 ledger + run_python
+MAX_TOOLS = 33  # 15 core + 5 gym + 9 platform + 3 ledger + run_python
 MAX_CHARS = 40_000  # ~11k tokens for every tool definition together
 
 
@@ -86,7 +87,7 @@ async def test_every_toolset_together_fits_the_budget():
         ServerSettings(toolsets="core,gym,platform,ledger", enable_python=True)
     )
     names = [d["name"] for d in definitions]
-    assert len(names) == 15 + 5 + 8 + 3 + 1 <= MAX_TOOLS, names
+    assert len(names) == 15 + 5 + 9 + 3 + 1 <= MAX_TOOLS, names
     assert len(json.dumps(definitions)) <= MAX_CHARS
 
 

@@ -65,6 +65,7 @@ async def server_lifespan(server) -> AsyncIterator[dict]:
         from openswmm_mcp.tools.platform import connect
 
         context["platform"] = connect(settings)
+        context["optimizations"] = {}  # platform_study optimizations this server runs
     if "ledger" in toolsets(settings):
         context["ledger_store"] = LedgerStore(
             Path(settings.working_dir).expanduser().resolve() / ".ledger.sqlite"
@@ -76,6 +77,9 @@ async def server_lifespan(server) -> AsyncIterator[dict]:
             context["ledger_store"].close()
         logger.info("OpenSWMM MCP server shutting down -- cleaning up sessions")
         if "platform" in context:
+            from openswmm_mcp.tools.platform_study import stop_all
+
+            stop_all(context)
             context["platform"].close()
         if "job_manager" in context:
             context["job_manager"].shutdown()

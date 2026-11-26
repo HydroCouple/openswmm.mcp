@@ -18,7 +18,7 @@ from fastmcp.exceptions import ToolError
 from .conftest import wait_for_job
 
 DATA = Path(__file__).resolve().parents[1] / "unit" / "data"
-SOURCE = Path(__file__).resolve().parents[2] / "src" / "openswmm_mcp" / "tools" / "platform.py"
+TOOLS_DIR = Path(__file__).resolve().parents[2] / "src" / "openswmm_mcp" / "tools"
 
 
 def two_models(folder: Path) -> tuple[Path, Path]:
@@ -167,7 +167,7 @@ async def test_platform_sessions_and_typed_refusals(mcp_server):
             await tools("platform_model", action="upload", path="absent.inp", target_id="tgt_x")
 
 
-async def test_the_toolset_is_eight_tools_with_three_read_only(mcp_server):
+async def test_the_toolset_is_nine_tools_with_four_read_only(mcp_server):
     async with mcp_server() as tools:
         listed = await tools.client.list_tools()
         platform = {t.name: t for t in listed if t.name.startswith("platform_")}
@@ -180,9 +180,16 @@ async def test_the_toolset_is_eight_tools_with_three_read_only(mcp_server):
             "platform_job",
             "platform_results",
             "platform_finding",
+            "platform_study",  # M7, decision A
         }
         read_only = {n for n, t in platform.items() if t.annotations and t.annotations.readOnlyHint}
-        assert read_only == {"platform_targets", "platform_estimate", "platform_results"}
+        # platform_job reads only: a job is cancelled with platform_run.
+        assert read_only == {
+            "platform_targets",
+            "platform_estimate",
+            "platform_job",
+            "platform_results",
+        }
 
 
 def test_the_server_refuses_a_persons_token(monkeypatch):
@@ -194,13 +201,17 @@ def test_the_server_refuses_a_persons_token(monkeypatch):
         connect(settings)
 
 
-def test_the_module_owns_no_local_solver_or_job_pool():
+@pytest.mark.parametrize(
+    ("module", "extra"),
+    [("platform.py", set()), ("platform_study.py", {"openswmm_mcp.tools.platform"})],
+)
+def test_the_module_owns_no_local_solver_or_job_pool(module, extra):
     """Governing plan §1A: no import of session.py or gym_support/jobs.py."""
     imported = set()
-    for node in ast.walk(ast.parse(SOURCE.read_text(encoding="utf-8"))):
+    for node in ast.walk(ast.parse((TOOLS_DIR / module).read_text(encoding="utf-8"))):
         if isinstance(node, ast.ImportFrom):
             imported.add(node.module or "")
         elif isinstance(node, ast.Import):
             imported.update(alias.name for alias in node.names)
     ours = {m for m in imported if m.startswith("openswmm_mcp")}
-    assert ours == {"openswmm_mcp.config", "openswmm_mcp.errors", "openswmm_mcp.journal"}
+    assert ours == {"openswmm_mcp.config", "openswmm_mcp.errors", "openswmm_mcp.journal"} | extra

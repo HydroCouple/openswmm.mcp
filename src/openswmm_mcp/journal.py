@@ -63,6 +63,7 @@ _BY_ACTION = {
     "platform_session": {"list": "read"},
     "platform_model": {"get": "read", "upload": "file"},
     "platform_job": {"status": "read", "list": "read"},
+    "platform_study": {"estimate": "read", "status": "read", "results": "read"},
 }
 _CODE = re.compile(r"^\[([A-Z_]+)\]")
 

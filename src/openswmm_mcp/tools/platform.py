@@ -1,5 +1,6 @@
-"""Platform toolset: seven tools over ``hydrocouple_platform.client.PlatformClient``, and
-``platform_finding``, which records and verifies what an agent concludes from platform runs.
+"""Platform toolset: seven tools over ``hydrocouple_platform.client.PlatformClient``,
+``platform_study`` for optimizations (``platform_study.py``), and ``platform_finding``, which
+records and verifies what an agent concludes from platform runs.
 
 Registered when ``OPENSWMM_MCP_TOOLSETS`` includes ``platform``. A run submitted here executes
 in the compute target's runner, not in this process: nothing in this module opens a local
@@ -8,7 +9,8 @@ solver, a local session or the gym job pool, and local session ids are never pla
 The server signs in with an agent session credential (``OPENSWMM_MCP_PLATFORM_TOKEN``,
 ``hcps_...``) that a person created for it. It never holds the person's own token, so the
 platform checks every submission against that session's budget and may answer
-``PENDING_APPROVAL``.
+``PENDING_APPROVAL``. Every request names the journal's tool call (``X-HCP-Tool-Call-Id``),
+so the platform records which call changed what.
 """
 
 from __future__ import annotations
@@ -62,8 +64,9 @@ async def _platform(ctx: Context, fn: Callable[[Any, ServerSettings], T]) -> T:
     from hydrocouple_platform.packaging.package import PackagingError
 
     context = ctx.lifespan_context
+    client = context["platform"].for_tool_call(CURRENT_CALL.get())
     try:
-        return await asyncio.to_thread(fn, context["platform"], context["settings"])
+        return await asyncio.to_thread(fn, client, context["settings"])
     except PlatformError as exc:
         body = exc.body
         text = f"[{body.code.value}] {body.message} (retryable: {str(body.retryable).lower()})"
@@ -93,15 +96,17 @@ def _folder(settings: ServerSettings, *parts: str) -> Path:
 
 
 async def platform_targets(ctx: Context) -> dict:
-    """List what this agent session may use on the platform: the person it acts for, each
-    organization's compute targets (adapter, egress policy, capabilities), and the approved
-    workflows with their parameter schemas. Start here before platform_model and platform_run.
+    """List what this agent session may use on the platform: the person it acts for, its
+    budget (what it has used and what is left), each organization's compute targets
+    (adapter, egress policy, capabilities, prices), and the approved workflows with their
+    parameter schemas. Start here before platform_model, platform_run and platform_study.
     """
 
     def _run(client: Any, settings: ServerSettings) -> dict:
         me = client.me()
         return {
             "acting_for": me["subject"],
+            "budget": client.agent_session(),
             "default_project_id": settings.platform_project_id,
             "organizations": {
                 org: {"role": role, "targets": client.list_targets(org)}
@@ -356,26 +361,39 @@ async def platform_estimate(
 
 async def platform_run(
     ctx: Context,
-    revision_id: str,
-    target_id: str,
+    revision_id: str | None = None,
+    target_id: str | None = None,
     workflow: str = "swmm.simulation",
     workflow_version: str = "1",
     parameters: dict[str, Any] | None = None,
     project_id: str | None = None,
     session_id: str | None = None,
     idempotency_key: str | None = None,
+    estimate_id: str | None = None,
+    action: Literal["submit", "cancel"] = "submit",
+    job_id: str | None = None,
 ) -> dict:
-    """Submit a run of a registered revision to a compute target.
+    """Submit a run of a registered revision to a compute target, or cancel a job.
 
-    Returns run_id, job_id and the admission state: ACCEPTED (durably accepted, not yet
-    claimed by the target) or PENDING_APPROVAL when the request is outside this agent
+    "submit" returns run_id, job_id and the admission state: ACCEPTED (durably accepted, not
+    yet claimed by the target) or PENDING_APPROVAL when the request is outside this agent
     session's budget; a person approves it, never the agent. Retrying with the same
-    idempotency_key returns the same run. Follow with platform_job, then platform_results.
-    The run's provenance names this call by the tool_call_id the result returns.
+    idempotency_key returns the same run. Name the estimate_id from platform_estimate when
+    the organization requires one. Follow with platform_job, then platform_results. The
+    run's provenance names this call by the tool_call_id the result returns.
+    "cancel" (with job_id) asks the target to stop the job.
     """
     tool_call_id = CURRENT_CALL.get() or f"tc_{uuid.uuid4().hex}"  # the journal's id
 
     def _run(client: Any, settings: ServerSettings) -> dict:
+        if action == "cancel":
+            if not job_id:
+                raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] cancel needs job_id.")
+            return client.cancel(job_id)
+        if not revision_id or not target_id:
+            raise ToolError(
+                f"[{ErrorCode.VALIDATION_ERROR}] submit needs revision_id and target_id."
+            )
         request = _request(
             settings,
             revision_id,
@@ -387,6 +405,8 @@ async def platform_run(
             session_id,
         )
         request["tool_call_id"] = tool_call_id
+        if estimate_id:
+            request["estimate_id"] = estimate_id
         accepted = client.submit_run(request, idempotency_key)
         return accepted | {"tool_call_id": request["tool_call_id"]}
 
@@ -395,15 +415,15 @@ async def platform_run(
 
 async def platform_job(
     ctx: Context,
-    action: Literal["status", "list", "cancel"] = "status",
+    action: Literal["status", "list"] = "status",
     job_id: str | None = None,
     project_id: str | None = None,
     state: str | None = None,
     limit: int = 50,
 ) -> dict:
-    """Read a job's persisted state, progress, attempts and failure ("status"), list a
-    project's jobs ("list", optionally by state), or request cancellation ("cancel").
-    Status is durable: it can be read from a new connection at any time."""
+    """Read a job's persisted state, progress, attempts and failure ("status"), or list a
+    project's jobs ("list", optionally by state). Status is durable: it can be read from a
+    new connection at any time. Cancel a job with platform_run (action="cancel")."""
 
     def _run(client: Any, settings: ServerSettings) -> dict:
         if action == "list":
@@ -411,7 +431,7 @@ async def platform_job(
             return client.jobs(_project(settings, project_id), **params)
         if not job_id:
             raise ToolError(f"[{ErrorCode.VALIDATION_ERROR}] {action} needs job_id.")
-        return client.cancel(job_id) if action == "cancel" else client.job(job_id)
+        return client.job(job_id)
 
     return await _platform(ctx, _run)
 
@@ -602,5 +622,6 @@ TOOLS = (
     platform_finding,
 )
 #: Tools that change nothing on the platform (platform_results writes only its own copy
-#: of the summary under the working directory).
-READ_ONLY = frozenset({platform_targets, platform_estimate, platform_results})
+#: of the summary under the working directory; platform_estimate keeps an estimate a later
+#: submission may name, but starts no work and spends nothing).
+READ_ONLY = frozenset({platform_targets, platform_estimate, platform_job, platform_results})
