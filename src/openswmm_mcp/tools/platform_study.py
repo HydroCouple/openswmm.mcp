@@ -267,6 +267,11 @@ async def platform_study(
         deadline = time.monotonic() + 30
         while run.study_id is None and run.state not in _ENDED and time.monotonic() < deadline:
             await asyncio.sleep(0.1)  # answer with the study id once the platform has it
+        if run.study_id is None and run.state == "FAILED":
+            # The platform refused the study itself (budget scope, a required estimate, an
+            # invalid request): a refusal, as create would give, not a running optimization.
+            del runs[run_id]
+            raise ToolError(run.error or f"[{ErrorCode.VALIDATION_ERROR}] The study was refused.")
         return run.view() | {"dimensions": _dimensions(request), "tool_call_id": tool_call_id}
 
     def _run(client: Any, settings: ServerSettings) -> dict:
