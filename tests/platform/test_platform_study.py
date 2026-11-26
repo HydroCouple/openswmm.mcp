@@ -118,6 +118,42 @@ async def test_an_agent_optimizes_on_the_platform_through_mcp_alone(
             tools.agent_session["agent_session_id"]
         }
 
+        # A finding about the best design cites its evaluation, checked against the record.
+        best = results["result"]["best"]
+        name, value = next(iter(best["objectives"].items()))
+        quoted = f"{value:.3f}"
+        claim = {
+            "quoted": quoted,
+            "study_id": started["study_id"],
+            "evaluation": best["evaluation"],
+            "locator": f"objectives/{name}",
+        }
+        # and a metric of an evaluation recorded in another chunk.
+        home = next(r["chunk_id"] for r in records if r["evaluation"] == best["evaluation"])
+        other = next(r for r in records if r["chunk_id"] != home)
+        metric, measured = next(iter(other["metrics"].items()))
+        also = f"{measured:.3f}"
+        claims = [
+            claim,
+            {
+                "quoted": also,
+                "study_id": started["study_id"],
+                "evaluation": other["evaluation"],
+                "locator": f"metrics/{metric}",
+            },
+        ]
+        statement = f"The best width scores {quoted} on {name}; another gives {also}."
+        finding = await tools("platform_finding", statement=statement, claims=claims)
+        assert finding["verifier_passed"], finding
+        assert len(finding["claims"]) == 2
+        wrong = f"{value + 1:.3f}"
+        refused = await tools(
+            "platform_finding",
+            statement=statement.replace(quoted, wrong),
+            claims=[claim | {"quoted": wrong}],
+        )
+        assert not refused["verifier_passed"]
+
         # The agent proposes candidates itself.
         own = await tools(
             "platform_study",
