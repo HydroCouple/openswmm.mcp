@@ -69,6 +69,9 @@ If any of these is unknown, ask before running anything.
    `"nsga2"` with two objectives instead. Poll `gym_job(action="status")`.
    → verify: the job is `done` and every evaluation has its metrics
    (`gym_job(action="results")`).
+   To sample on a compute target instead, run the same optimization with
+   `platform_study(action="optimize", ...)` as operational-optimization step 3
+   describes; cite every number you report from it with `platform_finding`.
 
 6. **Behavioral set.** `gym_score(action="behavioural", job_id=...)` applies
    the study's rule (or `rule` to try another) and writes

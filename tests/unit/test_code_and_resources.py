@@ -40,6 +40,15 @@ TOOLS = {
     "tally",
     "sources",
     "locate",
+    "platform_targets",
+    "platform_session",
+    "platform_model",
+    "platform_estimate",
+    "platform_run",
+    "platform_job",
+    "platform_results",
+    "platform_finding",
+    "platform_study",
 }
 
 
@@ -90,6 +99,7 @@ def test_skills_and_prompts_name_only_real_tools_and_fields(path):
         if c.startswith(
             (
                 "gym_",
+                "platform_",
                 "query_",
                 "lifecycle_",
                 "analysis_",

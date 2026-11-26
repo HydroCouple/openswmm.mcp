@@ -164,6 +164,26 @@ seed, so the result can be run again to the same evaluations.
    "budget": ..., "population_size": ..., "seed": ...})`. Each evaluation runs
    one episode per event; every term's per-event value is recorded as
    `<term>@<event>` beside the aggregates. Poll `gym_job(action="status")`.
+
+   **On the platform** (a server whose `OPENSWMM_MCP_TOOLSETS` includes
+   `platform`), the same search runs on a compute target's evaluator pool, under
+   this agent session's budget. `platform_model(action="upload", path=...,
+   target_id=...)` registers the model.
+   `platform_study(action="estimate", revision_id=..., target_id=...,
+   env_config=..., optimization=...)` counts the study (evaluations, pool,
+   cost band, whether a person must approve it) and returns an `estimate_id`;
+   then `platform_study(action="optimize", ..., estimate_id=...)` runs the
+   search from this server against a new study. To propose candidates
+   yourself instead, `platform_study(action="create", ...)` returns the
+   dimensions in candidate order and `platform_study(action="submit",
+   study_id=..., candidates=[[...]], wait_seconds=...)` evaluates them. Poll
+   `platform_study(action="status", optimization_id=...)`. A study outside the
+   budget waits as `PENDING_APPROVAL` until a person decides; never try to
+   approve it. `platform_study(action="results", optimization_id=...)` gives
+   the front and the lineage files.
+   → verify: every number you report from the platform is cited with
+   `platform_finding` (`{"quoted", "study_id", "evaluation", "locator":
+   "objectives/<name>"}`) and the finding's `verifier_passed` is true.
 4. **Front and choice.** `gym_score(action="pareto")` and
    `gym_score(action="score")` to inspect the front, then
    `gym_score(action="apply_design")`: a market job writes
