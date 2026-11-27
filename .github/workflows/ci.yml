@@ -1,0 +1,22 @@
+# NOTE: This file has been superseded by separate workflows:
+#   - .github/workflows/lint.yml
+#   - .github/workflows/unit_testing.yml
+#
+# Sandbox tooling could not delete this file in place. After pulling the
+# branch, run:
+#
+#     git rm .github/workflows/ci.yml
+#
+# A no-op trigger is left here so GitHub Actions does not error out on
+# this file's presence.
+
+name: CI (deprecated — see lint / unit_testing)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  noop:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "This workflow has been split. See lint.yml / unit_testing.yml."

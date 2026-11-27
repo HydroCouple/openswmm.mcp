@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openswmm.mcp/skills/operational-optimization/market_config.schema.json",
+  "title": "Agent-based capacity-market control configuration",
+  "description": "Configuration for the operational-optimization market controller: agents price their stress on normalized [0,1] cost curves, and per-route PIDs throttle structures on the buyer-minus-seller cost differential.",
+  "type": "object",
+  "required": ["meta", "cost_curves", "agents", "trade_routes"],
+  "additionalProperties": false,
+  "properties": {
+    "meta": {
+      "type": "object",
+      "required": ["model_path", "output_dir", "control_interval_seconds"],
+      "additionalProperties": false,
+      "properties": {
+        "model_path": { "type": "string", "description": "Path to the .inp model." },
+        "output_dir": { "type": "string", "description": "User-reviewable folder for config, logs, figures, and report." },
+        "treatment_tag": { "type": "string", "default": "TREATED", "description": "Node tag marking treatment-connected outfalls; all other outfalls are uncontrolled." },
+        "control_interval_seconds": { "type": "number", "exclusiveMinimum": 0, "description": "How often prices are recomputed and settings reapplied; a multiple of the routing step." },
+        "currency_note": { "type": "string", "description": "Free text documenting the single normalized currency so cross-commodity prices are comparable." }
+      }
+    },
+    "objectives": {
+      "type": "object",
+      "description": "Relative weights for the four (minimized) objectives; used only for tuning/scoring, not for the reactive loop itself.",
+      "additionalProperties": false,
+      "properties": {
+        "flooding": { "type": "number", "minimum": 0, "default": 1 },
+        "uncontrolled_discharge": { "type": "number", "minimum": 0, "default": 1 },
+        "storage_underutilization": { "type": "number", "minimum": 0, "default": 1 },
+        "pumping_energy": { "type": "number", "minimum": 0, "default": 1 }
+      }
+    },
+    "cost_curves": {
+      "type": "object",
+      "description": "Named, reusable curves mapping a stress metric in [0,1] to a price in [0,1].",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "required": ["type", "onset"],
+        "additionalProperties": false,
+        "properties": {
+          "type": { "enum": ["piecewise_linear", "logistic"] },
+          "onset": { "type": "number", "minimum": 0, "maximum": 1, "description": "Metric value below which price stays at floor (PL) / curve midpoint (logistic)." },
+          "full": { "type": "number", "minimum": 0, "maximum": 1, "default": 1.0, "description": "piecewise_linear only: metric value at which price reaches ceiling." },
+          "steepness": { "type": "number", "exclusiveMinimum": 0, "default": 10, "description": "logistic only: slope of the sigmoid." },
+          "floor": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.0 },
+          "ceiling": { "type": "number", "minimum": 0, "maximum": 1, "default": 1.0 }
+        }
+      }
+    },
+    "agents": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "element_type", "commodity", "stress_metric", "curve"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "description": "Model element ID (node or link), resolved via the query_* tools." },
+          "element_type": { "enum": ["node", "link"] },
+          "role": { "enum": ["buyer", "seller", "both"], "default": "both", "description": "Role is usually state-dependent; 'both' lets the agent switch by its live stress." },
+          "commodity": { "enum": ["conveyance", "storage", "treatment"] },
+          "stress_metric": {
+            "enum": ["filling_ratio", "freeboard_fraction", "storage_fill", "treatment_utilization", "spill_imminence"],
+            "description": "Which normalized [0,1] state quantity prices this agent."
+          },
+          "curve": { "type": "string", "description": "Key into cost_curves." }
+        }
+      }
+    },
+    "trade_routes": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Each controllable structure mediates one buyer/seller trade and is throttled by its own PID.",
+      "items": {
+        "type": "object",
+        "required": ["structure_link_id", "buyer_agents", "seller_agents", "pid"],
+        "additionalProperties": false,
+        "properties": {
+          "structure_link_id": { "type": "string", "description": "Controllable pump/gate/orifice/weir link ID." },
+          "buyer_agents": { "type": "array", "items": { "type": "string" }, "minItems": 1, "description": "Agent IDs whose stress sets the buyer price (aggregated, e.g. max)." },
+          "seller_agents": { "type": "array", "items": { "type": "string" }, "minItems": 1, "description": "Agent IDs whose spare capacity sets the seller price." },
+          "aggregate": { "enum": ["max", "mean"], "default": "max", "description": "How to combine multiple agents into one side price." },
+          "pid": {
+            "type": "object",
+            "required": ["kp"],
+            "additionalProperties": false,
+            "properties": {
+              "kp": { "type": "number" },
+              "ki": { "type": "number", "default": 0 },
+              "kd": { "type": "number", "default": 0 },
+              "setpoint": { "type": "number", "default": 0, "description": "Target cost differential; 0 drives prices to equilibrium." },
+              "out_min": { "type": "number", "minimum": 0, "maximum": 1, "default": 0 },
+              "out_max": { "type": "number", "minimum": 0, "maximum": 1, "default": 1 }
+            }
+          },
+          "constraints": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "setting_min": { "type": "number", "minimum": 0, "maximum": 1, "default": 0 },
+              "setting_max": { "type": "number", "minimum": 0, "maximum": 1, "default": 1 },
+              "min_cycle_seconds": { "type": "number", "minimum": 0, "description": "Minimum on/off dwell for pumps." },
+              "max_starts_per_hour": { "type": "number", "minimum": 0 }
+            }
+          }
+        }
+      }
+    },
+    "constraints": {
+      "type": "object",
+      "description": "Global hard limits enforced regardless of price; a violating result is invalid.",
+      "additionalProperties": false,
+      "properties": {
+        "min_velocity": { "type": "number", "minimum": 0, "description": "Self-cleansing minimum, model flow units." },
+        "max_hgl_freeboard": { "type": "number", "description": "Minimum allowed freeboard to rim before a setting is rejected." }
+      }
+    }
+  }
+}

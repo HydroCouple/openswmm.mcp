@@ -1,0 +1,227 @@
+# Tools
+
+The server registers 15 core tools. Optional toolsets add five gym tools, eight platform tools and three ledger tools. The stdio transport also supports the opt-in `run_python` tool.
+
+The engine exposes over a thousand functions. Instead of one tool per function,
+six generic tools (`describe`, `find`, `get`, `set`, `inspect`, `call`) read the engine's
+machine-readable catalog (`openswmm.engine.catalog`) and dispatch supported fields and methods by their catalog paths. New scalar
+fields and JSON-compatible method arguments often need no new tool code;
+lifecycle operations, callbacks, standalone construction and optional native
+features still have explicit boundaries (see below).
+
+## Core tools
+
+| Tool | What it does |
+|---|---|
+| `open_model(path?, session_id, lenient)` | Open a `.inp` model into a session, or start an empty model when `path` is omitted. Returns counts, key options, the time window, file paths and parse warnings. |
+| `run(session_id, until, max_steps)` | Advance the simulation: `until="end"` (and write the report), an ISO datetime, or `"+<n>[s\|m\|h\|d]"`; `max_steps` for step-wise control. Reports progress; returns continuity errors when finished. |
+| `session(action, session_id, new_session_id)` | `list`, `state`, `close`, `clone` (hot-start state into a new session) or `reset` (reopen at the start). |
+| `save(session_id, path, format, profile)` | Write the model (`inp`, `gpkg`, `hdf5`), a hot-start file, or the report. `profile="SWMM5"` writes a SWMM 5 compatible `.inp`. |
+| `describe(topic, session_id)` | Discover the engine: element kinds, services, fields (type, units, read/write, lifecycle phases) and method signatures; `enum:<Name>`; `output` for time-series variables. |
+| `find(session_id, kind, pattern, type, where)` | List element IDs filtered by regex, subtype (`"STORAGE"`) and a field predicate (`"stats.max_depth > 2"`). |
+| `get(session_id, kind, fields, ids)` | Read fields as a table. All elements use the engine's bulk arrays where they exist. Works for services too (`kind="mass_balance"`). |
+| `set(session_id, kind, changes)` | Write fields: `[{"id": "C1", "field": "roughness", "value": 0.015}]`. Each change is validated and reported individually. |
+| `inspect(session_id, target, method, args)` | Run a cataloged method that only reads (the engine catalog gives it the effect `read`), with the same targets as `call`. Marked read-only, so a client can approve it without approving changes. A method that changes something is refused and names `call`. |
+| `call(session_id, target, method, args)` | Run a cataloged method that changes the model or engine state, or reads or writes a file (effect `write`, `structural` or `file`), on a service (`"forcing"`), an element (`"node:OUT1.outfall"`), a standalone target (`"xsect"`, `"output"`, `"geopackage"`, `"hotstart"`, `"builder"`) or a function module (`"datetime"`). |
+| `edit(session_id, action, kind, ids, ...)` | Structural edits: `add`, `delete`, `preview_delete`, `rename`, `convert`. |
+| `timeseries(source, kind, ids, variable)` | Result series from a finished session or an `.out` file, peak-preserving downsampling; `variable="quality:TSS"` for pollutants. |
+| `report(session_id, name)` | `summary`, `mass_balance`, `flooding`, `capacity`, `storage`, `pumps`, `subcatchments`, `statistics`, `quality`, `2d`, `groundwater`. |
+| `compare(a, b, kind, variable)` | Two sessions, `.out` files or an observed CSV: per-element peak, volume, RMSE, NSE, bias and Kling-Gupta efficiency (openswmm.gymnasium's `rewards.fit`, the same code calibration objectives use). |
+| `export(session_id, path, kind, fields \| variable)` | Write a field table or a result series to CSV or JSON. |
+
+### Addressing
+
+- **Element kinds** are `node`, `link`, `subcatchment`, `gage`, `pollutant`,
+  `landuse`, `pattern`, `table`, and the reaction `species`, `coefficient` and
+  `term` collections. Sub-view fields use a dotted path: `stats.max_depth`,
+  `storage.functional`, `pump.startup_depth`, `xsect.g1`.
+- **Services** are everything else reachable from a model: `forcing`,
+  `options`, `climate`, `controls`, `inflows`, `infrastructure.lids`,
+  `surface2d.groundwater.transport`, and so on. `describe()` lists them.
+- **`inspect` or `call`**: `describe` lists each method with its `tool`. Methods the
+  engine catalog marks `read` run through `inspect`; every other method runs through
+  `call`. Each tool refuses the other's methods and names the right one. The read-only
+  tools (`describe`, `find`, `get`, `inspect`, `timeseries`, `report`, `compare`) carry the
+  MCP read-only hint; `set`, `call` and `edit` carry the destructive hint.
+- **Long arrays**: `inspect` and `call` return at most 2,000 entries of an array and add
+  `"truncated": true` when one was cut.
+- **Elements** in `inspect` and `call` are `<kind>:<id>[.<subview>]`; IDs may contain dots
+  (`node:MH.1.outfall`).
+- **Standalone targets** take their constructor arguments in `args`: `xsect`
+  takes `shape`, `geom1`..`geom4` and `units` (or a `from` spec such as
+  `{"method": "from_street", ...}`); `geopackage` and `hotstart` take `path`;
+  `output` reads the session's results unless given a `path`. The session
+  opens and closes these readers itself.
+- **Enums** are passed and returned by name (`"JUNCTION"`, `"PERSIST"`).
+- **Units** follow each catalog member, including fixed SI/temperature units; `describe(..., session_id=...)` and every
+  `get` response name them (`ft`, `CFS`, `ft3`, ...).
+- **Files** in arguments resolve against `OPENSWMM_MCP_WORKING_DIR`.
+
+### Authoring a model with `builder`
+
+`builder` is a `ModelBuilder` kept by the session, for writing a model from
+scratch without running it. Its methods take positional indices: elements are
+numbered in the order they are added, and `add_node` / `add_link` return an
+error code (`0` on success), not the index. Type and shape arguments are the
+integer codes of `NodeType`, `LinkType` and `XSectShape` (`describe("enum:NodeType")`).
+
+```text
+open_model(session_id="b")                                   # a session to hold the builder
+call("b", "builder", "add_node", {"node_id": "J1", "node_type": 0})   # JUNCTION, index 0
+call("b", "builder", "add_node", {"node_id": "O1", "node_type": 1})   # OUTFALL, index 1
+call("b", "builder", "add_link", {"link_id": "C1", "link_type": 0})   # CONDUIT, index 0
+call("b", "builder", "set_node_invert", {"idx": 0, "elev": 10.0})
+call("b", "builder", "set_node_invert", {"idx": 1, "elev": 9.0})
+call("b", "builder", "set_link_nodes", {"idx": 0, "from_node": 0, "to_node": 1})
+call("b", "builder", "set_link_xsect", {"idx": 0, "shape": 0, "g1": 1.0})   # CIRCULAR
+call("b", "builder", "set_option", {"key": "START_DATE", "value": "01/01/2026"})
+call("b", "builder", "write", {"path": "built.inp"})
+open_model(path="built.inp", session_id="run")
+```
+
+Set `START_DATE` and `END_DATE`: the builder's defaults are not a runnable
+simulation window. `to_solver` is refused, because a built model runs only
+after it is written and opened.
+
+### A model's structure changes
+
+Adding, deleting or converting elements changes the engine's arrays. The next
+`run` therefore writes the edited model to `<name>_edited.inp` in the session
+folder and reopens it before initializing, so derived data is rebuilt.
+
+## Gym tools (`OPENSWMM_MCP_TOOLSETS=core,gym`)
+
+| Tool | Actions |
+|---|---|
+| `gym_describe(topic)` | Capabilities, observation features, reward terms, design factories, runtime actuators; `benchmark[:<id>]`. |
+| `gym_config(action, name, spec)` | `create`, `get`, `list`, `validate`, `delete` named environment specs. |
+| `gym_env(action, env_id, ...)` | `open`, `reset`, `step`, `close`, `list`, `run_episode`. |
+| `gym_job(action, job_id, ...)` | `start` (NSGA-II and other optimizers), `status`, `results`, `cancel`, `list`, `decode_policy`. |
+| `gym_score(action, ...)` | `pareto`, `score` (hypervolume, IGD, epsilon, R2, spread), `compare`, `apply_design`. |
+
+Environment specs can observe any numeric engine field through
+`observations.fields` (`{"link.stats.max_flow": ["C1"]}`) and actuate any
+writable one through the `field_setpoint` runtime factory.
+
+## Platform tools (`OPENSWMM_MCP_TOOLSETS=core,platform`)
+
+Eight tools: seven submit runs to [hydrocouple.platform](https://github.com/HydroCouple/hydrocouple.platform)
+and read their results, and `platform_finding` records and verifies an answer drawn from
+them. A platform run executes in the compute target's runner, not in the
+server process; platform ids are never local session ids. The toolset needs the `platform`
+extra and three settings: `OPENSWMM_MCP_PLATFORM_URL`, `OPENSWMM_MCP_PLATFORM_TOKEN` and,
+optionally, `OPENSWMM_MCP_PLATFORM_PROJECT_ID`. The token is an agent session credential
+(`hcps_...`) that a person creates for the server; the server refuses a person's own
+sign-in token. The platform checks every submission against that session's budget.
+
+| Tool | What it does |
+|---|---|
+| `platform_targets()` | The person the session acts for, each organization's compute targets, and the approved workflows with their parameter schemas. Read-only. |
+| `platform_session(action, project_id, name)` | `list` or `create` persistent platform sessions in a project. |
+| `platform_model(action, path, target_id, revision_id, study_id, evaluation)` | `upload` packages a local `.inp` with the files it references and registers it as an immutable revision; `get` returns a revision; `derive` writes a study evaluation's design onto the study's base model at `path` (checked against the base revision's files) through the study's own design factories and uploads it as a revision whose manifest names the base revision, the study, the evaluation and the design. |
+| `platform_estimate(revision_id, target_id, workflow, parameters)` | Validate a would-be run: findings, job class, cost band and whether approval would be required. Read-only. |
+| `platform_run(revision_id, target_id, workflow, parameters, idempotency_key)` | Submit a run. Returns `ACCEPTED`, or `PENDING_APPROVAL` when the request is outside the session's budget; a person approves it. |
+| `platform_job(action, job_id, project_id, state)` | `status` (state, progress, attempts, failure), `list`, or `cancel`. |
+| `platform_results(run_id, table)` | Provenance first, then continuity quality, the artifact list, and the run summary: its tables with row counts, or one table's columns (engine catalog path and unit) and rows. Only `summary.json` is fetched, and it is checked against its published sha256. Read-only. |
+
+`platform_finding(statement, claims, question, assumptions)` records an answer and checks
+every number it cites. Each claim is `{"quoted", "unit", "run_id", "locator"}`: the number as
+the statement writes it, the unit the run summary gives, the run, and `table/element id/column`
+in the summary (for example `node_flooding/J10/total_flood_volume`). The tool fetches each
+cited run's revision manifest, attempt manifest and summary by checksum, loads them with this
+session's journal into water-ontology rows under `<working_dir>/platform/findings/`, and adds
+the finding there. It returns `verifier_passed` and what was found for each claim; a changed
+number fails and names the value the summary holds. It needs the `ontology` extra
+(water-ontology).
+
+A platform error keeps its code, its `retryable` flag and its `next_action` in the refusal.
+
+## The tool-call journal
+
+The server appends one JSON line per tool call to `<working_dir>/journal/<journal id>.jsonl`,
+one file per server process: the tool, the effect the call was allowed to have (`read`,
+`write`, `structural` or `file`; `call` takes the method's effect from the engine catalog,
+and a tool no rule places is `write`), whether the tool is declared read-only, the SHA-256 of
+its arguments and of its result as canonical JSON (never their content), its start and end
+times, whether it succeeded, and its tool call id. `platform_run` sends that id to the
+platform, which writes it into the run's provenance, so a run leads back to the call that
+submitted it. With the platform toolset each line also names the platform agent session and
+the person it acts for; the water ontology's `platform_to_rows --journal` loads the lines as
+`ToolCall` rows. With `OPENSWMM_MCP_LOCAL_MANIFESTS=true` (and the `platform` extra), a local
+`run` that starts from an opened model also writes platform-format revision and attempt
+manifests under `<session>/local/<run id>/`, which load the same way.
+
+## Ledger tools (`OPENSWMM_MCP_TOOLSETS=core,ledger`)
+
+| Tool | Actions |
+|---|---|
+| `tally(action, ...)` | `commit`, `facts`, `verify`, `prove`, `root`, `list`. Commits a finished run's facts to a salted hash tree, lists them for citation, verifies claims and narratives, and discloses single facts to a reviewer. See [the ledger guide](ledger.md). |
+| `sources(action, ...)` | `register`, `list`, `link`, `lineage`, `mentions`, `retire`. Registers the files a model was built from, links source features to model elements, and answers what produced an element or which documents mention it. Spatial links need the `ledger` extra. See [the ledger guide](ledger.md). |
+| `locate(session_id, ...)` | Returns the elements, source features, lineage, mentions and exclusions within a buffer of a model element or point, as true at `as_of` and known at `as_known`. Needs the `ledger` extra for buffer search. See [the ledger guide](ledger.md). |
+
+## `run_python` (opt-in)
+
+`OPENSWMM_MCP_ENABLE_PYTHON=true` registers `run_python(session_id, code)` on
+the stdio transport only. The code runs with the server's permissions, with
+`solver`, `engine`, `catalog` and `np` in scope. Do not enable it on a server
+that others can reach.
+
+## Migrating from v1
+
+v1 registered 663 tools. Each maps to one of the tools above:
+
+| v1 namespace | v2 |
+|---|---|
+| `lifecycle_*` | `open_model`, `run` (step, stride, until), `session`, `save(format="rpt")`; events and runoff-interface files via `call(target="events" \| "solver", ...)` |
+| `query_*` | `get`, `find`, `report(name="summary")` |
+| `nodes_*`, `links_*`, `subcatchments_*`, `pollutants_*`, `model_*` | `get` / `set` on the element fields; methods via `call(target="<kind>:<id>", ...)` or `call(target="options", ...)` |
+| `building_*` | `open_model()` without a path, then `edit(action="add")`, `set`, `save`; or author with `call(target="builder", ...)` (see below) |
+| `editing_*` | `edit`; inlet and virtual-junction operations via `call(target="editor", ...)` |
+| `forcing_*`, `controls_*`, `inflows_*`, `tables_*`, `climate_*`, `infrastructure_*`, `heat_*`, `reactions_*`, `water_age_*`, `initial_quality_*`, `process_components_*` | `call(target="<service>", ...)`; fields via `get`/`set` |
+| `twod_*`, `infil2d_*` | `get(kind="surface2d", ...)`, `call(target="surface2d" \| "surface2d.infiltration", ...)`, `report(name="2d")` |
+| `hotstart_*` | `save(format="hotstart")`, `session(action="clone")`, `call(target="hotstart", ...)` |
+| `analysis_*` | `report`, `timeseries`, `compare`, `export`; raw output via `call(target="output", ...)` |
+| `geopackage_*` | `save(format="gpkg")`, `call(target="geopackage", ...)`, `compare` with an observed CSV |
+| `spatial_*` | `inspect(target="spatial", ...)` |
+| `xsect_*` | `inspect(target="xsect", method=..., args={"shape": ..., "geom1": ..., "units": "US", ...})` |
+| `datetime_*` | `inspect(target="datetime", ...)` |
+| `gym_*` (23 tools) | `gym_describe`, `gym_config`, `gym_env`, `gym_job`, `gym_score` |
+
+The SWMM 5 (legacy) backend is gone: every session uses the handle-based
+OpenSWMM 6 engine.
+
+
+## Catalog coverage and current limits
+
+The server needs a compiled engine build with `openswmm.engine.catalog`, not
+just a matching version string. Rebuild/reinstall the wheel after adding Cython
+extensions; copying Python files into an older install can produce missing
+extension errors. Restart the server after updating the package so its cached
+catalog and native modules refer to the same build.
+
+- **Discovery is not universal dispatch.** `describe` can list members that
+  `call` intentionally refuses. Solver creation, open/start/step/end/close,
+  destruction and iteration are owned by the session tools. Solver callbacks
+  and `write_staged` require Python callables and are refused through `call`.
+  Use `save` for normal serialization.
+- **Standalone targets need adapters.** The existing handlers cover `output`,
+  `hotstart`, `geopackage`, `xsect` and `builder`; adding an unrelated constructible
+  class to the catalog does not implement its MCP constructor automatically.
+- **Lifecycle and configuration remain native contracts.** Author transport,
+  groundwater and surface-quality tables before starting the simulation.
+  Optional 2D services require a build and model that support them. A successful
+  metadata lookup does not establish availability.
+- **JSON is a boundary.** Returned arrays/records are serialized snapshots,
+  subject to size limits. Arbitrary Python callbacks, generators and ownership
+  transfers are not JSON APIs. A new signature needs a coercion/serialization
+  test, even when the generic dispatcher can locate it.
+- **Mutation is not transactional.** `set` reports each change independently;
+  earlier successful writes remain applied if later changes fail. Structural
+  edits trigger model serialization and reopening before the next run.
+
+For transport configuration use `describe("transport")`; for aquifer authoring
+use `describe("surface2d.groundwater")` and
+`describe("surface2d.groundwater.transport")`; surface quality is
+`describe("surface2d.quality")`. Use the returned signatures and units rather
+than translating Python keyword names or assuming all quantities use the
+project’s flow units.
